@@ -23545,9 +23545,13 @@ function sbOnLoginSuccess(){
   sbLoadInitialData().then(function(){
     sbReady = true;
     console.log('[Supabase] Carga inicial completa.');
-    // Re-render por si los datos cargados afectan vistas activas
+    // Re-render: tras cargar microciclos, hay que rebuildear varios selectores
     if(typeof refresh === 'function') try{ refresh(); }catch(e){}
     if(typeof rebuildCatBtns === 'function') try{ rebuildCatBtns(); }catch(e){}
+    if(typeof mcRebuildWeekSel === 'function') try{ mcRebuildWeekSel(); }catch(e){}
+    if(typeof cargaRebuildWeekSel === 'function') try{ cargaRebuildWeekSel(); }catch(e){}
+    if(typeof mcRenderWeek === 'function') try{ mcRenderWeek(); }catch(e){}
+    if(typeof cargaRender === 'function') try{ cargaRender(); }catch(e){}
   }).catch(function(err){
     console.error('[Supabase] Error en carga inicial:', err);
     alert('No se pudieron cargar datos de Supabase. Vas a seguir con tu datos locales. Error: ' + (err.message||err));
@@ -23741,12 +23745,202 @@ window.sbScheduleProfileSync = sbScheduleProfileSync;
 })();
 
 // ═══════════════════════════════════════════════════════════════
+// CAPA DE DATOS: MICROCICLO
+// ═══════════════════════════════════════════════════════════════
+// Formato local (MICROCICLO):
+//   array de { week, day, fecha, ref, pse, ua, players:[...], _hasExtra, _isEstimated }
+//
+// Formato Supabase (tabla microciclo):
+//   filas con: id (bigserial), week, day, fecha, data (jsonb con players y todo lo demás), categoria
+//
+// El UNIQUE constraint es (week, day, categoria), así que el upsert lo usa.
+
+function sbMicrociclosFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('microciclo')
+    .select('*')
+    .eq('categoria', SB_CATEGORIA)
+    .then(function(res){
+      if(res.error) throw res.error;
+      return res.data || [];
+    });
+}
+
+// Convierte una sesión local a payload para Supabase
+function _sbMicrocicloToPayload(session){
+  // Lo que va aparte en columnas dedicadas (para queries rápidas)
+  var week = session.week || '';
+  var day  = session.day || '';
+  var fecha = session.fecha || session.date || null;
+  // Validar fecha (Supabase espera YYYY-MM-DD o null)
+  if(fecha && !/^\d{4}-\d{2}-\d{2}/.test(String(fecha))) fecha = null;
+  // El resto va en `data` JSONB
+  var data = Object.assign({}, session);
+  // Las columnas dedicadas las sacamos del JSON para no duplicar
+  delete data.week; delete data.day; delete data.fecha; delete data.date;
+  return {
+    week: week,
+    day: day,
+    fecha: fecha,
+    data: data,
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+
+// Convierte una fila de Supabase a sesión local
+function _sbMicrocicloFromRow(row){
+  var session = Object.assign({}, row.data || {});
+  session.week = row.week;
+  session.day  = row.day;
+  if(row.fecha) session.fecha = row.fecha;
+  return session;
+}
+
+function sbMicrocicloUpsert(session){
+  if(!sbClient || !sbCurrentUser) return Promise.reject(new Error('No hay sesión activa'));
+  var payload = _sbMicrocicloToPayload(session);
+  return sbClient.from('microciclo')
+    .upsert(payload, { onConflict: 'week,day,categoria' })
+    .then(function(res){
+      if(res.error) throw res.error;
+      return res.data;
+    });
+}
+
+function sbMicrocicloDelete(week, day){
+  if(!sbClient || !sbCurrentUser) return Promise.reject(new Error('No hay sesión activa'));
+  return sbClient.from('microciclo')
+    .delete()
+    .eq('week', week)
+    .eq('day', day)
+    .eq('categoria', SB_CATEGORIA)
+    .then(function(res){
+      if(res.error) throw res.error;
+      return res.data;
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SYNC con debounce
+// ═══════════════════════════════════════════════════════════════
+var _sbMicroSyncTimer = null;
+function sbScheduleMicrocicloSync(){
+  if(!sbReady) return;
+  if(_sbMicroSyncTimer) clearTimeout(_sbMicroSyncTimer);
+  _sbMicroSyncTimer = setTimeout(function(){
+    _sbMicroSyncTimer = null;
+    if(typeof MICROCICLO === 'undefined' || !Array.isArray(MICROCICLO)) return;
+    if(!MICROCICLO.length){
+      console.log('[Supabase] MICROCICLO vacío, no se sube nada.');
+      return;
+    }
+    console.log('[Supabase] Sync de microciclos (' + MICROCICLO.length + ')');
+    // Batch upsert: subimos todas las sesiones de una vez
+    var payload = MICROCICLO.map(_sbMicrocicloToPayload);
+    sbClient.from('microciclo').upsert(payload, { onConflict: 'week,day,categoria' }).then(function(res){
+      if(res.error){
+        console.error('[Supabase] Sync microciclos error:', res.error);
+      } else {
+        console.log('[Supabase] Sync microciclos OK (' + MICROCICLO.length + ' sesiones)');
+      }
+    });
+  }, 1500);
+}
+window.sbScheduleMicrocicloSync = sbScheduleMicrocicloSync;
+
+// ═══════════════════════════════════════════════════════════════
+// CARGA INICIAL EXTENDIDA: agregar MICROCICLO
+// ═══════════════════════════════════════════════════════════════
+// Sobreescribo sbLoadInitialData (anterior) para que ahora también traiga MICROCICLO
+var _origLoadInitialData = sbLoadInitialData;
+sbLoadInitialData = function(){
+  return _origLoadInitialData().then(function(){
+    return sbMicrociclosFetchAll();
+  }).then(function(rows){
+    if(typeof MICROCICLO === 'undefined') return;
+    if(!rows.length){
+      console.log('[Supabase] No hay microciclos en Supabase todavía.');
+      return;
+    }
+    // Estrategia: Supabase es la fuente de verdad. Reemplazamos local con remoto.
+    // Si vos tenías sesiones locales que NO están en Supabase, las preservamos
+    // (no las pisamos con vacío) — usuario las puede subir con "Subir microciclos".
+    var sbKeys = {};
+    rows.forEach(function(row){
+      var s = _sbMicrocicloFromRow(row);
+      sbKeys[s.week + '||' + s.day] = s;
+    });
+    // Sesiones locales que NO están en Supabase (preservar)
+    var localOnly = MICROCICLO.filter(function(s){
+      return !sbKeys[s.week + '||' + s.day];
+    });
+    // Reemplazar array preservando referencia
+    MICROCICLO.length = 0;
+    Object.values(sbKeys).forEach(function(s){ MICROCICLO.push(s); });
+    localOnly.forEach(function(s){ MICROCICLO.push(s); });
+    console.log('[Supabase] Cargados ' + rows.length + ' microciclos de Supabase. ' +
+                (localOnly.length ? '(' + localOnly.length + ' locales preservados, subilos manualmente con "Subir microciclos")' : ''));
+  });
+};
+
+// ═══════════════════════════════════════════════════════════════
+// MIGRACIÓN: subir MICROCICLO locales a Supabase
+// ═══════════════════════════════════════════════════════════════
+function sbMigrateMicroclicosLocalToCloud(){
+  if(!sbReady){ alert('Sesión todavía cargando. Esperá unos segundos.'); return; }
+  if(typeof MICROCICLO === 'undefined' || !MICROCICLO.length){
+    alert('No hay microciclos locales para subir.'); return;
+  }
+  var total = MICROCICLO.length;
+  if(!confirm('Vas a subir ' + total + ' sesiones de microciclo a Supabase.\n\n' +
+              'Si ya hay sesiones con el mismo (week, day) en la nube, se van a ACTUALIZAR (no duplicar).\n\n' +
+              '¿Continuar?')) return;
+  var status = document.getElementById('sb-migrate-mc-status') || null;
+  function setStatus(t){ if(status) status.textContent = t; console.log('[Migrate-MC]', t); }
+  setStatus('Subiendo... 0/' + total);
+  // En lugar de uno por uno, hacemos batch (más rápido)
+  var payload = MICROCICLO.map(_sbMicrocicloToPayload);
+  sbClient.from('microciclo').upsert(payload, { onConflict: 'week,day,categoria' }).then(function(res){
+    if(res.error){
+      setStatus('✗ Error');
+      alert('Error al subir microciclos: ' + (res.error.message || res.error));
+      console.error(res.error);
+      return;
+    }
+    setStatus('✓ ' + total + ' subidos');
+    alert('✓ ' + total + ' microciclos subidos a Supabase.\n\nPedile a tu compañero que recargue su dashboard para verlos.');
+  }).catch(function(err){
+    setStatus('✗ Error');
+    alert('Error al subir microciclos: ' + (err.message || err));
+    console.error(err);
+  });
+}
+window.sbMigrateMicroclicosLocalToCloud = sbMigrateMicroclicosLocalToCloud;
+
+// ═══════════════════════════════════════════════════════════════
+// PATCH: extender el wrap de saveData para incluir sync de microciclos
+// ═══════════════════════════════════════════════════════════════
+// Como `saveData` ya está wrappeado para perfiles, lo wrappeamos otra vez
+// para agregar el sync de MICROCICLO. Es seguro hacerlo "encima".
+(function(){
+  if(typeof window.saveData !== 'function') return;
+  var prev = window.saveData;
+  window.saveData = function(){
+    var r = prev.apply(this, arguments);
+    sbScheduleMicrocicloSync();
+    return r;
+  };
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // BOTÓN DE MIGRACIÓN — agregar al lado de Exportar
 // ═══════════════════════════════════════════════════════════════
 function sbInjectMigrateButton(){
   if(document.getElementById('sb-migrate-btn')) return;
   var exportBtn = document.querySelector('[onclick="exportData()"]');
   if(!exportBtn) return;
+  // Botón 1: Subir perfiles
   var btn = document.createElement('button');
   btn.id = 'sb-migrate-btn';
   btn.onclick = sbMigrateProfilesLocalToCloud;
@@ -23758,6 +23952,18 @@ function sbInjectMigrateButton(){
   status.id = 'sb-migrate-status';
   status.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
   exportBtn.parentNode.appendChild(status);
+  // Botón 2: Subir microciclos
+  var btn2 = document.createElement('button');
+  btn2.id = 'sb-migrate-mc-btn';
+  btn2.onclick = sbMigrateMicroclicosLocalToCloud;
+  btn2.title = 'Subir mis microciclos locales a Supabase (los hace visibles para mi compañero)';
+  btn2.style.cssText = 'background:#0C447C;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
+  btn2.innerHTML = '☁ Subir microciclos';
+  exportBtn.parentNode.appendChild(btn2);
+  var status2 = document.createElement('span');
+  status2.id = 'sb-migrate-mc-status';
+  status2.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
+  exportBtn.parentNode.appendChild(status2);
 }
 
 // ═══════════════════════════════════════════════════════════════
