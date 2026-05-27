@@ -104,6 +104,8 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 }
 #pdf-print-area{display:none}
 </style>
+<!-- Supabase JS SDK v2 (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <header style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:14px;padding-bottom:10px;border-bottom:3px solid #304483">
@@ -23388,6 +23390,373 @@ if(document.readyState==='loading'){
 }
 
 
+</script>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MÓDULO SUPABASE — Autenticación + sincronización (Etapa A)
+     Maneja: login, logout, lectura/escritura de player_profiles
+     contra el backend en https://jvopjhvchsnhwchcnzun.supabase.co
+     ═══════════════════════════════════════════════════════════════ -->
+
+<!-- UI: Pantalla de login (oculta por defecto, se muestra si no hay sesión) -->
+<div id="sb-login-overlay" style="display:none;position:fixed;inset:0;background:linear-gradient(135deg,#0D1B2A 0%,#1B2845 100%);z-index:99999;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:28px 26px;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:32px;margin-bottom:6px">⚽</div>
+      <div style="font-size:18px;font-weight:800;color:#0D1B2A">Dashboard de Alto Rendimiento</div>
+      <div style="font-size:11px;color:#888;margin-top:3px">Club Atlético Tigre — 5ta División</div>
+    </div>
+    <div style="font-size:11px;color:#666;margin-bottom:6px;font-weight:600">Email</div>
+    <input id="sb-login-email" type="email" autocomplete="email" placeholder="tu@email.com" style="width:100%;padding:9px 12px;border:1px solid #ccc;border-radius:6px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+    <div style="font-size:11px;color:#666;margin-bottom:6px;font-weight:600">Contraseña</div>
+    <input id="sb-login-password" type="password" autocomplete="current-password" placeholder="••••••••" style="width:100%;padding:9px 12px;border:1px solid #ccc;border-radius:6px;font-size:13px;margin-bottom:14px;box-sizing:border-box">
+    <button id="sb-login-btn" onclick="sbDoLogin()" style="width:100%;background:#1D9E75;color:#fff;border:none;border-radius:6px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">Ingresar</button>
+    <div id="sb-login-msg" style="font-size:11px;color:#E24B4A;margin-top:10px;text-align:center;min-height:14px"></div>
+    <div style="font-size:10px;color:#aaa;margin-top:16px;text-align:center;line-height:1.5">
+      Acceso restringido al cuerpo técnico autorizado.<br>
+      ¿No tenés cuenta? Pedile acceso al administrador.
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// CONFIGURACIÓN
+// ═══════════════════════════════════════════════════════════════
+var SUPABASE_URL = 'https://jvopjhvchsnhwchcnzun.supabase.co';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2b3BqaHZjaHNuaHdjaGNuenVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MjUxNTAsImV4cCI6MjA5NTQwMTE1MH0.O9RypkGnP66hSk51FXackEUB3algI-QUrOF4BvI6yUk';
+
+// Categoría activa (Etapa A: hard-coded; Etapa B: la elige el usuario)
+var SB_CATEGORIA = '5ta División';
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENT SETUP
+// ═══════════════════════════════════════════════════════════════
+var sbClient = null;
+var sbCurrentUser = null;
+var sbReady = false; // true cuando hay sesión activa y la primera carga terminó
+
+function sbInit(){
+  if(typeof window.supabase === 'undefined' || !window.supabase.createClient){
+    console.error('[Supabase] SDK no cargado. ¿Hay conexión a internet?');
+    sbShowError('No se pudo conectar al servidor. Revisá tu conexión a internet.');
+    return;
+  }
+  sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,    // recordar el login en localStorage
+      autoRefreshToken: true,  // renovar token automáticamente
+      detectSessionInUrl: false
+    }
+  });
+  // Chequear si hay sesión guardada
+  sbClient.auth.getSession().then(function(res){
+    if(res.data && res.data.session){
+      sbCurrentUser = res.data.session.user;
+      sbOnLoginSuccess();
+    } else {
+      sbShowLogin();
+    }
+  }).catch(function(err){
+    console.error('[Supabase] Error getSession:', err);
+    sbShowLogin();
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LOGIN / LOGOUT
+// ═══════════════════════════════════════════════════════════════
+function sbShowLogin(){
+  var overlay = document.getElementById('sb-login-overlay');
+  if(overlay) overlay.style.display = 'flex';
+  // Enter envía
+  var pwd = document.getElementById('sb-login-password');
+  if(pwd) pwd.onkeydown = function(e){ if(e.key === 'Enter') sbDoLogin(); };
+  var em = document.getElementById('sb-login-email');
+  if(em) em.onkeydown = function(e){ if(e.key === 'Enter') document.getElementById('sb-login-password').focus(); };
+}
+
+function sbHideLogin(){
+  var overlay = document.getElementById('sb-login-overlay');
+  if(overlay) overlay.style.display = 'none';
+}
+
+function sbShowError(msg){
+  var m = document.getElementById('sb-login-msg');
+  if(m) m.textContent = msg || '';
+}
+
+function sbDoLogin(){
+  var email = (document.getElementById('sb-login-email').value || '').trim();
+  var pwd = document.getElementById('sb-login-password').value || '';
+  if(!email || !pwd){ sbShowError('Completá email y contraseña.'); return; }
+  var btn = document.getElementById('sb-login-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Ingresando...'; }
+  sbShowError('');
+  sbClient.auth.signInWithPassword({ email: email, password: pwd }).then(function(res){
+    if(btn){ btn.disabled = false; btn.textContent = 'Ingresar'; }
+    if(res.error){
+      sbShowError(res.error.message === 'Invalid login credentials' ? 'Email o contraseña incorrectos.' : res.error.message);
+      return;
+    }
+    sbCurrentUser = res.data.user;
+    sbOnLoginSuccess();
+  }).catch(function(err){
+    if(btn){ btn.disabled = false; btn.textContent = 'Ingresar'; }
+    sbShowError(err.message || 'Error al iniciar sesión.');
+  });
+}
+window.sbDoLogin = sbDoLogin;
+
+function sbDoLogout(){
+  if(!confirm('¿Cerrar sesión?')) return;
+  sbClient.auth.signOut().then(function(){
+    sbCurrentUser = null;
+    sbReady = false;
+    location.reload(); // recargar la página para limpiar estado
+  });
+}
+window.sbDoLogout = sbDoLogout;
+
+function sbOnLoginSuccess(){
+  sbHideLogin();
+  console.log('[Supabase] Sesión activa:', sbCurrentUser.email);
+  // Inyectar UI de "logueado como" en el header
+  sbInjectUserBadge();
+  // Cargar datos de Supabase y mergear con localStorage
+  sbLoadInitialData().then(function(){
+    sbReady = true;
+    console.log('[Supabase] Carga inicial completa.');
+    // Re-render por si los datos cargados afectan vistas activas
+    if(typeof refresh === 'function') try{ refresh(); }catch(e){}
+    if(typeof rebuildCatBtns === 'function') try{ rebuildCatBtns(); }catch(e){}
+  }).catch(function(err){
+    console.error('[Supabase] Error en carga inicial:', err);
+    alert('No se pudieron cargar datos de Supabase. Vas a seguir con tu datos locales. Error: ' + (err.message||err));
+    sbReady = true;
+  });
+}
+
+function sbInjectUserBadge(){
+  // Buscar el botón Exportar y agregar al lado un badge con el usuario
+  var existing = document.getElementById('sb-user-badge');
+  if(existing) return;
+  var exportBtn = document.querySelector('[onclick="exportData()"]');
+  if(!exportBtn) return;
+  var badge = document.createElement('div');
+  badge.id = 'sb-user-badge';
+  badge.style.cssText = 'display:inline-flex;align-items:center;gap:5px;background:#1D9E7518;border:1px solid #1D9E7566;border-radius:5px;padding:3px 8px;font-size:10px;color:#085041;font-weight:700;margin-left:6px';
+  var emailShort = (sbCurrentUser.email||'').split('@')[0];
+  badge.innerHTML = '<span title="Sesión activa">🟢</span> '+
+    '<span>'+emailShort+'</span>' +
+    '<button onclick="sbDoLogout()" title="Cerrar sesión" style="background:none;border:none;cursor:pointer;color:#666;font-size:11px;padding:0;margin-left:3px">⎋</button>';
+  exportBtn.parentNode.insertBefore(badge, exportBtn.nextSibling);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CAPA DE DATOS: PLAYER_PROFILES
+// ═══════════════════════════════════════════════════════════════
+// Esta capa convierte entre el formato local y el formato Supabase.
+//
+// Formato local (PLAYER_PROFILES):
+//   { "id1": {name, posicion, foto, ...}, "id2": {...} }
+//
+// Formato Supabase (tabla player_profiles):
+//   filas con columnas: id (text), name (text), data (jsonb), categoria (text)
+
+function sbProfilesFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('player_profiles')
+    .select('*')
+    .eq('categoria', SB_CATEGORIA)
+    .then(function(res){
+      if(res.error) throw res.error;
+      return res.data || [];
+    });
+}
+
+function sbProfilesUpsert(id, profile){
+  if(!sbClient || !sbCurrentUser) return Promise.reject(new Error('No hay sesión activa'));
+  // Separamos name (columna dedicada) del resto (data JSONB)
+  var data = Object.assign({}, profile);
+  delete data.name; // se guarda aparte
+  var payload = {
+    id: id,
+    name: profile.name || '(sin nombre)',
+    data: data,
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+  return sbClient.from('player_profiles')
+    .upsert(payload, { onConflict: 'id' })
+    .then(function(res){
+      if(res.error) throw res.error;
+      return res.data;
+    });
+}
+
+function sbProfilesDelete(id){
+  if(!sbClient || !sbCurrentUser) return Promise.reject(new Error('No hay sesión activa'));
+  return sbClient.from('player_profiles')
+    .delete()
+    .eq('id', id)
+    .eq('categoria', SB_CATEGORIA)
+    .then(function(res){
+      if(res.error) throw res.error;
+      return res.data;
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CARGA INICIAL: merge Supabase → PLAYER_PROFILES local
+// ═══════════════════════════════════════════════════════════════
+// Estrategia:
+//   - Si Supabase tiene perfiles, son la fuente de verdad.
+//   - Los perfiles locales que NO están en Supabase se preservan
+//     (el usuario los puede subir con el botón de migración).
+//   - Los perfiles de Supabase reemplazan a los locales con mismo ID.
+
+function sbLoadInitialData(){
+  return sbProfilesFetchAll().then(function(rows){
+    if(!rows.length){
+      console.log('[Supabase] No hay perfiles en Supabase todavía.');
+      return;
+    }
+    if(typeof PLAYER_PROFILES === 'undefined'){
+      console.warn('[Supabase] PLAYER_PROFILES no definido aún. Skip.');
+      return;
+    }
+    // Mergear: los de Supabase pisan a los locales con el mismo id
+    rows.forEach(function(row){
+      var prof = Object.assign({}, row.data || {});
+      prof.name = row.name;
+      PLAYER_PROFILES[row.id] = prof;
+    });
+    console.log('[Supabase] Cargados ' + rows.length + ' perfiles de jugadores.');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MIGRACIÓN: subir PLAYER_PROFILES locales a Supabase
+// ═══════════════════════════════════════════════════════════════
+function sbMigrateProfilesLocalToCloud(){
+  if(!sbReady){ alert('Sesión todavía cargando. Esperá unos segundos.'); return; }
+  if(typeof PLAYER_PROFILES === 'undefined' || !Object.keys(PLAYER_PROFILES).length){
+    alert('No hay perfiles locales para subir.'); return;
+  }
+  var ids = Object.keys(PLAYER_PROFILES);
+  if(!confirm('Vas a subir '+ids.length+' perfiles de jugadores a Supabase.\n\n' +
+              'Si ya hay perfiles en la nube con el mismo ID, se van a actualizar (no duplicar).\n\n' +
+              '¿Continuar?')) return;
+  var status = document.getElementById('sb-migrate-status') || null;
+  function setStatus(t){ if(status) status.textContent = t; console.log('[Migrate]', t); }
+  setStatus('Subiendo... 0/'+ids.length);
+  var done = 0, errors = 0;
+  // Procesar en serie para no abrumar la API
+  function next(i){
+    if(i >= ids.length){
+      var msg = '✓ '+done+' subidos' + (errors>0 ? ', '+errors+' con error.' : '.');
+      setStatus(msg);
+      alert(msg + '\n\nPedile a tu compañero que recargue su dashboard para ver los cambios.');
+      return;
+    }
+    var id = ids[i];
+    sbProfilesUpsert(id, PLAYER_PROFILES[id]).then(function(){
+      done++;
+      setStatus('Subiendo... '+(i+1)+'/'+ids.length);
+      next(i+1);
+    }).catch(function(err){
+      errors++;
+      console.error('[Migrate] Error en id='+id+':', err);
+      setStatus('Subiendo... '+(i+1)+'/'+ids.length+' (errores: '+errors+')');
+      next(i+1);
+    });
+  }
+  next(0);
+}
+window.sbMigrateProfilesLocalToCloud = sbMigrateProfilesLocalToCloud;
+
+// ═══════════════════════════════════════════════════════════════
+// PATCH: interceptar saveData para sincronizar perfiles a Supabase
+// ═══════════════════════════════════════════════════════════════
+// Estrategia: envolvemos saveData para que después de guardar local,
+// también haga upsert a Supabase de TODOS los perfiles. Es overkill pero
+// garantiza consistencia. Como son pocos perfiles (~25), no afecta perf.
+//
+// Para no saturar: hacemos debounce de 1500ms.
+var _sbProfileSyncTimer = null;
+function sbScheduleProfileSync(){
+  if(!sbReady) return;
+  if(_sbProfileSyncTimer) clearTimeout(_sbProfileSyncTimer);
+  _sbProfileSyncTimer = setTimeout(function(){
+    _sbProfileSyncTimer = null;
+    if(typeof PLAYER_PROFILES === 'undefined') return;
+    var ids = Object.keys(PLAYER_PROFILES);
+    if(!ids.length) return;
+    console.log('[Supabase] Sync de perfiles ('+ids.length+')');
+    // Subir en batch (un upsert con array)
+    var payload = ids.map(function(id){
+      var p = PLAYER_PROFILES[id];
+      var data = Object.assign({}, p); delete data.name;
+      return { id: id, name: p.name || '(sin nombre)', data: data, categoria: SB_CATEGORIA, updated_at: new Date().toISOString() };
+    });
+    sbClient.from('player_profiles').upsert(payload, { onConflict: 'id' }).then(function(res){
+      if(res.error){
+        console.error('[Supabase] Sync error:', res.error);
+      } else {
+        console.log('[Supabase] Sync OK ('+ids.length+' perfiles)');
+      }
+    });
+  }, 1500);
+}
+window.sbScheduleProfileSync = sbScheduleProfileSync;
+
+// Wrap saveData
+(function(){
+  if(typeof saveData !== 'function') return;
+  var origSave = saveData;
+  window.saveData = function(){
+    var r = origSave.apply(this, arguments);
+    sbScheduleProfileSync();
+    return r;
+  };
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// BOTÓN DE MIGRACIÓN — agregar al lado de Exportar
+// ═══════════════════════════════════════════════════════════════
+function sbInjectMigrateButton(){
+  if(document.getElementById('sb-migrate-btn')) return;
+  var exportBtn = document.querySelector('[onclick="exportData()"]');
+  if(!exportBtn) return;
+  var btn = document.createElement('button');
+  btn.id = 'sb-migrate-btn';
+  btn.onclick = sbMigrateProfilesLocalToCloud;
+  btn.title = 'Subir mis perfiles locales a Supabase (los hace visibles para mi compañero)';
+  btn.style.cssText = 'background:#3B4D88;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
+  btn.innerHTML = '☁ Subir perfiles';
+  exportBtn.parentNode.appendChild(btn);
+  var status = document.createElement('span');
+  status.id = 'sb-migrate-status';
+  status.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
+  exportBtn.parentNode.appendChild(status);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', function(){
+    sbInit();
+    setTimeout(sbInjectMigrateButton, 1500);
+  });
+} else {
+  setTimeout(function(){
+    sbInit();
+    setTimeout(sbInjectMigrateButton, 1500);
+  }, 100);
+}
 </script>
 
 </body>
