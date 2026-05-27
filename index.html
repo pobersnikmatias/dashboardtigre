@@ -2971,40 +2971,54 @@ const STORAGE_KEY='gps_dash_v9';
 // Se usa tanto para guardar en localStorage (saveData) como para exportar a JSON
 // (exportData). Si agregás una nueva estructura de datos al dashboard, agregala
 // también acá; si no, no se persistirá ni se exportará.
+//
+// IMPORTANTE: esta función puede ser llamada ANTES de que todos los módulos
+// hayan declarado sus variables globales (ej. GYM_EXERCISES se declara muy
+// abajo en el archivo). Por eso TODO acceso a una global debe usar
+// `typeof X !== 'undefined' ? X : default` — sino, ReferenceError rompe la app.
 function _buildFullPayload(stripImages){
-  var dD = D.map(function(r){
+  // Helper para clonar arrays con stripImages opcional
+  function safeArr(name, getter, mapImg){
+    if(typeof getter==='function'){try{var v=getter();return v||[];}catch(e){return [];}}
+    return [];
+  }
+  var dD = (typeof D!=='undefined' && Array.isArray(D)) ? D.map(function(r){
     var c={...r};
     if(stripImages && c.img) c.img=null;
     return c;
-  });
-  var gymEx = GYM_EXERCISES.map(function(e){
+  }) : [];
+  var gymEx = (typeof GYM_EXERCISES!=='undefined' && Array.isArray(GYM_EXERCISES)) ? GYM_EXERCISES.map(function(e){
     var c={...e};
     if(stripImages && c.img) c.img=null;
     return c;
-  });
+  }) : [];
   return {
     D:dD,
-    MATCHES:[...MATCHES],
-    CATS:[...CATS],CATN:[...CATN],BC:{...BC},CS:{...CS},REF:{...REF},
-    MICROCICLO:[...MICROCICLO],
-    PLAYER_PROFILES:{...PLAYER_PROFILES},
-    MC_BANDS:{...MC_BANDS},
-    MC_PLAYER_BANDS:{...MC_PLAYER_BANDS},
-    GYM_SESSIONS:[...GYM_SESSIONS],
+    MATCHES:(typeof MATCHES!=='undefined' && Array.isArray(MATCHES))?[...MATCHES]:[],
+    CATS:(typeof CATS!=='undefined' && Array.isArray(CATS))?[...CATS]:[],
+    CATN:(typeof CATN!=='undefined' && Array.isArray(CATN))?[...CATN]:[],
+    BC:(typeof BC!=='undefined' && BC)?{...BC}:{},
+    CS:(typeof CS!=='undefined' && CS)?{...CS}:{},
+    REF:(typeof REF!=='undefined' && REF)?{...REF}:{},
+    MICROCICLO:(typeof MICROCICLO!=='undefined' && Array.isArray(MICROCICLO))?[...MICROCICLO]:[],
+    PLAYER_PROFILES:(typeof PLAYER_PROFILES!=='undefined' && PLAYER_PROFILES)?{...PLAYER_PROFILES}:{},
+    MC_BANDS:(typeof MC_BANDS!=='undefined' && MC_BANDS)?{...MC_BANDS}:{},
+    MC_PLAYER_BANDS:(typeof MC_PLAYER_BANDS!=='undefined' && MC_PLAYER_BANDS)?{...MC_PLAYER_BANDS}:{},
+    GYM_SESSIONS:(typeof GYM_SESSIONS!=='undefined' && Array.isArray(GYM_SESSIONS))?[...GYM_SESSIONS]:[],
     GYM_EXERCISES:gymEx,
-    GYM_CATS:[...GYM_CATS],
-    GYM_EVALS:{...GYM_EVALS},
-    NUTRITION_DATA:(typeof NUTRITION_DATA!=='undefined')?{...NUTRITION_DATA}:{},
-    MOBILITY_DATA:(typeof MOBILITY_DATA!=='undefined')?{...MOBILITY_DATA}:{},
-    NUT_REF:(typeof NUT_REF!=='undefined')?{...NUT_REF}:{},
-    MOB_REF:(typeof MOB_REF!=='undefined')?{...MOB_REF}:{},
-    EXTRA_METRICS:(typeof EXTRA_METRICS!=='undefined')?JSON.parse(JSON.stringify(EXTRA_METRICS)):[],
-    NUT_COL_MAP:(typeof NUT_COL_MAP!=='undefined')?{...NUT_COL_MAP}:{},
-    MOB_COL_MAP:(typeof MOB_COL_MAP!=='undefined')?{...MOB_COL_MAP}:{},
-    EVAL_ALIASES:{...EVAL_ALIASES},
-    PLAN_WEEKS:PLAN_WEEKS.map(function(w){return JSON.parse(JSON.stringify(w));}),
-    WELLNESS_DATA:(typeof WELLNESS_DATA!=='undefined')?JSON.parse(JSON.stringify(WELLNESS_DATA)):[],
-    PSE_DATA:(typeof PSE_DATA!=='undefined')?JSON.parse(JSON.stringify(PSE_DATA)):[],
+    GYM_CATS:(typeof GYM_CATS!=='undefined' && Array.isArray(GYM_CATS))?[...GYM_CATS]:[],
+    GYM_EVALS:(typeof GYM_EVALS!=='undefined' && GYM_EVALS)?{...GYM_EVALS}:{},
+    NUTRITION_DATA:(typeof NUTRITION_DATA!=='undefined' && NUTRITION_DATA)?{...NUTRITION_DATA}:{},
+    MOBILITY_DATA:(typeof MOBILITY_DATA!=='undefined' && MOBILITY_DATA)?{...MOBILITY_DATA}:{},
+    NUT_REF:(typeof NUT_REF!=='undefined' && NUT_REF)?{...NUT_REF}:{},
+    MOB_REF:(typeof MOB_REF!=='undefined' && MOB_REF)?{...MOB_REF}:{},
+    EXTRA_METRICS:(typeof EXTRA_METRICS!=='undefined' && Array.isArray(EXTRA_METRICS))?JSON.parse(JSON.stringify(EXTRA_METRICS)):[],
+    NUT_COL_MAP:(typeof NUT_COL_MAP!=='undefined' && NUT_COL_MAP)?{...NUT_COL_MAP}:{},
+    MOB_COL_MAP:(typeof MOB_COL_MAP!=='undefined' && MOB_COL_MAP)?{...MOB_COL_MAP}:{},
+    EVAL_ALIASES:(typeof EVAL_ALIASES!=='undefined' && EVAL_ALIASES)?{...EVAL_ALIASES}:{},
+    PLAN_WEEKS:(typeof PLAN_WEEKS!=='undefined' && Array.isArray(PLAN_WEEKS))?PLAN_WEEKS.map(function(w){return JSON.parse(JSON.stringify(w));}):[],
+    WELLNESS_DATA:(typeof WELLNESS_DATA!=='undefined' && Array.isArray(WELLNESS_DATA))?JSON.parse(JSON.stringify(WELLNESS_DATA)):[],
+    PSE_DATA:(typeof PSE_DATA!=='undefined' && Array.isArray(PSE_DATA))?JSON.parse(JSON.stringify(PSE_DATA)):[],
     WELLNESS_LAYOUT:(typeof WELLNESS_LAYOUT!=='undefined' && WELLNESS_LAYOUT)?JSON.parse(JSON.stringify(WELLNESS_LAYOUT)):null,
     PSE_LAYOUT:(typeof PSE_LAYOUT!=='undefined' && PSE_LAYOUT)?JSON.parse(JSON.stringify(PSE_LAYOUT)):null,
     CARGA_NAME_ALIASES:(typeof CARGA_NAME_ALIASES!=='undefined')?{...CARGA_NAME_ALIASES}:{},
@@ -13054,6 +13068,8 @@ document.addEventListener('DOMContentLoaded',function(){
 // ── Datos globales ─────────────────────────────────────────
 var GYM_SESSIONS = [];   // [{id, date, week, md, notes, exercises:[{exId, sets, reps, intensity, inttype, notes}]}]
 var GYM_EXERCISES = [];  // [{id, name, cat, muscle, inttype, notes}]
+var GYM_EVALS = {};      // declarado temprano por compatibilidad con gymLoadData (la definición canónica está más abajo)
+var EVAL_ALIASES = {};   // ídem (keys lowercase, values = GYM_EXERCISES name)
 var GYM_CATS = [         // categorías de ejercicios con color; parent=null → grupo raíz; parent='X' → subcategoría de X
   {name:'Básicos',         color:'#D85A30', parent:null},
   {name:'Secundarios',     color:'#3B4D88', parent:null},
@@ -15113,7 +15129,8 @@ window.vbtFindZone = vbtFindZone;
 // ══════════════════════════════════════════════════════════════
 
 // GYM_EVALS: { playerKey: [ {id, date, exercise, method, kg, vmp, notes, rm1} ] }
-var GYM_EVALS = {};
+// (Ya declarado en la zona alta del archivo para que gymLoadData no truene.
+// Acá solo está la documentación; NO redeclarar con `var` porque resetearía el objeto.)
 // Cargar GYM_EVALS desde localStorage
 (function(){ try{ var p=JSON.parse(localStorage.getItem('gps_dash_v9')||'{}'); if(p.GYM_EVALS) Object.assign(GYM_EVALS, p.GYM_EVALS); }catch(e){} })();
 
@@ -16879,7 +16896,7 @@ var ORIENT_LABELS = {
 
 // Patch drawTable to inject orientation badge in exercise name cell
 // ── EVAL_ALIASES: { "nombre evaluacion": "nombre ejercicio gym" } ─────────────
-var EVAL_ALIASES = {};  // keys lowercase, values = GYM_EXERCISES name
+// (Ya declarado en la zona alta del archivo. NO redeclarar acá.)
 // Cargar EVAL_ALIASES desde localStorage
 (function(){ try{ var p=JSON.parse(localStorage.getItem('gps_dash_v9')||'{}'); if(p.EVAL_ALIASES) Object.assign(EVAL_ALIASES, p.EVAL_ALIASES); }catch(e){} })();
 
