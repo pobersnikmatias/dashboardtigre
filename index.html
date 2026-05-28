@@ -23633,6 +23633,10 @@ function sbOnLoginSuccess(){
     if(typeof mcRenderWeek === 'function') try{ mcRenderWeek(); }catch(e){}
     if(typeof cargaRender === 'function') try{ cargaRender(); }catch(e){}
     if(typeof cargaUpdateDataIndicator === 'function') try{ cargaUpdateDataIndicator(); }catch(e){}
+    if(typeof planRender === 'function') try{ planRender(); }catch(e){}
+    if(typeof planRebuildWeekSel === 'function') try{ planRebuildWeekSel(); }catch(e){}
+    if(typeof gymRender === 'function') try{ gymRender(); }catch(e){}
+    if(typeof gymRefreshSessions === 'function') try{ gymRefreshSessions(); }catch(e){}
     sbLoadingSet(100, '¡Listo!', '');
     setTimeout(sbLoadingHide, 400);
   }).catch(function(err){
@@ -24228,6 +24232,261 @@ window.sbMigrateWellPseLocalToCloud = sbMigrateWellPseLocalToCloud;
 })();
 
 // ═══════════════════════════════════════════════════════════════
+// CAPA DE DATOS: PLAN_WEEKS + GYM_SESSIONS + NUTRITION + MOBILITY
+// (Tanda 1 - estructuras planas con JSONB para los campos anidados)
+// ═══════════════════════════════════════════════════════════════
+
+// ── PLAN_WEEKS ──
+// Local: array de {name, created, groups, days, ...}
+// Supabase: tabla plan_weeks con (name, created, data jsonb), UNIQUE(name, created, categoria)
+function sbPlanWeeksFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbPlanWeekToPayload(p){
+  // name + created van como columnas dedicadas (parte del UNIQUE)
+  var data = Object.assign({}, p);
+  delete data.name; delete data.created;
+  return {
+    name: p.name || '(sin nombre)',
+    created: p.created || '',  // string ISO o vacío; es parte del UNIQUE
+    data: data,
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+function _sbPlanWeekFromRow(row){
+  var p = Object.assign({}, row.data || {});
+  p.name = row.name;
+  if(row.created) p.created = row.created;
+  return p;
+}
+
+// ── GYM_SESSIONS ──
+// Local: array de {id, date, week, md, notes, exercises:[...]}
+// Supabase: tabla gym_sessions con id TEXT PK
+function sbGymSessionsFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('gym_sessions').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbGymSessionToPayload(s){
+  var data = Object.assign({}, s);
+  delete data.id; delete data.date; delete data.week; delete data.md; delete data.notes;
+  return {
+    id: String(s.id || ''),
+    date: _sbValidDate(s.date),
+    week: s.week || null,
+    md: s.md || null,
+    notes: s.notes || null,
+    data: data,   // exercises[] y cualquier otro campo
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+function _sbGymSessionFromRow(row){
+  var s = Object.assign({}, row.data || {});
+  s.id = row.id;
+  if(row.date) s.date = row.date;
+  if(row.week) s.week = row.week;
+  if(row.md) s.md = row.md;
+  if(row.notes!=null) s.notes = row.notes;
+  return s;
+}
+
+// ── NUTRITION_DATA ──
+// Local: { playerKey: [registros] }  → un objeto, cada key un jugador
+// Supabase: tabla nutrition_data con player_key PK, records JSONB
+function sbNutritionFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('nutrition_data').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbNutritionToPayloads(obj){
+  if(!obj) return [];
+  return Object.keys(obj).map(function(k){
+    return {
+      player_key: k,
+      records: obj[k] || [],
+      categoria: SB_CATEGORIA,
+      updated_at: new Date().toISOString()
+    };
+  });
+}
+
+// ── MOBILITY_DATA ──
+function sbMobilityFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('mobility_data').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbMobilityToPayloads(obj){
+  if(!obj) return [];
+  return Object.keys(obj).map(function(k){
+    return {
+      player_key: k,
+      records: obj[k] || [],
+      categoria: SB_CATEGORIA,
+      updated_at: new Date().toISOString()
+    };
+  });
+}
+
+// ── SYNC con debounce (Tanda 1 — los 4 juntos) ──
+var _sbTanda1SyncTimer = null;
+function sbScheduleTanda1Sync(){
+  if(!sbReady) return;
+  if(_sbTanda1SyncTimer) clearTimeout(_sbTanda1SyncTimer);
+  _sbTanda1SyncTimer = setTimeout(function(){
+    _sbTanda1SyncTimer = null;
+    // PLAN_WEEKS
+    if(typeof PLAN_WEEKS!=='undefined' && Array.isArray(PLAN_WEEKS) && PLAN_WEEKS.length){
+      var pPayload = PLAN_WEEKS.map(_sbPlanWeekToPayload);
+      console.log('[Supabase] Sync plan_weeks (' + pPayload.length + ')');
+      sbClient.from('plan_weeks').upsert(pPayload, { onConflict: 'name,created,categoria' }).then(function(res){
+        if(res.error) console.error('[Supabase] Sync plan_weeks error:', res.error);
+        else console.log('[Supabase] Sync plan_weeks OK');
+      });
+    }
+    // GYM_SESSIONS
+    if(typeof GYM_SESSIONS!=='undefined' && Array.isArray(GYM_SESSIONS) && GYM_SESSIONS.length){
+      var gPayload = GYM_SESSIONS.map(_sbGymSessionToPayload).filter(function(p){return p.id;});
+      if(gPayload.length){
+        console.log('[Supabase] Sync gym_sessions (' + gPayload.length + ')');
+        sbClient.from('gym_sessions').upsert(gPayload, { onConflict: 'id' }).then(function(res){
+          if(res.error) console.error('[Supabase] Sync gym_sessions error:', res.error);
+          else console.log('[Supabase] Sync gym_sessions OK');
+        });
+      }
+    }
+    // NUTRITION
+    if(typeof NUTRITION_DATA!=='undefined' && NUTRITION_DATA && Object.keys(NUTRITION_DATA).length){
+      var nPayload = _sbNutritionToPayloads(NUTRITION_DATA);
+      console.log('[Supabase] Sync nutrition (' + nPayload.length + ' jugadores)');
+      sbClient.from('nutrition_data').upsert(nPayload, { onConflict: 'player_key,categoria' }).then(function(res){
+        if(res.error) console.error('[Supabase] Sync nutrition error:', res.error);
+        else console.log('[Supabase] Sync nutrition OK');
+      });
+    }
+    // MOBILITY
+    if(typeof MOBILITY_DATA!=='undefined' && MOBILITY_DATA && Object.keys(MOBILITY_DATA).length){
+      var mPayload = _sbMobilityToPayloads(MOBILITY_DATA);
+      console.log('[Supabase] Sync mobility (' + mPayload.length + ' jugadores)');
+      sbClient.from('mobility_data').upsert(mPayload, { onConflict: 'player_key,categoria' }).then(function(res){
+        if(res.error) console.error('[Supabase] Sync mobility error:', res.error);
+        else console.log('[Supabase] Sync mobility OK');
+      });
+    }
+  }, 1500);
+}
+window.sbScheduleTanda1Sync = sbScheduleTanda1Sync;
+
+// ── CARGA INICIAL EXTENDIDA: agregar Tanda 1 ──
+var _origLoadInitialData3 = sbLoadInitialData;
+sbLoadInitialData = function(){
+  return _origLoadInitialData3().then(function(){
+    if(typeof sbLoadingSet==='function') sbLoadingSet(93, 'Cargando planificación…', _sbGetLoadingCounts());
+    return sbPlanWeeksFetchAll();
+  }).then(function(rows){
+    if(typeof PLAN_WEEKS!=='undefined' && rows && rows.length){
+      // Supabase es fuente de verdad. Preservar locales que no estén en la nube.
+      var keys = {};
+      rows.forEach(function(row){ keys[row.name+'||'+(row.created||'')] = _sbPlanWeekFromRow(row); });
+      var localOnly = PLAN_WEEKS.filter(function(p){ return !keys[(p.name||'')+'||'+(p.created||'')]; });
+      PLAN_WEEKS.length = 0;
+      Object.values(keys).forEach(function(p){ PLAN_WEEKS.push(p); });
+      localOnly.forEach(function(p){ PLAN_WEEKS.push(p); });
+      console.log('[Supabase] Cargados ' + rows.length + ' plan_weeks.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+    } else {
+      console.log('[Supabase] No hay plan_weeks en Supabase todavía.');
+    }
+    return sbGymSessionsFetchAll();
+  }).then(function(rows){
+    if(typeof GYM_SESSIONS!=='undefined' && rows && rows.length){
+      var keys = {};
+      rows.forEach(function(row){ keys[row.id] = _sbGymSessionFromRow(row); });
+      var localOnly = GYM_SESSIONS.filter(function(s){ return !keys[s.id]; });
+      GYM_SESSIONS.length = 0;
+      Object.values(keys).forEach(function(s){ GYM_SESSIONS.push(s); });
+      localOnly.forEach(function(s){ GYM_SESSIONS.push(s); });
+      console.log('[Supabase] Cargados ' + rows.length + ' gym_sessions.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+    } else {
+      console.log('[Supabase] No hay gym_sessions en Supabase todavía.');
+    }
+    return sbNutritionFetchAll();
+  }).then(function(rows){
+    if(typeof NUTRITION_DATA!=='undefined' && rows && rows.length){
+      rows.forEach(function(row){
+        NUTRITION_DATA[row.player_key] = row.records || [];
+      });
+      console.log('[Supabase] Cargados ' + rows.length + ' nutrition (jugadores).');
+    } else {
+      console.log('[Supabase] No hay nutrition en Supabase todavía.');
+    }
+    return sbMobilityFetchAll();
+  }).then(function(rows){
+    if(typeof MOBILITY_DATA!=='undefined' && rows && rows.length){
+      rows.forEach(function(row){
+        MOBILITY_DATA[row.player_key] = row.records || [];
+      });
+      console.log('[Supabase] Cargados ' + rows.length + ' mobility (jugadores).');
+    } else {
+      console.log('[Supabase] No hay mobility en Supabase todavía.');
+    }
+  });
+};
+
+// ── MIGRACIÓN: subir Tanda 1 (las 4 estructuras de un click) ──
+function sbMigrateTanda1LocalToCloud(){
+  if(!sbReady){ alert('Sesión todavía cargando. Esperá unos segundos.'); return; }
+  var nPlan = (typeof PLAN_WEEKS!=='undefined') ? PLAN_WEEKS.length : 0;
+  var nGym  = (typeof GYM_SESSIONS!=='undefined') ? GYM_SESSIONS.length : 0;
+  var nNut  = (typeof NUTRITION_DATA!=='undefined') ? Object.keys(NUTRITION_DATA).length : 0;
+  var nMob  = (typeof MOBILITY_DATA!=='undefined') ? Object.keys(MOBILITY_DATA).length : 0;
+  if(!nPlan && !nGym && !nNut && !nMob){ alert('No hay datos locales para subir en esta tanda.'); return; }
+  if(!confirm('Vas a subir a Supabase:\n\n  Planes semanales: '+nPlan+'\n  Sesiones de gimnasio: '+nGym+'\n  Nutrición: '+nNut+' jugadores\n  Movilidad: '+nMob+' jugadores\n\n¿Continuar?')) return;
+  var status = document.getElementById('sb-migrate-t1-status');
+  function setStatus(t){ if(status) status.textContent = t; console.log('[Migrate-T1]', t); }
+  setStatus('Subiendo...');
+  var tasks = [];
+  if(nPlan) tasks.push(sbClient.from('plan_weeks').upsert(PLAN_WEEKS.map(_sbPlanWeekToPayload), { onConflict: 'name,created,categoria' }));
+  if(nGym){
+    var gP = GYM_SESSIONS.map(_sbGymSessionToPayload).filter(function(p){return p.id;});
+    if(gP.length) tasks.push(sbClient.from('gym_sessions').upsert(gP, { onConflict: 'id' }));
+  }
+  if(nNut) tasks.push(sbClient.from('nutrition_data').upsert(_sbNutritionToPayloads(NUTRITION_DATA), { onConflict: 'player_key,categoria' }));
+  if(nMob) tasks.push(sbClient.from('mobility_data').upsert(_sbMobilityToPayloads(MOBILITY_DATA), { onConflict: 'player_key,categoria' }));
+  Promise.all(tasks).then(function(results){
+    var anyErr = results.some(function(r){ return r.error; });
+    if(anyErr){
+      results.forEach(function(r){ if(r.error) console.error('[Migrate-T1]', r.error); });
+      setStatus('✗ Error parcial');
+      alert('Hubo un error al subir algunos datos. Revisá la consola (F12) para detalles.');
+    } else {
+      setStatus('✓ Subido');
+      alert('✓ Plan, gym, nutrición y movilidad subidos a Supabase.\n\nPedile a tu compañero que recargue para verlos.');
+    }
+  }).catch(function(err){
+    setStatus('✗ Error');
+    alert('Error al subir: ' + (err.message||err));
+    console.error(err);
+  });
+}
+window.sbMigrateTanda1LocalToCloud = sbMigrateTanda1LocalToCloud;
+
+// ── PATCH saveData para sync Tanda 1 ──
+(function(){
+  if(typeof window.saveData !== 'function') return;
+  var prev = window.saveData;
+  window.saveData = function(){
+    var r = prev.apply(this, arguments);
+    sbScheduleTanda1Sync();
+    return r;
+  };
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // BOTÓN DE MIGRACIÓN — agregar al lado de Exportar
 // ═══════════════════════════════════════════════════════════════
 function sbInjectMigrateButton(){
@@ -24270,6 +24529,18 @@ function sbInjectMigrateButton(){
   status3.id = 'sb-migrate-wp-status';
   status3.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
   exportBtn.parentNode.appendChild(status3);
+  // Botón 4: Subir resto (Plan + Gym sesiones + Nutrición + Movilidad)
+  var btn4 = document.createElement('button');
+  btn4.id = 'sb-migrate-t1-btn';
+  btn4.onclick = sbMigrateTanda1LocalToCloud;
+  btn4.title = 'Subir Plan semanal, Gimnasio (sesiones), Nutrición y Movilidad';
+  btn4.style.cssText = 'background:#8E44AD;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
+  btn4.innerHTML = '☁ Subir resto';
+  exportBtn.parentNode.appendChild(btn4);
+  var status4 = document.createElement('span');
+  status4.id = 'sb-migrate-t1-status';
+  status4.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
+  exportBtn.parentNode.appendChild(status4);
 }
 
 // ═══════════════════════════════════════════════════════════════
