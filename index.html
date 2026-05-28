@@ -3847,8 +3847,29 @@ function mcDrop(e){
   const r=new FileReader();r.onload=ev=>{document.getElementById('mc-raw').value=ev.target.result;mcPreview();};r.readAsText(file,'UTF-8');
 }
 window.mcDrop=mcDrop;
+// Ordena nombres de semana de forma "natural": entiende los números embebidos.
+// "Microciclo 2" va antes que "Microciclo 19" (no orden alfabético donde "19"<"2").
+// Soporta cualquier texto; si no hay número, ordena alfabéticamente al final.
+function _sortWeeksNatural(weeks){
+  function num(w){
+    var m=String(w||'').match(/(\d+)/);
+    return m ? parseInt(m[1],10) : null;
+  }
+  return weeks.slice().sort(function(a,b){
+    var na=num(a), nb=num(b);
+    if(na!=null && nb!=null){
+      if(na!==nb) return na-nb;
+      return String(a).localeCompare(String(b),'es');
+    }
+    if(na!=null) return -1;   // los que tienen número van primero
+    if(nb!=null) return 1;
+    return String(a).localeCompare(String(b),'es');
+  });
+}
+window._sortWeeksNatural=_sortWeeksNatural;
+
 function mcRebuildWeekSel(){
-  const weeks=[...new Set(MICROCICLO.map(s=>s.week))];
+  const weeks=_sortWeeksNatural([...new Set(MICROCICLO.map(s=>s.week))]);
   const sel=document.getElementById('mc-week-view');if(!sel)return;
   const cur=sel.value;
   sel.innerHTML='<option value="">— elegir semana —</option>'+weeks.map(w=>'<option value="'+w+'">'+w+'</option>').join('');
@@ -4072,7 +4093,7 @@ window.mcSetRefWeek=mcSetRefWeek;
 function mcToggleRefDayChip(day){
   // Use explicit ref week OR fall back to prevWeek (same logic as chip display)
   var curWeek=document.getElementById('mc-week-view')?.value;
-  var allWks=[...new Set(MICROCICLO.map(function(s){return s.week;}))].filter(Boolean);
+  var allWks=((typeof _sortWeeksNatural==='function')?_sortWeeksNatural([...new Set(MICROCICLO.map(function(s){return s.week;}))]):[...new Set(MICROCICLO.map(function(s){return s.week;}))]).filter(Boolean);
   var wIdx=allWks.indexOf(curWeek);
   var autoPrev=wIdx>0?allWks[wIdx-1]:null;
   var rw=_mcRefWeek||autoPrev;
@@ -4102,8 +4123,8 @@ function mcRenderWeek(){
   });
   if(!sessions.length){wrap.innerHTML='<div style="padding:16px;color:#aaa;font-size:11px;text-align:center">Sin sesiones para esta semana</div>';return;}
 
-  // Find previous week for ratio comparison
-  const allWeeks=[...new Set(MICROCICLO.map(s=>s.week))];
+  // Find previous week for ratio comparison (orden natural para que "previa" sea correcta)
+  const allWeeks=(typeof _sortWeeksNatural==='function')?_sortWeeksNatural([...new Set(MICROCICLO.map(s=>s.week))]):[...new Set(MICROCICLO.map(s=>s.week))];
   const wIdx=allWeeks.indexOf(week);
   const prevWeek=wIdx>0?allWeeks[wIdx-1]:null;
   const prevSess=prevWeek?MICROCICLO.filter(s=>s.week===prevWeek):[];
@@ -4427,7 +4448,7 @@ function mcEstInit(){
     : '<span style="font-size:10px;color:#aaa">Sin perfiles registrados. Agregá jugadores en la pestaña Perfiles.</span>';
   // Populate week datalist
   var dl=document.getElementById('mc-week-datalist');
-  if(dl) dl.innerHTML=[...new Set(MICROCICLO.map(function(s){return s.week;}))].map(function(w){return'<option value="'+w+'">'+w+'</option>';}).join('');
+  if(dl) dl.innerHTML=((typeof _sortWeeksNatural==='function')?_sortWeeksNatural([...new Set(MICROCICLO.map(function(s){return s.week;}))]):[...new Set(MICROCICLO.map(function(s){return s.week;}))]).map(function(w){return'<option value="'+w+'">'+w+'</option>';}).join('');
   // Clear exercise rows
   _mcEstRows=[];
   document.getElementById('mc-est-ex-rows').innerHTML='';
@@ -4741,7 +4762,7 @@ window.mcMoveDay=mcMoveDay;
 function mcRenderLoad(){
   const metric=document.getElementById('mc-load-metric')?.value||'mts';
   const nWeeks=document.getElementById('mc-load-weeks')?.value||'4';
-  const weeks=[...new Set(MICROCICLO.map(s=>s.week))];
+  const weeks=(typeof _sortWeeksNatural==='function')?_sortWeeksNatural([...new Set(MICROCICLO.map(s=>s.week))]):[...new Set(MICROCICLO.map(s=>s.week))];
   const useWeeks=nWeeks==='all'?weeks:weeks.slice(-(parseInt(nWeeks)));
   const canvas=document.getElementById('mc-load-chart');if(!canvas)return;
   if(!useWeeks.length){if(mcLoadChart){mcLoadChart.destroy();mcLoadChart=null;}return;}
@@ -19198,9 +19219,8 @@ function _cargaListMicrociclos(){
       if(s.week && !seen[s.week]){seen[s.week]=true;weeks.push(s.week);}
     });
   }
-  // Si no hay ningún microciclo todavía, ofrecemos generar uno sintético
-  // (ej. "Sem 1", "Sem 2", ...) para que el usuario pueda cargar PSE/Wellness sin tener
-  // GPS todavía.
+  // Ordenar natural para que el desplegable salga "Microciclo 1, 2, ... 19"
+  if(typeof _sortWeeksNatural==='function') weeks=_sortWeeksNatural(weeks);
   return weeks;
 }
 // Sugerencia de microciclo basada en la fecha: si la fecha matchea alguna sesión existente, usar esa week.
@@ -19573,7 +19593,7 @@ function cargaRebuildWeekSel(){
   // Incluir también semanas que aparecen solo en PSE_DATA o WELLNESS_DATA
   if(typeof PSE_DATA!=='undefined')PSE_DATA.forEach(function(r){if(r.week)weekSet[r.week]=true;});
   if(typeof WELLNESS_DATA!=='undefined')WELLNESS_DATA.forEach(function(r){if(r.week)weekSet[r.week]=true;});
-  var weeks=Object.keys(weekSet);
+  var weeks=(typeof _sortWeeksNatural==='function')?_sortWeeksNatural(Object.keys(weekSet)):Object.keys(weekSet);
   var cur=sel.value;
   sel.innerHTML='<option value="">— elegir semana —</option>'+weeks.map(function(w){return'<option value="'+w+'"'+(w===cur?' selected':'')+'>'+w+'</option>';}).join('');
   if(!sel.value&&weeks.length)sel.value=weeks[weeks.length-1];
@@ -19714,7 +19734,7 @@ function cargaRenderCuadrante(){
   var sessions=MICROCICLO.filter(function(s){return s.week===week;});
   if(!sessions.length){out.innerHTML='<div style="padding:30px;text-align:center;color:#aaa">Sin datos GPS para esta semana.</div>';return;}
 
-  var allWeeks=[...new Set(MICROCICLO.map(function(s){return s.week;}))];
+  var allWeeks=(typeof _sortWeeksNatural==='function')?_sortWeeksNatural([...new Set(MICROCICLO.map(function(s){return s.week;}))]):[...new Set(MICROCICLO.map(function(s){return s.week;}))];
   var wIdx=allWeeks.indexOf(week);
   var prevWeek=wIdx>0?allWeeks[wIdx-1]:null;
   var classMode=cargaGetClassMode();
