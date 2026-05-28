@@ -4197,7 +4197,14 @@ function mcRenderWeek(){
   // ── UI control vars ──
   var hasMD=sessions.some(function(s){return s.day==='MD';});
   var mdBtn=hasMD?('<button onclick="mcToggleMD()" style="border:1px solid '+(_mcExcludeMD?'#E24B4A55':'#1D9E7555')+';background:'+(_mcExcludeMD?'#E24B4A18':'#1D9E7518')+';color:'+(_mcExcludeMD?'#E24B4A':'#1D9E75')+';border-radius:5px;padding:3px 10px;font-size:10px;font-weight:700;cursor:pointer">'+(_mcExcludeMD?'&#9917; MD excluido':'&#9917; Incluir MD')+'</button>'):'';
-  var curDayChips=sessions.map(function(s){
+  // Sessions ordenadas según DAY_ORDER para que los chips salgan MD-5, MD-4, ... MD-1, MD, MD+1
+  var sessionsSortedForChips=sessions.slice().sort(function(a,b){
+    var ia=DAY_ORDER.indexOf(a.day), ib=DAY_ORDER.indexOf(b.day);
+    if(ia<0) ia=999;
+    if(ib<0) ib=999;
+    return ia-ib;
+  });
+  var curDayChips=sessionsSortedForChips.map(function(s){
     var on=!_mcDayFilter||_mcDayFilter.has(s.day);
     return '<button onclick="mcToggleDayChip(\''+(s.day)+'\')" style="border:1px solid '+(on?'#0C447C':'#ccc')+';background:'+(on?'#0C447C':'#f0f0f0')+';color:'+(on?'#fff':'#aaa')+';border-radius:4px;padding:2px 9px;font-size:10px;font-weight:700;cursor:pointer">'+(s.day)+'</button>';
   }).join(' ');
@@ -4206,6 +4213,13 @@ function mcRenderWeek(){
   var refWeekSel='<select onchange="mcSetRefWeek(this.value)" style="border:1px solid #ddd;border-radius:4px;padding:3px 6px;font-size:10px;background:#fff"><option value="">auto (sem. anterior)</option>'+weekOpts+'</select>';
   var refWeekKey2=_mcRefWeek||(prevWeek||null);
   var refWeekDays=refWeekKey2?MICROCICLO.filter(function(s){return s.week===refWeekKey2;}).map(function(s){return s.day;}):[];
+  // Ordenar los días según DAY_ORDER (MD-5, MD-4, ..., MD-1, MD, MD+1, MD+2) para que MD quede al final
+  refWeekDays.sort(function(a,b){
+    var ia=DAY_ORDER.indexOf(a), ib=DAY_ORDER.indexOf(b);
+    if(ia<0) ia=999;
+    if(ib<0) ib=999;
+    return ia-ib;
+  });
   var refDayChips=refWeekDays.map(function(day){
     var effRef=_mcRefDays||_mcDayFilter;
     var on=!effRef||effRef.has(day);
