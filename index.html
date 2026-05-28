@@ -23436,6 +23436,19 @@ if(document.readyState==='loading'){
      contra el backend en https://jvopjhvchsnhwchcnzun.supabase.co
      ═══════════════════════════════════════════════════════════════ -->
 
+<!-- Overlay de carga (aparece mientras se traen datos de Supabase) -->
+<div id="sb-loading-overlay" style="display:none;position:fixed;inset:0;background:linear-gradient(135deg,#0D1B2A 0%,#1B2845 100%);z-index:99998;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:14px;max-width:400px;width:100%;padding:32px 28px;box-shadow:0 20px 60px rgba(0,0,0,0.4);text-align:center">
+    <div style="font-size:32px;margin-bottom:12px">⚽</div>
+    <div style="font-size:16px;font-weight:800;color:#0D1B2A;margin-bottom:6px">Cargando datos del club…</div>
+    <div id="sb-loading-step" style="font-size:11px;color:#666;margin-bottom:18px;min-height:14px">Conectando con el servidor</div>
+    <div style="background:#eee;border-radius:10px;height:8px;overflow:hidden;margin-bottom:8px">
+      <div id="sb-loading-bar" style="background:linear-gradient(90deg,#1D9E75,#3B4D88);height:100%;width:0%;transition:width 0.4s ease;border-radius:10px"></div>
+    </div>
+    <div id="sb-loading-counts" style="font-size:10px;color:#888;line-height:1.6"></div>
+  </div>
+</div>
+
 <!-- UI: Pantalla de login (oculta por defecto, se muestra si no hay sesión) -->
 <div id="sb-login-overlay" style="display:none;position:fixed;inset:0;background:linear-gradient(135deg,#0D1B2A 0%,#1B2845 100%);z-index:99999;align-items:center;justify-content:center;padding:20px">
   <div style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:28px 26px;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
@@ -23466,6 +23479,36 @@ var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 // Categoría activa (Etapa A: hard-coded; Etapa B: la elige el usuario)
 var SB_CATEGORIA = '5ta División';
+
+// ═══════════════════════════════════════════════════════════════
+// LOADING OVERLAY HELPERS
+// ═══════════════════════════════════════════════════════════════
+// Manejo de la pantalla "Cargando datos del club…" con barra de progreso.
+// Pasos esperados: conectar → perfiles → microciclos → wellness → PSE → render
+function sbLoadingShow(){
+  var el=document.getElementById('sb-loading-overlay');
+  if(el) el.style.display='flex';
+}
+function sbLoadingHide(){
+  var el=document.getElementById('sb-loading-overlay');
+  if(el){
+    // Fade out suave
+    el.style.transition='opacity 0.3s';
+    el.style.opacity='0';
+    setTimeout(function(){el.style.display='none';el.style.opacity='1';},300);
+  }
+}
+function sbLoadingSet(pct, step, counts){
+  var bar=document.getElementById('sb-loading-bar');
+  var stp=document.getElementById('sb-loading-step');
+  var cnt=document.getElementById('sb-loading-counts');
+  if(bar) bar.style.width=Math.min(100,Math.max(0,pct))+'%';
+  if(stp && step) stp.textContent=step;
+  if(cnt && counts!=null) cnt.innerHTML=counts;
+}
+window.sbLoadingShow=sbLoadingShow;
+window.sbLoadingHide=sbLoadingHide;
+window.sbLoadingSet=sbLoadingSet;
 
 // ═══════════════════════════════════════════════════════════════
 // CLIENT SETUP
@@ -23558,6 +23601,8 @@ window.sbDoLogout = sbDoLogout;
 
 function sbOnLoginSuccess(){
   sbHideLogin();
+  sbLoadingShow();
+  sbLoadingSet(10, 'Conectando con el servidor…', '');
   console.log('[Supabase] Sesión activa:', sbCurrentUser.email);
   // Inyectar UI de "logueado como" en el header
   sbInjectUserBadge();
@@ -23565,6 +23610,7 @@ function sbOnLoginSuccess(){
   sbLoadInitialData().then(function(){
     sbReady = true;
     console.log('[Supabase] Carga inicial completa.');
+    sbLoadingSet(95, 'Renderizando vistas…', '');
     // Re-render: tras cargar microciclos, hay que rebuildear varios selectores
     if(typeof refresh === 'function') try{ refresh(); }catch(e){}
     if(typeof rebuildCatBtns === 'function') try{ rebuildCatBtns(); }catch(e){}
@@ -23573,8 +23619,11 @@ function sbOnLoginSuccess(){
     if(typeof mcRenderWeek === 'function') try{ mcRenderWeek(); }catch(e){}
     if(typeof cargaRender === 'function') try{ cargaRender(); }catch(e){}
     if(typeof cargaUpdateDataIndicator === 'function') try{ cargaUpdateDataIndicator(); }catch(e){}
+    sbLoadingSet(100, '¡Listo!', '');
+    setTimeout(sbLoadingHide, 400);
   }).catch(function(err){
     console.error('[Supabase] Error en carga inicial:', err);
+    sbLoadingHide();
     alert('No se pudieron cargar datos de Supabase. Vas a seguir con tu datos locales. Error: ' + (err.message||err));
     sbReady = true;
   });
@@ -23660,9 +23709,11 @@ function sbProfilesDelete(id){
 //   - Los perfiles de Supabase reemplazan a los locales con mismo ID.
 
 function sbLoadInitialData(){
+  sbLoadingSet(20, 'Cargando perfiles de jugadores…', '');
   return sbProfilesFetchAll().then(function(rows){
     if(!rows.length){
       console.log('[Supabase] No hay perfiles en Supabase todavía.');
+      sbLoadingSet(35, 'Perfiles cargados', 'Perfiles: 0');
       return;
     }
     if(typeof PLAYER_PROFILES === 'undefined'){
@@ -23676,6 +23727,7 @@ function sbLoadInitialData(){
       PLAYER_PROFILES[row.id] = prof;
     });
     console.log('[Supabase] Cargados ' + rows.length + ' perfiles de jugadores.');
+    sbLoadingSet(35, 'Perfiles cargados', 'Perfiles: '+rows.length);
   });
 }
 
@@ -23877,33 +23929,41 @@ window.sbScheduleMicrocicloSync = sbScheduleMicrocicloSync;
 var _origLoadInitialData = sbLoadInitialData;
 sbLoadInitialData = function(){
   return _origLoadInitialData().then(function(){
+    sbLoadingSet(45, 'Cargando microciclos…', _sbGetLoadingCounts());
     return sbMicrociclosFetchAll();
   }).then(function(rows){
     if(typeof MICROCICLO === 'undefined') return;
     if(!rows.length){
       console.log('[Supabase] No hay microciclos en Supabase todavía.');
+      sbLoadingSet(60, 'Microciclos cargados', _sbGetLoadingCounts());
       return;
     }
-    // Estrategia: Supabase es la fuente de verdad. Reemplazamos local con remoto.
-    // Si vos tenías sesiones locales que NO están en Supabase, las preservamos
-    // (no las pisamos con vacío) — usuario las puede subir con "Subir microciclos".
     var sbKeys = {};
     rows.forEach(function(row){
       var s = _sbMicrocicloFromRow(row);
       sbKeys[s.week + '||' + s.day] = s;
     });
-    // Sesiones locales que NO están en Supabase (preservar)
     var localOnly = MICROCICLO.filter(function(s){
       return !sbKeys[s.week + '||' + s.day];
     });
-    // Reemplazar array preservando referencia
     MICROCICLO.length = 0;
     Object.values(sbKeys).forEach(function(s){ MICROCICLO.push(s); });
     localOnly.forEach(function(s){ MICROCICLO.push(s); });
     console.log('[Supabase] Cargados ' + rows.length + ' microciclos de Supabase. ' +
                 (localOnly.length ? '(' + localOnly.length + ' locales preservados, subilos manualmente con "Subir microciclos")' : ''));
+    sbLoadingSet(60, 'Microciclos cargados', _sbGetLoadingCounts());
   });
 };
+
+// Helper para componer la línea de conteos durante la carga
+function _sbGetLoadingCounts(){
+  var parts = [];
+  if(typeof PLAYER_PROFILES!=='undefined') parts.push('Perfiles: ' + Object.keys(PLAYER_PROFILES).length);
+  if(typeof MICROCICLO!=='undefined') parts.push('Microciclos: ' + MICROCICLO.length);
+  if(typeof WELLNESS_DATA!=='undefined' && WELLNESS_DATA.length) parts.push('Wellness: ' + WELLNESS_DATA.length);
+  if(typeof PSE_DATA!=='undefined' && PSE_DATA.length) parts.push('PSE: ' + PSE_DATA.length);
+  return parts.join(' · ');
+}
 
 // ═══════════════════════════════════════════════════════════════
 // MIGRACIÓN: subir MICROCICLO locales a Supabase
@@ -24072,6 +24132,7 @@ window.sbScheduleWellPseSync = sbScheduleWellPseSync;
 var _origLoadInitialData2 = sbLoadInitialData;
 sbLoadInitialData = function(){
   return _origLoadInitialData2().then(function(){
+    sbLoadingSet(70, 'Cargando wellness…', _sbGetLoadingCounts());
     return sbWellnessFetchAll();
   }).then(function(rows){
     if(typeof WELLNESS_DATA!=='undefined' && rows && rows.length){
@@ -24086,6 +24147,7 @@ sbLoadInitialData = function(){
     } else {
       console.log('[Supabase] No hay wellness en Supabase todavía.');
     }
+    sbLoadingSet(82, 'Cargando PSE…', _sbGetLoadingCounts());
     return sbPseFetchAll();
   }).then(function(rows){
     if(typeof PSE_DATA!=='undefined' && rows && rows.length){
@@ -24099,6 +24161,7 @@ sbLoadInitialData = function(){
     } else {
       console.log('[Supabase] No hay PSE en Supabase todavía.');
     }
+    sbLoadingSet(92, 'Datos cargados', _sbGetLoadingCounts());
   });
 };
 
