@@ -23572,6 +23572,7 @@ function sbOnLoginSuccess(){
     if(typeof cargaRebuildWeekSel === 'function') try{ cargaRebuildWeekSel(); }catch(e){}
     if(typeof mcRenderWeek === 'function') try{ mcRenderWeek(); }catch(e){}
     if(typeof cargaRender === 'function') try{ cargaRender(); }catch(e){}
+    if(typeof cargaUpdateDataIndicator === 'function') try{ cargaUpdateDataIndicator(); }catch(e){}
   }).catch(function(err){
     console.error('[Supabase] Error en carga inicial:', err);
     alert('No se pudieron cargar datos de Supabase. Vas a seguir con tu datos locales. Error: ' + (err.message||err));
@@ -23954,6 +23955,202 @@ window.sbMigrateMicroclicosLocalToCloud = sbMigrateMicroclicosLocalToCloud;
 })();
 
 // ═══════════════════════════════════════════════════════════════
+// CAPA DE DATOS: WELLNESS_DATA y PSE_DATA
+// ═══════════════════════════════════════════════════════════════
+// Ambas son arrays planos. Estructura:
+//   WELLNESS_DATA: [{name, date, readiness, fields:{}, dolor, dolorZona, week, day}]
+//   PSE_DATA:      [{name, date, pse, fields:{}, week, day}]
+//
+// Tablas Supabase:
+//   wellness_data: name, date, readiness, fields(jsonb), dolor, dolor_zona, week, day, categoria
+//                  UNIQUE(name, date, categoria)
+//   pse_data:      name, date, pse, fields(jsonb), week, day, categoria
+//                  UNIQUE(name, date, week, day, categoria)
+
+function _sbValidDate(d){
+  if(!d) return null;
+  var s = String(d).slice(0,10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+// ── WELLNESS ──
+function sbWellnessFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('wellness_data').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbWellnessToPayload(r){
+  return {
+    name: r.name || '',
+    date: _sbValidDate(r.date),
+    readiness: (r.readiness!=null && !isNaN(r.readiness)) ? r.readiness : null,
+    fields: r.fields || {},
+    dolor: r.dolor || null,
+    dolor_zona: r.dolorZona || r.dolor_zona || null,
+    week: r.week || null,
+    day: r.day || null,
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+function _sbWellnessFromRow(row){
+  return {
+    name: row.name,
+    date: row.date,
+    readiness: row.readiness,
+    fields: row.fields || {},
+    dolor: row.dolor || '',
+    dolorZona: row.dolor_zona || '',
+    week: row.week || '',
+    day: row.day || ''
+  };
+}
+
+// ── PSE ──
+function sbPseFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('pse_data').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbPseToPayload(r){
+  return {
+    name: r.name || '',
+    date: _sbValidDate(r.date),
+    pse: (r.pse!=null && !isNaN(r.pse)) ? r.pse : 0,
+    fields: r.fields || {},
+    week: r.week || '',   // parte del UNIQUE, no puede ser null
+    day: r.day || '',     // parte del UNIQUE, no puede ser null
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+function _sbPseFromRow(row){
+  return {
+    name: row.name,
+    date: row.date,
+    pse: row.pse,
+    fields: row.fields || {},
+    week: row.week || '',
+    day: row.day || ''
+  };
+}
+
+// ── SYNC con debounce (wellness + pse juntos) ──
+var _sbWellPseSyncTimer = null;
+function sbScheduleWellPseSync(){
+  if(!sbReady) return;
+  if(_sbWellPseSyncTimer) clearTimeout(_sbWellPseSyncTimer);
+  _sbWellPseSyncTimer = setTimeout(function(){
+    _sbWellPseSyncTimer = null;
+    // Wellness
+    if(typeof WELLNESS_DATA!=='undefined' && Array.isArray(WELLNESS_DATA) && WELLNESS_DATA.length){
+      var wPayload = WELLNESS_DATA.map(_sbWellnessToPayload).filter(function(p){return p.date;});
+      if(wPayload.length){
+        console.log('[Supabase] Sync wellness (' + wPayload.length + ')');
+        sbClient.from('wellness_data').upsert(wPayload, { onConflict: 'name,date,categoria' }).then(function(res){
+          if(res.error) console.error('[Supabase] Sync wellness error:', res.error);
+          else console.log('[Supabase] Sync wellness OK');
+        });
+      }
+    }
+    // PSE
+    if(typeof PSE_DATA!=='undefined' && Array.isArray(PSE_DATA) && PSE_DATA.length){
+      var pPayload = PSE_DATA.map(_sbPseToPayload).filter(function(p){return p.date;});
+      if(pPayload.length){
+        console.log('[Supabase] Sync PSE (' + pPayload.length + ')');
+        sbClient.from('pse_data').upsert(pPayload, { onConflict: 'name,date,week,day,categoria' }).then(function(res){
+          if(res.error) console.error('[Supabase] Sync PSE error:', res.error);
+          else console.log('[Supabase] Sync PSE OK');
+        });
+      }
+    }
+  }, 1500);
+}
+window.sbScheduleWellPseSync = sbScheduleWellPseSync;
+
+// ── CARGA INICIAL EXTENDIDA: agregar wellness + pse ──
+var _origLoadInitialData2 = sbLoadInitialData;
+sbLoadInitialData = function(){
+  return _origLoadInitialData2().then(function(){
+    return sbWellnessFetchAll();
+  }).then(function(rows){
+    if(typeof WELLNESS_DATA!=='undefined' && rows && rows.length){
+      // Supabase es fuente de verdad; preservar locales que no estén en la nube
+      var keys = {};
+      rows.forEach(function(row){ keys[row.name+'||'+row.date] = _sbWellnessFromRow(row); });
+      var localOnly = WELLNESS_DATA.filter(function(r){ return !keys[r.name+'||'+(_sbValidDate(r.date)||r.date)]; });
+      WELLNESS_DATA.length = 0;
+      Object.values(keys).forEach(function(r){ WELLNESS_DATA.push(r); });
+      localOnly.forEach(function(r){ WELLNESS_DATA.push(r); });
+      console.log('[Supabase] Cargados ' + rows.length + ' registros de wellness.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+    } else {
+      console.log('[Supabase] No hay wellness en Supabase todavía.');
+    }
+    return sbPseFetchAll();
+  }).then(function(rows){
+    if(typeof PSE_DATA!=='undefined' && rows && rows.length){
+      var keys = {};
+      rows.forEach(function(row){ keys[row.name+'||'+row.date+'||'+(row.week||'')+'||'+(row.day||'')] = _sbPseFromRow(row); });
+      var localOnly = PSE_DATA.filter(function(r){ return !keys[r.name+'||'+(_sbValidDate(r.date)||r.date)+'||'+(r.week||'')+'||'+(r.day||'')]; });
+      PSE_DATA.length = 0;
+      Object.values(keys).forEach(function(r){ PSE_DATA.push(r); });
+      localOnly.forEach(function(r){ PSE_DATA.push(r); });
+      console.log('[Supabase] Cargados ' + rows.length + ' registros de PSE.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+    } else {
+      console.log('[Supabase] No hay PSE en Supabase todavía.');
+    }
+  });
+};
+
+// ── MIGRACIÓN: subir wellness + pse locales ──
+function sbMigrateWellPseLocalToCloud(){
+  if(!sbReady){ alert('Sesión todavía cargando. Esperá unos segundos.'); return; }
+  var nW = (typeof WELLNESS_DATA!=='undefined') ? WELLNESS_DATA.length : 0;
+  var nP = (typeof PSE_DATA!=='undefined') ? PSE_DATA.length : 0;
+  if(!nW && !nP){ alert('No hay datos de wellness ni PSE para subir.'); return; }
+  if(!confirm('Vas a subir a Supabase:\n\n  Wellness: '+nW+' registros\n  PSE: '+nP+' registros\n\nLos que ya existan se actualizan (no duplican).\n\n¿Continuar?')) return;
+  var status = document.getElementById('sb-migrate-wp-status');
+  function setStatus(t){ if(status) status.textContent = t; console.log('[Migrate-WP]', t); }
+  setStatus('Subiendo...');
+  var tasks = [];
+  if(nW){
+    var wPayload = WELLNESS_DATA.map(_sbWellnessToPayload).filter(function(p){return p.date;});
+    tasks.push(sbClient.from('wellness_data').upsert(wPayload, { onConflict: 'name,date,categoria' }));
+  }
+  if(nP){
+    var pPayload = PSE_DATA.map(_sbPseToPayload).filter(function(p){return p.date;});
+    tasks.push(sbClient.from('pse_data').upsert(pPayload, { onConflict: 'name,date,week,day,categoria' }));
+  }
+  Promise.all(tasks).then(function(results){
+    var anyErr = results.some(function(r){ return r.error; });
+    if(anyErr){
+      results.forEach(function(r){ if(r.error) console.error('[Migrate-WP]', r.error); });
+      setStatus('✗ Error parcial');
+      alert('Hubo un error al subir algunos datos. Revisá la consola (F12) para detalles.');
+    } else {
+      setStatus('✓ Subido');
+      alert('✓ Wellness y PSE subidos a Supabase.\n\nPedile a tu compañero que recargue para verlos.');
+    }
+  }).catch(function(err){
+    setStatus('✗ Error');
+    alert('Error al subir: ' + (err.message||err));
+    console.error(err);
+  });
+}
+window.sbMigrateWellPseLocalToCloud = sbMigrateWellPseLocalToCloud;
+
+// ── PATCH saveData para sync wellness+pse ──
+(function(){
+  if(typeof window.saveData !== 'function') return;
+  var prev = window.saveData;
+  window.saveData = function(){
+    var r = prev.apply(this, arguments);
+    sbScheduleWellPseSync();
+    return r;
+  };
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // BOTÓN DE MIGRACIÓN — agregar al lado de Exportar
 // ═══════════════════════════════════════════════════════════════
 function sbInjectMigrateButton(){
@@ -23984,6 +24181,18 @@ function sbInjectMigrateButton(){
   status2.id = 'sb-migrate-mc-status';
   status2.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
   exportBtn.parentNode.appendChild(status2);
+  // Botón 3: Subir wellness + PSE
+  var btn3 = document.createElement('button');
+  btn3.id = 'sb-migrate-wp-btn';
+  btn3.onclick = sbMigrateWellPseLocalToCloud;
+  btn3.title = 'Subir mis datos de Wellness y PSE a Supabase';
+  btn3.style.cssText = 'background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
+  btn3.innerHTML = '☁ Subir wellness+PSE';
+  exportBtn.parentNode.appendChild(btn3);
+  var status3 = document.createElement('span');
+  status3.id = 'sb-migrate-wp-status';
+  status3.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
+  exportBtn.parentNode.appendChild(status3);
 }
 
 // ═══════════════════════════════════════════════════════════════
