@@ -4087,6 +4087,59 @@ window.mcToggleDayChip=mcToggleDayChip;
 function mcResetDayFilter(){_mcDayFilter=null;mcRenderWeek();}
 window.mcResetDayFilter=mcResetDayFilter;
 
+// Borrar una sesión específica (día) de la semana actualmente seleccionada.
+// Borra local + Supabase. Pide confirmación.
+function mcDeleteDayPrompt(){
+  var week=document.getElementById('mc-week-view')?.value;
+  if(!week){ alert('Seleccioná una semana primero.'); return; }
+  var sessions=MICROCICLO.filter(function(s){return s.week===week;});
+  if(!sessions.length){ alert('Esta semana no tiene días cargados.'); return; }
+  // Ordenar según DAY_ORDER (MD al final)
+  var days=sessions.map(function(s){return s.day;}).sort(function(a,b){
+    var ia=DAY_ORDER.indexOf(a), ib=DAY_ORDER.indexOf(b);
+    if(ia<0) ia=999; if(ib<0) ib=999;
+    return ia-ib;
+  });
+  var listStr=days.map(function(d,i){return (i+1)+') '+d;}).join('\n');
+  var input=prompt('¿Qué día querés borrar de "'+week+'"?\n\n'+listStr+'\n\nEscribí el número o el nombre exacto (ej. "MD-3"):');
+  if(input==null) return;  // canceló
+  input=String(input).trim();
+  if(!input) return;
+  // Resolver: si es número, usarlo como índice; si es texto, buscar match exacto
+  var dayToDelete=null;
+  var idx=parseInt(input,10);
+  if(!isNaN(idx) && idx>=1 && idx<=days.length){
+    dayToDelete=days[idx-1];
+  } else if(days.indexOf(input)>-1){
+    dayToDelete=input;
+  } else {
+    alert('No reconocí "'+input+'". Probá con el número (1, 2, ...) o el nombre exacto (MD-3, MD-1, etc.).');
+    return;
+  }
+  // Confirmación final
+  if(!confirm('¿Borrar "'+dayToDelete+'" de "'+week+'"?\n\nEsta acción no se puede deshacer.\nSi tu compañero está mirando esta semana en este momento, va a tener que recargar para ver el cambio.')) return;
+  // Borrar local
+  var i=MICROCICLO.findIndex(function(s){return s.week===week && s.day===dayToDelete;});
+  if(i<0){ alert('No encontré la sesión. Recargá la página y probá de nuevo.'); return; }
+  MICROCICLO.splice(i,1);
+  // Borrar Supabase directamente (no esperamos al debounce)
+  if(typeof sbMicrocicloDelete==='function'){
+    sbMicrocicloDelete(week, dayToDelete).then(function(){
+      console.log('[Supabase] Borrado microciclo:', week, dayToDelete);
+    }).catch(function(err){
+      console.error('[Supabase] Error al borrar microciclo:', err);
+      alert('Se borró localmente, pero hubo un error al borrar de Supabase. Cuando vuelva el sync probablemente se restaure. Revisá la consola para detalles.');
+    });
+  }
+  // Persistir local + re-render
+  saveData();
+  mcRebuildWeekSel();
+  if(typeof cargaRebuildWeekSel==='function') cargaRebuildWeekSel();
+  mcRenderWeek();
+  if(typeof mcRenderLoad==='function') mcRenderLoad();
+}
+window.mcDeleteDayPrompt=mcDeleteDayPrompt;
+
 function mcSetRefWeek(w){_mcRefWeek=w||null;_mcRefDays=null;mcRenderWeek();}
 window.mcSetRefWeek=mcSetRefWeek;
 
@@ -4242,6 +4295,7 @@ function mcRenderWeek(){
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;background:#f5f8ff;border-bottom:1px solid #e8edf8">
     <span style="font-size:9px;color:#0C447C;font-weight:700;text-transform:uppercase;letter-spacing:.4px;min-width:90px">Sem. actual:</span>
     ${curDayChips} ${resetCurBtn}
+    <button onclick="mcDeleteDayPrompt()" title="Borrar una sesión (día) específica de esta semana" style="margin-left:auto;border:1px solid #E24B4A55;background:#E24B4A12;color:#E24B4A;border-radius:5px;padding:2px 9px;font-size:10px;font-weight:700;cursor:pointer">🗑️ Borrar día</button>
   </div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;background:#fff8f5;border-bottom:1px solid #f0e4dc">
     <span style="font-size:9px;color:#D85A30;font-weight:700;text-transform:uppercase;letter-spacing:.4px;min-width:90px">Comparar vs:</span>
@@ -24956,81 +25010,16 @@ window.sbMigrateTanda2bLocalToCloud = sbMigrateTanda2bLocalToCloud;
 // BOTÓN DE MIGRACIÓN — agregar al lado de Exportar
 // ═══════════════════════════════════════════════════════════════
 function sbInjectMigrateButton(){
-  if(document.getElementById('sb-migrate-btn')) return;
-  var exportBtn = document.querySelector('[onclick="exportData()"]');
-  if(!exportBtn) return;
-  // Botón 1: Subir perfiles
-  var btn = document.createElement('button');
-  btn.id = 'sb-migrate-btn';
-  btn.onclick = sbMigrateProfilesLocalToCloud;
-  btn.title = 'Subir mis perfiles locales a Supabase (los hace visibles para mi compañero)';
-  btn.style.cssText = 'background:#3B4D88;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
-  btn.innerHTML = '☁ Subir perfiles';
-  exportBtn.parentNode.appendChild(btn);
-  var status = document.createElement('span');
-  status.id = 'sb-migrate-status';
-  status.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
-  exportBtn.parentNode.appendChild(status);
-  // Botón 2: Subir microciclos
-  var btn2 = document.createElement('button');
-  btn2.id = 'sb-migrate-mc-btn';
-  btn2.onclick = sbMigrateMicroclicosLocalToCloud;
-  btn2.title = 'Subir mis microciclos locales a Supabase (los hace visibles para mi compañero)';
-  btn2.style.cssText = 'background:#0C447C;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
-  btn2.innerHTML = '☁ Subir microciclos';
-  exportBtn.parentNode.appendChild(btn2);
-  var status2 = document.createElement('span');
-  status2.id = 'sb-migrate-mc-status';
-  status2.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
-  exportBtn.parentNode.appendChild(status2);
-  // Botón 3: Subir wellness + PSE
-  var btn3 = document.createElement('button');
-  btn3.id = 'sb-migrate-wp-btn';
-  btn3.onclick = sbMigrateWellPseLocalToCloud;
-  btn3.title = 'Subir mis datos de Wellness y PSE a Supabase';
-  btn3.style.cssText = 'background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
-  btn3.innerHTML = '☁ Subir wellness+PSE';
-  exportBtn.parentNode.appendChild(btn3);
-  var status3 = document.createElement('span');
-  status3.id = 'sb-migrate-wp-status';
-  status3.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
-  exportBtn.parentNode.appendChild(status3);
-  // Botón 4: Subir resto (Plan + Gym sesiones + Nutrición + Movilidad)
-  var btn4 = document.createElement('button');
-  btn4.id = 'sb-migrate-t1-btn';
-  btn4.onclick = sbMigrateTanda1LocalToCloud;
-  btn4.title = 'Subir Plan semanal, Gimnasio (sesiones), Nutrición y Movilidad';
-  btn4.style.cssText = 'background:#8E44AD;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
-  btn4.innerHTML = '☁ Subir resto';
-  exportBtn.parentNode.appendChild(btn4);
-  var status4 = document.createElement('span');
-  status4.id = 'sb-migrate-t1-status';
-  status4.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
-  exportBtn.parentNode.appendChild(status4);
-  // Botón 5: Subir Gym (catalogo + categorías + evaluaciones + aliases)
-  var btn5 = document.createElement('button');
-  btn5.id = 'sb-migrate-t2a-btn';
-  btn5.onclick = sbMigrateTanda2aLocalToCloud;
-  btn5.title = 'Subir catálogo de ejercicios, categorías, evaluaciones y aliases de Gimnasio';
-  btn5.style.cssText = 'background:#D85A30;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
-  btn5.innerHTML = '☁ Subir Gym';
-  exportBtn.parentNode.appendChild(btn5);
-  var status5 = document.createElement('span');
-  status5.id = 'sb-migrate-t2a-status';
-  status5.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
-  exportBtn.parentNode.appendChild(status5);
-  // Botón 6: Subir ejercicios+partidos (Tanda 2b)
-  var btn6 = document.createElement('button');
-  btn6.id = 'sb-migrate-t2b-btn';
-  btn6.onclick = sbMigrateTanda2bLocalToCloud;
-  btn6.title = 'Subir Ejercicios (drills tácticos) y Partidos';
-  btn6.style.cssText = 'background:#16A085;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
-  btn6.innerHTML = '☁ Subir ejercicios+partidos';
-  exportBtn.parentNode.appendChild(btn6);
-  var status6 = document.createElement('span');
-  status6.id = 'sb-migrate-t2b-status';
-  status6.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
-  exportBtn.parentNode.appendChild(status6);
+  // Los botones de migración inicial ya cumplieron su propósito (toda la data está en Supabase).
+  // Si en el futuro hace falta re-subir algo manualmente, podés llamar desde la consola:
+  //   sbMigrateProfilesLocalToCloud()
+  //   sbMigrateMicroclicosLocalToCloud()
+  //   sbMigrateWellPseLocalToCloud()
+  //   sbMigrateTanda1LocalToCloud()       // plan, gym sesiones, nutrición, movilidad
+  //   sbMigrateTanda2aLocalToCloud()      // gym catálogo, categorías, evaluaciones, aliases
+  //   sbMigrateTanda2bLocalToCloud()      // ejercicios drills, partidos
+  // Por defecto no inyecta nada en la UI.
+  return;
 }
 
 // ═══════════════════════════════════════════════════════════════
