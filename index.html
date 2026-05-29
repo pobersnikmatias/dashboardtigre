@@ -25007,6 +25007,215 @@ window.sbMigrateTanda2bLocalToCloud = sbMigrateTanda2bLocalToCloud;
 })();
 
 // ═══════════════════════════════════════════════════════════════
+// CAPA DE DATOS: CONFIGURACIONES GLOBALES (Tanda 3)
+// ═══════════════════════════════════════════════════════════════
+// Una sola tabla key-value (app_settings) almacena todas las configuraciones.
+// Cada key es el nombre de la variable global; el valor va en JSONB.
+//
+// Lista de keys soportadas. Para agregar una nueva, agregarla acá y
+// se sincroniza automáticamente.
+var SB_SETTINGS_KEYS = [
+  'REF',
+  'MC_BANDS',
+  'MC_PLAYER_BANDS',
+  'NUT_REF',
+  'MOB_REF',
+  'EXTRA_METRICS',
+  'WELLNESS_LAYOUT',
+  'PSE_LAYOUT',
+  'CARGA_NAME_ALIASES',
+  'NUT_COL_MAP',
+  'MOB_COL_MAP'
+];
+
+// Devuelve el valor actual de la variable global con ese nombre (o undefined).
+function _sbReadGlobal(name){
+  try {
+    // Intentar como window.NAME
+    if(typeof window[name] !== 'undefined') return window[name];
+    // Fallback: eval para alcanzar variables declaradas con var/let en script global
+    return eval(name);
+  } catch(e){
+    return undefined;
+  }
+}
+
+// Asigna value a la variable global de nombre name. Las variables locales se
+// declaran con var/let, así que la asignación a window[name] solo funciona si
+// estaban declaradas como propiedades de window. Para let/var del script global
+// hay que usar eval con un patrón seguro.
+function _sbWriteGlobal(name, value){
+  try {
+    // Esta forma actualiza el binding local del script si name está declarado con var/let
+    // Usamos una función que recibe value y hace name=value en su scope (gracias a eval).
+    // Solo aceptamos nombres que pasen un test de identificador simple.
+    if(!/^[A-Z_][A-Z0-9_]*$/i.test(name)) return false;
+    var setter = new Function('v', name + ' = v;');
+    setter(value);
+    return true;
+  } catch(e){
+    console.warn('[Supabase] No se pudo asignar a global', name, e);
+    return false;
+  }
+}
+
+function sbSettingsFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('app_settings').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+
+function _sbSettingsToPayloads(){
+  // Construye payloads para cada key cuya variable local existe y tiene contenido
+  var out = [];
+  SB_SETTINGS_KEYS.forEach(function(k){
+    var v = _sbReadGlobal(k);
+    if(v === undefined || v === null) return;
+    // Skip vacíos puros (no vale la pena ocupar fila)
+    if(Array.isArray(v) && v.length === 0) return;
+    if(typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) return;
+    out.push({
+      key: k,
+      value: v,
+      categoria: SB_CATEGORIA,
+      updated_at: new Date().toISOString()
+    });
+  });
+  return out;
+}
+
+// Aplica un row de Supabase a la variable local correspondiente.
+// IMPORTANTE: Para variables declaradas con `let`, NO se puede reasignar desde fuera del scope.
+// Solución: si la variable existente es un objeto/array, mutarlo in-place (vaciar y copiar).
+// Eso preserva la referencia que otros módulos puedan tener.
+function _sbApplySettingRow(row){
+  if(!row || !row.key) return;
+  if(SB_SETTINGS_KEYS.indexOf(row.key) < 0) return;  // key no reconocida, ignorar
+  var current = _sbReadGlobal(row.key);
+  var incoming = row.value;
+  // Si la variable no existía o era null, intentar asignar directo (funciona con var, no con let)
+  if(current === undefined || current === null){
+    _sbWriteGlobal(row.key, incoming);
+    return;
+  }
+  // Si es array: vaciar y copiar
+  if(Array.isArray(current) && Array.isArray(incoming)){
+    current.length = 0;
+    incoming.forEach(function(v){ current.push(v); });
+    return;
+  }
+  // Si es objeto plano: vaciar keys y copiar las nuevas
+  if(typeof current === 'object' && typeof incoming === 'object' && !Array.isArray(current) && !Array.isArray(incoming)){
+    Object.keys(current).forEach(function(k){ delete current[k]; });
+    Object.keys(incoming).forEach(function(k){ current[k] = incoming[k]; });
+    return;
+  }
+  // Tipo distinto o primitivo: intentar reasignación directa
+  _sbWriteGlobal(row.key, incoming);
+}
+
+// ── SYNC con debounce (Tanda 3) ──
+var _sbTanda3SyncTimer = null;
+function sbScheduleTanda3Sync(){
+  if(!sbReady) return;
+  if(_sbTanda3SyncTimer) clearTimeout(_sbTanda3SyncTimer);
+  _sbTanda3SyncTimer = setTimeout(function(){
+    _sbTanda3SyncTimer = null;
+    var payloads = _sbSettingsToPayloads();
+    if(!payloads.length){
+      console.log('[Supabase] Sync settings: nada para subir (todas vacías)');
+      return;
+    }
+    console.log('[Supabase] Sync app_settings (' + payloads.length + ' keys)');
+    sbClient.from('app_settings').upsert(payloads, { onConflict: 'key,categoria' }).then(function(res){
+      if(res.error) console.error('[Supabase] Sync app_settings error:', res.error);
+      else console.log('[Supabase] Sync app_settings OK');
+    });
+  }, 1500);
+}
+window.sbScheduleTanda3Sync = sbScheduleTanda3Sync;
+
+// ── CARGA INICIAL EXTENDIDA: agregar Tanda 3 ──
+var _origLoadInitialData6 = sbLoadInitialData;
+sbLoadInitialData = function(){
+  return _origLoadInitialData6().then(function(){
+    if(typeof sbLoadingSet==='function') sbLoadingSet(97, 'Cargando configuraciones…', _sbGetLoadingCounts());
+    return sbSettingsFetchAll();
+  }).then(function(rows){
+    if(!rows || !rows.length){
+      console.log('[Supabase] No hay app_settings en Supabase todavía. Se usarán los defaults locales.');
+      return;
+    }
+    rows.forEach(function(row){
+      _sbApplySettingRow(row);
+    });
+    console.log('[Supabase] Cargadas ' + rows.length + ' configuraciones.');
+  });
+};
+
+// ── MIGRACIÓN: subir todas las configuraciones locales ──
+function sbMigrateTanda3LocalToCloud(){
+  if(!sbReady){ alert('Sesión todavía cargando. Esperá unos segundos.'); return; }
+  var payloads = _sbSettingsToPayloads();
+  if(!payloads.length){ console.log('No hay configuraciones para subir.'); return; }
+  console.log('[Migrate-T3] Subiendo ' + payloads.length + ' configuraciones...');
+  sbClient.from('app_settings').upsert(payloads, { onConflict: 'key,categoria' }).then(function(res){
+    if(res.error){
+      console.error('[Migrate-T3] Error:', res.error);
+    } else {
+      console.log('[Migrate-T3] ✓ Subidas ' + payloads.length + ' configuraciones.');
+    }
+  });
+}
+window.sbMigrateTanda3LocalToCloud = sbMigrateTanda3LocalToCloud;
+
+// ── PATCH saveData para sync Tanda 3 ──
+(function(){
+  if(typeof window.saveData !== 'function') return;
+  var prev = window.saveData;
+  window.saveData = function(){
+    var r = prev.apply(this, arguments);
+    sbScheduleTanda3Sync();
+    return r;
+  };
+})();
+
+// ── AUTO-SUBIDA INICIAL DE CONFIGURACIONES (Opción 1) ──
+// Si tras la carga inicial de Supabase no había configuraciones (es la primera vez
+// que alguien entra al dashboard con este código), las subimos automáticamente.
+// Se ejecuta una sola vez después del login, y solo si app_settings estaba vacío.
+(function(){
+  // Listener que dispara cuando sbReady pasa a true por primera vez
+  var _t3AutoMigrateChecked = false;
+  function _t3AutoMigrateMaybe(){
+    if(_t3AutoMigrateChecked) return;
+    if(!sbReady) return;
+    _t3AutoMigrateChecked = true;
+    // Esperá un toque para no superponer con otros syncs
+    setTimeout(function(){
+      // Verificar si hay configs en Supabase
+      sbSettingsFetchAll().then(function(rows){
+        if(!rows || !rows.length){
+          console.log('[Supabase] Primera vez: subiendo configuraciones locales automáticamente...');
+          sbMigrateTanda3LocalToCloud();
+        }
+      }).catch(function(e){
+        console.warn('[Supabase] No se pudo verificar app_settings:', e);
+      });
+    }, 3000);
+  }
+  // Chequear cada 500ms hasta que sbReady sea true (max 30s)
+  var attempts = 0;
+  var iv = setInterval(function(){
+    attempts++;
+    if(sbReady || attempts > 60){
+      clearInterval(iv);
+      if(sbReady) _t3AutoMigrateMaybe();
+    }
+  }, 500);
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // BOTÓN DE MIGRACIÓN — agregar al lado de Exportar
 // ═══════════════════════════════════════════════════════════════
 function sbInjectMigrateButton(){
@@ -25018,6 +25227,7 @@ function sbInjectMigrateButton(){
   //   sbMigrateTanda1LocalToCloud()       // plan, gym sesiones, nutrición, movilidad
   //   sbMigrateTanda2aLocalToCloud()      // gym catálogo, categorías, evaluaciones, aliases
   //   sbMigrateTanda2bLocalToCloud()      // ejercicios drills, partidos
+  //   sbMigrateTanda3LocalToCloud()       // configuraciones globales (REF, bandas, métricas, layouts, mapeos)
   // Por defecto no inyecta nada en la UI.
   return;
 }
