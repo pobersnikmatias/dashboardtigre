@@ -23637,6 +23637,10 @@ function sbOnLoginSuccess(){
     if(typeof planRebuildWeekSel === 'function') try{ planRebuildWeekSel(); }catch(e){}
     if(typeof gymRender === 'function') try{ gymRender(); }catch(e){}
     if(typeof gymRefreshSessions === 'function') try{ gymRefreshSessions(); }catch(e){}
+    // Tanda 2b refrescos
+    if(typeof refresh === 'function') try{ refresh(); }catch(e){}
+    if(typeof drawTable === 'function') try{ drawTable(); }catch(e){}
+    if(typeof matchesRender === 'function') try{ matchesRender(); }catch(e){}
     sbLoadingSet(100, '¡Listo!', '');
     setTimeout(sbLoadingHide, 400);
   }).catch(function(err){
@@ -24760,6 +24764,195 @@ window.sbMigrateTanda2aLocalToCloud = sbMigrateTanda2aLocalToCloud;
 })();
 
 // ═══════════════════════════════════════════════════════════════
+// CAPA DE DATOS: D (Ejercicios drills) + MATCHES (Partidos)
+// (Tanda 2b)
+// ═══════════════════════════════════════════════════════════════
+
+// ── D (drills_exercises) ──
+// Local: array de {id, n, cat, min, mts, hsr, h2, h25, acc, dcc, rhie, vmax, spr, jug, L, A, ...}
+// Supabase: tabla drills_exercises con id INTEGER PK
+function sbDrillsFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('drills_exercises').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbDrillToPayload(d){
+  // id, n, cat van como columnas dedicadas; el resto (métricas) en data JSONB
+  var data = Object.assign({}, d);
+  delete data.id; delete data.n; delete data.cat;
+  // Validar id numérico
+  var idNum = Number(d.id);
+  if(isNaN(idNum)) return null;
+  return {
+    id: idNum,
+    n: d.n || '(sin nombre)',
+    cat: d.cat || null,
+    data: data,
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+function _sbDrillFromRow(row){
+  var d = Object.assign({}, row.data || {});
+  d.id = row.id;
+  d.n = row.n;
+  if(row.cat) d.cat = row.cat;
+  return d;
+}
+
+// ── MATCHES ──
+// Local: array de {id, rival, fecha, result, local, comp, min, mts, hsr, ...}
+// Supabase: tabla matches con id TEXT PK
+function sbMatchesFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('matches').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbMatchToPayload(m){
+  var data = Object.assign({}, m);
+  delete data.id; delete data.rival; delete data.fecha; delete data.result; delete data.comp;
+  return {
+    id: String(m.id != null ? m.id : ''),
+    rival: m.rival || null,
+    fecha: _sbValidDate(m.fecha),
+    result: m.result || null,
+    comp: m.comp || null,
+    data: data,
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+function _sbMatchFromRow(row){
+  var m = Object.assign({}, row.data || {});
+  // El id puede haber sido número en local; intentar conservar tipo
+  var idNum = Number(row.id);
+  m.id = (!isNaN(idNum) && String(idNum) === row.id) ? idNum : row.id;
+  if(row.rival) m.rival = row.rival;
+  if(row.fecha) m.fecha = row.fecha;
+  if(row.result) m.result = row.result;
+  if(row.comp) m.comp = row.comp;
+  return m;
+}
+
+// ── SYNC con debounce (Tanda 2b) ──
+var _sbTanda2bSyncTimer = null;
+function sbScheduleTanda2bSync(){
+  if(!sbReady) return;
+  if(_sbTanda2bSyncTimer) clearTimeout(_sbTanda2bSyncTimer);
+  _sbTanda2bSyncTimer = setTimeout(function(){
+    _sbTanda2bSyncTimer = null;
+    // D
+    if(typeof D!=='undefined' && Array.isArray(D) && D.length){
+      var dPayload = D.map(_sbDrillToPayload).filter(function(p){return p && p.id!=null;});
+      if(dPayload.length){
+        console.log('[Supabase] Sync drills_exercises (' + dPayload.length + ')');
+        sbClient.from('drills_exercises').upsert(dPayload, { onConflict: 'id' }).then(function(res){
+          if(res.error) console.error('[Supabase] Sync drills_exercises error:', res.error);
+          else console.log('[Supabase] Sync drills_exercises OK');
+        });
+      }
+    }
+    // MATCHES
+    if(typeof MATCHES!=='undefined' && Array.isArray(MATCHES) && MATCHES.length){
+      var mPayload = MATCHES.map(_sbMatchToPayload).filter(function(p){return p.id;});
+      if(mPayload.length){
+        console.log('[Supabase] Sync matches (' + mPayload.length + ')');
+        sbClient.from('matches').upsert(mPayload, { onConflict: 'id' }).then(function(res){
+          if(res.error) console.error('[Supabase] Sync matches error:', res.error);
+          else console.log('[Supabase] Sync matches OK');
+        });
+      }
+    }
+  }, 1500);
+}
+window.sbScheduleTanda2bSync = sbScheduleTanda2bSync;
+
+// ── CARGA INICIAL EXTENDIDA: agregar Tanda 2b ──
+var _origLoadInitialData5 = sbLoadInitialData;
+sbLoadInitialData = function(){
+  return _origLoadInitialData5().then(function(){
+    if(typeof sbLoadingSet==='function') sbLoadingSet(96, 'Cargando ejercicios y partidos…', _sbGetLoadingCounts());
+    return sbDrillsFetchAll();
+  }).then(function(rows){
+    if(typeof D!=='undefined' && rows && rows.length){
+      var keys = {};
+      rows.forEach(function(row){ keys[row.id] = _sbDrillFromRow(row); });
+      var localOnly = D.filter(function(d){ return !(d.id in keys); });
+      D.length = 0;
+      Object.values(keys).forEach(function(d){ D.push(d); });
+      localOnly.forEach(function(d){ D.push(d); });
+      console.log('[Supabase] Cargados ' + rows.length + ' drills_exercises.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+    } else {
+      console.log('[Supabase] No hay drills_exercises en Supabase todavía.');
+    }
+    return sbMatchesFetchAll();
+  }).then(function(rows){
+    if(typeof MATCHES!=='undefined' && rows && rows.length){
+      var keys = {};
+      rows.forEach(function(row){ keys[String(row.id)] = _sbMatchFromRow(row); });
+      var localOnly = MATCHES.filter(function(m){ return !keys[String(m.id)]; });
+      MATCHES.length = 0;
+      Object.values(keys).forEach(function(m){ MATCHES.push(m); });
+      localOnly.forEach(function(m){ MATCHES.push(m); });
+      console.log('[Supabase] Cargados ' + rows.length + ' matches.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+    } else {
+      console.log('[Supabase] No hay matches en Supabase todavía.');
+    }
+  });
+};
+
+// ── MIGRACIÓN: subir Tanda 2b ──
+function sbMigrateTanda2bLocalToCloud(){
+  if(!sbReady){ alert('Sesión todavía cargando. Esperá unos segundos.'); return; }
+  var nD = (typeof D!=='undefined') ? D.length : 0;
+  var nM = (typeof MATCHES!=='undefined') ? MATCHES.length : 0;
+  if(!nD && !nM){ alert('No hay ejercicios ni partidos para subir.'); return; }
+  if(!confirm('Vas a subir a Supabase:\n\n' +
+              '  Ejercicios (drills): ' + nD + '\n' +
+              '  Partidos: ' + nM + '\n\n' +
+              '¿Continuar?')) return;
+  var status = document.getElementById('sb-migrate-t2b-status');
+  function setStatus(t){ if(status) status.textContent = t; console.log('[Migrate-T2b]', t); }
+  setStatus('Subiendo...');
+  var tasks = [];
+  if(nD){
+    var dP = D.map(_sbDrillToPayload).filter(function(p){return p && p.id!=null;});
+    if(dP.length) tasks.push(sbClient.from('drills_exercises').upsert(dP, { onConflict: 'id' }));
+  }
+  if(nM){
+    var mP = MATCHES.map(_sbMatchToPayload).filter(function(p){return p.id;});
+    if(mP.length) tasks.push(sbClient.from('matches').upsert(mP, { onConflict: 'id' }));
+  }
+  Promise.all(tasks).then(function(results){
+    var anyErr = results.some(function(r){ return r.error; });
+    if(anyErr){
+      results.forEach(function(r){ if(r.error) console.error('[Migrate-T2b]', r.error); });
+      setStatus('✗ Error parcial');
+      alert('Hubo un error al subir algunos datos. Revisá la consola (F12) para detalles.');
+    } else {
+      setStatus('✓ Subido');
+      alert('✓ Ejercicios y partidos subidos a Supabase.\n\nPedile a tu compañero que recargue para verlos.');
+    }
+  }).catch(function(err){
+    setStatus('✗ Error');
+    alert('Error al subir: ' + (err.message||err));
+    console.error(err);
+  });
+}
+window.sbMigrateTanda2bLocalToCloud = sbMigrateTanda2bLocalToCloud;
+
+// ── PATCH saveData para sync Tanda 2b ──
+(function(){
+  if(typeof window.saveData !== 'function') return;
+  var prev = window.saveData;
+  window.saveData = function(){
+    var r = prev.apply(this, arguments);
+    sbScheduleTanda2bSync();
+    return r;
+  };
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // BOTÓN DE MIGRACIÓN — agregar al lado de Exportar
 // ═══════════════════════════════════════════════════════════════
 function sbInjectMigrateButton(){
@@ -24826,6 +25019,18 @@ function sbInjectMigrateButton(){
   status5.id = 'sb-migrate-t2a-status';
   status5.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
   exportBtn.parentNode.appendChild(status5);
+  // Botón 6: Subir ejercicios+partidos (Tanda 2b)
+  var btn6 = document.createElement('button');
+  btn6.id = 'sb-migrate-t2b-btn';
+  btn6.onclick = sbMigrateTanda2bLocalToCloud;
+  btn6.title = 'Subir Ejercicios (drills tácticos) y Partidos';
+  btn6.style.cssText = 'background:#16A085;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
+  btn6.innerHTML = '☁ Subir ejercicios+partidos';
+  exportBtn.parentNode.appendChild(btn6);
+  var status6 = document.createElement('span');
+  status6.id = 'sb-migrate-t2b-status';
+  status6.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
+  exportBtn.parentNode.appendChild(status6);
 }
 
 // ═══════════════════════════════════════════════════════════════
