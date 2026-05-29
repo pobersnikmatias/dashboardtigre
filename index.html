@@ -24487,6 +24487,279 @@ window.sbMigrateTanda1LocalToCloud = sbMigrateTanda1LocalToCloud;
 })();
 
 // ═══════════════════════════════════════════════════════════════
+// CAPA DE DATOS: Módulo Gimnasio completo (GYM_EXERCISES + GYM_CATS + GYM_EVALS + EVAL_ALIASES)
+// (Tanda 2a - catalogo de ejercicios, categorías, evaluaciones, aliases)
+// ═══════════════════════════════════════════════════════════════
+
+// ── GYM_EXERCISES (catálogo) ──
+// Local: array de {id, name, cat, muscle, inttype, notes, img?}
+// Supabase: tabla gym_exercises con id TEXT PK
+function sbGymExercisesFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('gym_exercises').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbGymExerciseToPayload(e){
+  // Columnas dedicadas para id/name/cat/muscle/inttype/notes; el resto (img, etc.) en data JSONB
+  var data = Object.assign({}, e);
+  delete data.id; delete data.name; delete data.cat;
+  delete data.muscle; delete data.inttype; delete data.notes;
+  return {
+    id: String(e.id != null ? e.id : ''),
+    name: e.name || '(sin nombre)',
+    cat: e.cat || null,
+    muscle: e.muscle || null,
+    inttype: e.inttype || null,
+    notes: e.notes || null,
+    data: data,
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+function _sbGymExerciseFromRow(row){
+  var e = Object.assign({}, row.data || {});
+  // Conservar tipo numérico del id si era número
+  var idNum = Number(row.id);
+  e.id = (!isNaN(idNum) && String(idNum) === row.id) ? idNum : row.id;
+  e.name = row.name;
+  if(row.cat) e.cat = row.cat;
+  if(row.muscle) e.muscle = row.muscle;
+  if(row.inttype) e.inttype = row.inttype;
+  if(row.notes!=null) e.notes = row.notes;
+  return e;
+}
+
+// ── GYM_CATS ──
+// Local: array de {name, color, parent?}
+// Supabase: tabla gym_cats con PK (name, categoria)
+function sbGymCatsFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('gym_cats').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbGymCatToPayload(c){
+  var data = Object.assign({}, c);
+  delete data.name; delete data.color; delete data.parent;
+  return {
+    name: c.name || '',
+    color: c.color || null,
+    parent: c.parent || null,
+    data: data,
+    categoria: SB_CATEGORIA,
+    updated_at: new Date().toISOString()
+  };
+}
+function _sbGymCatFromRow(row){
+  var c = Object.assign({}, row.data || {});
+  c.name = row.name;
+  if(row.color) c.color = row.color;
+  if(row.parent !== null && row.parent !== undefined) c.parent = row.parent;
+  return c;
+}
+
+// ── GYM_EVALS ──
+// Local: { playerKey: [ {id, date, exercise, method, kg, vmp, notes, rm1} ] }
+// Supabase: tabla gym_evals con PK (player_key, categoria), evals JSONB array
+function sbGymEvalsFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('gym_evals').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbGymEvalsToPayloads(obj){
+  if(!obj) return [];
+  return Object.keys(obj).map(function(k){
+    return {
+      player_key: k,
+      evals: obj[k] || [],
+      categoria: SB_CATEGORIA,
+      updated_at: new Date().toISOString()
+    };
+  });
+}
+
+// ── EVAL_ALIASES ──
+// Local: { "alias lowercase": "nombre ejercicio gym" }
+// Supabase: tabla eval_aliases con PK (alias_key, categoria)
+function sbEvalAliasesFetchAll(){
+  if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
+  return sbClient.from('eval_aliases').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+}
+function _sbEvalAliasesToPayloads(obj){
+  if(!obj) return [];
+  return Object.keys(obj).map(function(k){
+    return {
+      alias_key: k,
+      exercise_name: obj[k] || '',
+      categoria: SB_CATEGORIA,
+      updated_at: new Date().toISOString()
+    };
+  });
+}
+
+// ── SYNC con debounce (Tanda 2a — los 4 juntos) ──
+var _sbTanda2aSyncTimer = null;
+function sbScheduleTanda2aSync(){
+  if(!sbReady) return;
+  if(_sbTanda2aSyncTimer) clearTimeout(_sbTanda2aSyncTimer);
+  _sbTanda2aSyncTimer = setTimeout(function(){
+    _sbTanda2aSyncTimer = null;
+    // GYM_EXERCISES
+    if(typeof GYM_EXERCISES!=='undefined' && Array.isArray(GYM_EXERCISES) && GYM_EXERCISES.length){
+      var ePayload = GYM_EXERCISES.map(_sbGymExerciseToPayload).filter(function(p){return p.id;});
+      if(ePayload.length){
+        console.log('[Supabase] Sync gym_exercises (' + ePayload.length + ')');
+        sbClient.from('gym_exercises').upsert(ePayload, { onConflict: 'id' }).then(function(res){
+          if(res.error) console.error('[Supabase] Sync gym_exercises error:', res.error);
+          else console.log('[Supabase] Sync gym_exercises OK');
+        });
+      }
+    }
+    // GYM_CATS
+    if(typeof GYM_CATS!=='undefined' && Array.isArray(GYM_CATS) && GYM_CATS.length){
+      var cPayload = GYM_CATS.map(_sbGymCatToPayload).filter(function(p){return p.name;});
+      if(cPayload.length){
+        console.log('[Supabase] Sync gym_cats (' + cPayload.length + ')');
+        sbClient.from('gym_cats').upsert(cPayload, { onConflict: 'name,categoria' }).then(function(res){
+          if(res.error) console.error('[Supabase] Sync gym_cats error:', res.error);
+          else console.log('[Supabase] Sync gym_cats OK');
+        });
+      }
+    }
+    // GYM_EVALS
+    if(typeof GYM_EVALS!=='undefined' && GYM_EVALS && Object.keys(GYM_EVALS).length){
+      var vPayload = _sbGymEvalsToPayloads(GYM_EVALS);
+      console.log('[Supabase] Sync gym_evals (' + vPayload.length + ' jugadores)');
+      sbClient.from('gym_evals').upsert(vPayload, { onConflict: 'player_key,categoria' }).then(function(res){
+        if(res.error) console.error('[Supabase] Sync gym_evals error:', res.error);
+        else console.log('[Supabase] Sync gym_evals OK');
+      });
+    }
+    // EVAL_ALIASES
+    if(typeof EVAL_ALIASES!=='undefined' && EVAL_ALIASES && Object.keys(EVAL_ALIASES).length){
+      var aPayload = _sbEvalAliasesToPayloads(EVAL_ALIASES);
+      console.log('[Supabase] Sync eval_aliases (' + aPayload.length + ')');
+      sbClient.from('eval_aliases').upsert(aPayload, { onConflict: 'alias_key,categoria' }).then(function(res){
+        if(res.error) console.error('[Supabase] Sync eval_aliases error:', res.error);
+        else console.log('[Supabase] Sync eval_aliases OK');
+      });
+    }
+  }, 1500);
+}
+window.sbScheduleTanda2aSync = sbScheduleTanda2aSync;
+
+// ── CARGA INICIAL EXTENDIDA: agregar Tanda 2a ──
+var _origLoadInitialData4 = sbLoadInitialData;
+sbLoadInitialData = function(){
+  return _origLoadInitialData4().then(function(){
+    if(typeof sbLoadingSet==='function') sbLoadingSet(94, 'Cargando catálogo de ejercicios…', _sbGetLoadingCounts());
+    return sbGymExercisesFetchAll();
+  }).then(function(rows){
+    if(typeof GYM_EXERCISES!=='undefined' && rows && rows.length){
+      var keys = {};
+      rows.forEach(function(row){ keys[String(row.id)] = _sbGymExerciseFromRow(row); });
+      var localOnly = GYM_EXERCISES.filter(function(e){ return !keys[String(e.id)]; });
+      GYM_EXERCISES.length = 0;
+      Object.values(keys).forEach(function(e){ GYM_EXERCISES.push(e); });
+      localOnly.forEach(function(e){ GYM_EXERCISES.push(e); });
+      console.log('[Supabase] Cargados ' + rows.length + ' gym_exercises.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+    } else {
+      console.log('[Supabase] No hay gym_exercises en Supabase todavía.');
+    }
+    return sbGymCatsFetchAll();
+  }).then(function(rows){
+    if(typeof GYM_CATS!=='undefined' && rows && rows.length){
+      var keys = {};
+      rows.forEach(function(row){ keys[row.name] = _sbGymCatFromRow(row); });
+      var localOnly = GYM_CATS.filter(function(c){ return !keys[c.name]; });
+      GYM_CATS.length = 0;
+      Object.values(keys).forEach(function(c){ GYM_CATS.push(c); });
+      localOnly.forEach(function(c){ GYM_CATS.push(c); });
+      console.log('[Supabase] Cargados ' + rows.length + ' gym_cats.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+    } else {
+      console.log('[Supabase] No hay gym_cats en Supabase todavía.');
+    }
+    return sbGymEvalsFetchAll();
+  }).then(function(rows){
+    if(typeof GYM_EVALS!=='undefined' && rows && rows.length){
+      rows.forEach(function(row){
+        GYM_EVALS[row.player_key] = row.evals || [];
+      });
+      console.log('[Supabase] Cargados ' + rows.length + ' gym_evals (jugadores).');
+    } else {
+      console.log('[Supabase] No hay gym_evals en Supabase todavía.');
+    }
+    return sbEvalAliasesFetchAll();
+  }).then(function(rows){
+    if(typeof EVAL_ALIASES!=='undefined' && rows && rows.length){
+      rows.forEach(function(row){
+        EVAL_ALIASES[row.alias_key] = row.exercise_name;
+      });
+      console.log('[Supabase] Cargados ' + rows.length + ' eval_aliases.');
+    } else {
+      console.log('[Supabase] No hay eval_aliases en Supabase todavía.');
+    }
+  });
+};
+
+// ── MIGRACIÓN: subir Tanda 2a (las 4 estructuras de un click) ──
+function sbMigrateTanda2aLocalToCloud(){
+  if(!sbReady){ alert('Sesión todavía cargando. Esperá unos segundos.'); return; }
+  var nEx  = (typeof GYM_EXERCISES!=='undefined') ? GYM_EXERCISES.length : 0;
+  var nCat = (typeof GYM_CATS!=='undefined') ? GYM_CATS.length : 0;
+  var nEv  = (typeof GYM_EVALS!=='undefined') ? Object.keys(GYM_EVALS).length : 0;
+  var nAl  = (typeof EVAL_ALIASES!=='undefined') ? Object.keys(EVAL_ALIASES).length : 0;
+  if(!nEx && !nCat && !nEv && !nAl){ alert('No hay datos locales del módulo Gimnasio para subir.'); return; }
+  if(!confirm('Vas a subir a Supabase:\n\n' +
+              '  Ejercicios (catálogo): ' + nEx + '\n' +
+              '  Categorías: ' + nCat + '\n' +
+              '  Evaluaciones: ' + nEv + ' jugadores\n' +
+              '  Aliases: ' + nAl + '\n\n' +
+              '¿Continuar?')) return;
+  var status = document.getElementById('sb-migrate-t2a-status');
+  function setStatus(t){ if(status) status.textContent = t; console.log('[Migrate-T2a]', t); }
+  setStatus('Subiendo...');
+  var tasks = [];
+  if(nEx){
+    var eP = GYM_EXERCISES.map(_sbGymExerciseToPayload).filter(function(p){return p.id;});
+    if(eP.length) tasks.push(sbClient.from('gym_exercises').upsert(eP, { onConflict: 'id' }));
+  }
+  if(nCat){
+    var cP = GYM_CATS.map(_sbGymCatToPayload).filter(function(p){return p.name;});
+    if(cP.length) tasks.push(sbClient.from('gym_cats').upsert(cP, { onConflict: 'name,categoria' }));
+  }
+  if(nEv) tasks.push(sbClient.from('gym_evals').upsert(_sbGymEvalsToPayloads(GYM_EVALS), { onConflict: 'player_key,categoria' }));
+  if(nAl) tasks.push(sbClient.from('eval_aliases').upsert(_sbEvalAliasesToPayloads(EVAL_ALIASES), { onConflict: 'alias_key,categoria' }));
+  Promise.all(tasks).then(function(results){
+    var anyErr = results.some(function(r){ return r.error; });
+    if(anyErr){
+      results.forEach(function(r){ if(r.error) console.error('[Migrate-T2a]', r.error); });
+      setStatus('✗ Error parcial');
+      alert('Hubo un error al subir algunos datos. Revisá la consola (F12) para detalles.');
+    } else {
+      setStatus('✓ Subido');
+      alert('✓ Módulo Gimnasio (catálogo, categorías, evaluaciones, aliases) subidos a Supabase.\n\nPedile a tu compañero que recargue para verlos.');
+    }
+  }).catch(function(err){
+    setStatus('✗ Error');
+    alert('Error al subir: ' + (err.message||err));
+    console.error(err);
+  });
+}
+window.sbMigrateTanda2aLocalToCloud = sbMigrateTanda2aLocalToCloud;
+
+// ── PATCH saveData para sync Tanda 2a ──
+(function(){
+  if(typeof window.saveData !== 'function') return;
+  var prev = window.saveData;
+  window.saveData = function(){
+    var r = prev.apply(this, arguments);
+    sbScheduleTanda2aSync();
+    return r;
+  };
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // BOTÓN DE MIGRACIÓN — agregar al lado de Exportar
 // ═══════════════════════════════════════════════════════════════
 function sbInjectMigrateButton(){
@@ -24541,6 +24814,18 @@ function sbInjectMigrateButton(){
   status4.id = 'sb-migrate-t1-status';
   status4.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
   exportBtn.parentNode.appendChild(status4);
+  // Botón 5: Subir Gym (catalogo + categorías + evaluaciones + aliases)
+  var btn5 = document.createElement('button');
+  btn5.id = 'sb-migrate-t2a-btn';
+  btn5.onclick = sbMigrateTanda2aLocalToCloud;
+  btn5.title = 'Subir catálogo de ejercicios, categorías, evaluaciones y aliases de Gimnasio';
+  btn5.style.cssText = 'background:#D85A30;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;margin-left:4px';
+  btn5.innerHTML = '☁ Subir Gym';
+  exportBtn.parentNode.appendChild(btn5);
+  var status5 = document.createElement('span');
+  status5.id = 'sb-migrate-t2a-status';
+  status5.style.cssText = 'font-size:10px;color:#085041;margin-left:6px';
+  exportBtn.parentNode.appendChild(status5);
 }
 
 // ═══════════════════════════════════════════════════════════════
