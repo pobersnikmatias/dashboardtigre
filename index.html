@@ -12143,12 +12143,19 @@ window.exiSave=function(){
   if(newName) row.n=newName;
   row.desc=(document.getElementById('exi-desc').value||'').trim()||null;
   row.img=_exInfoImg||null;
-  // Guardar diagrama solo si el panel está visible y tiene datos
+  // Guardar diagrama solo si el panel está visible
   var diagPanel=document.getElementById('exi-diag-panel');
   if(diagPanel&&diagPanel.style.display!=='none'){
     var diagData=exiDiagGetData();
-    if(diagData){row.diag=diagData;row.img=null;} // diagrama tiene prioridad si no hay imagen
-    else row.diag=row.diag||null; // mantener el existente si no se dibujó nada nuevo
+    if(diagData){
+      // Hay algo dibujado: guardar el nuevo diagrama
+      row.diag=diagData;
+      row.img=null; // diagrama tiene prioridad si no hay imagen
+    } else {
+      // Canvas vacío Y fondo plain: el usuario quiso dejarlo sin diagrama
+      // (antes manteníamos el viejo, pero eso impedía borrar)
+      row.diag=null;
+    }
   }
   if(row.img&&row.diag)row.diag=null;
   saveData();
@@ -12156,6 +12163,28 @@ window.exiSave=function(){
   msg.style.color='#1D9E75';msg.textContent='✓ Guardado';
   setTimeout(function(){exiClose();drawTable(gf());},700);
 };
+
+// Quitar diagrama explícitamente (con confirmación) y guardar
+function exiDiagRemove(){
+  if(_exInfoId===null) return;
+  var row=D.find(function(r){return r.id===_exInfoId;});
+  if(!row || !row.diag){
+    alert('Este ejercicio no tiene diagrama cargado.');
+    return;
+  }
+  if(!confirm('¿Quitar el diagrama de este ejercicio?\n\nEl ejercicio queda sin imagen. Esta acción se confirma al apretar Guardar.')) return;
+  // Limpiar el estado del canvas para que getData devuelva null
+  _exiDiagShapes=[];_exiDiagHistory=[];_exiDiagBg='plain';_exiDiagState.selIdx=-1;
+  // Actualizar la UI del fondo
+  ['plain','half','full'].forEach(function(b){
+    var btn=document.getElementById('exi-bg-'+b);
+    if(btn)btn.className='btn '+(b==='plain'?'bb':'bc');
+  });
+  exiDiagRender();
+  var msg=document.getElementById('exi-msg');
+  if(msg){msg.style.color='#666';msg.textContent='Diagrama eliminado. Apretá Guardar para confirmar.';}
+}
+window.exiDiagRemove=exiDiagRemove;
 
 // Sobreescribir exiClose para limpiar estado del diagrama
 var _origExiClose=window.exiClose;
@@ -12319,8 +12348,9 @@ document.addEventListener('DOMContentLoaded',function(){
           <button id="exi-t-ball"   onclick="exiDiagSetTool('ball')"   class="btn bc" style="padding:2px 7px;font-size:10px">⚽</button>
           <button id="exi-t-goal"   onclick="exiDiagSetTool('goal')"   class="btn bc" style="padding:2px 7px;font-size:10px">🥅</button>
           <button id="exi-t-erase"  onclick="exiDiagSetTool('erase')"  class="btn bc" style="padding:2px 7px;font-size:10px">✕</button>
-          <button onclick="exiDiagUndo()" class="btn bc" style="padding:2px 8px;font-size:10px;margin-left:4px">↩</button>
-          <button onclick="exiDiagClear()" class="btn bc" style="padding:2px 8px;font-size:10px">🗑</button>
+          <button onclick="exiDiagUndo()" class="btn bc" style="padding:2px 8px;font-size:10px;margin-left:4px" title="Deshacer último cambio">↩</button>
+          <button onclick="exiDiagClear()" class="btn bc" style="padding:2px 8px;font-size:10px" title="Limpiar canvas (vaciar para volver a dibujar)">🗑</button>
+          <button onclick="exiDiagRemove()" style="margin-left:auto;border:1px solid #E24B4A55;background:#E24B4A12;color:#E24B4A;border-radius:5px;padding:2px 9px;font-size:10px;font-weight:700;cursor:pointer" title="Quitar el diagrama guardado: el ejercicio queda sin imagen">❌ Quitar diagrama</button>
         </div>
         <!-- Colores -->
         <div style="display:flex;gap:5px;align-items:center;margin-bottom:7px">
