@@ -154,6 +154,23 @@ body.sb-show{visibility:visible}
 </div>
 </div></div></div>
 
+<!-- ── PANELES SUPERIORES: los 4 details lado a lado, uno abierto a la vez ── -->
+<style>
+/* Contenedor flex para los 4 paneles superiores */
+.top-panels-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-start}
+.top-panels-row > details.panel{flex:1 1 200px;min-width:180px;max-width:100%}
+/* Cuando un details está abierto, ocupa toda la fila para que el contenido se vea bien */
+.top-panels-row > details.panel[open]{flex:1 1 100%;max-width:100%}
+/* Summary clickeable más visible */
+.top-panels-row > details.panel > summary{
+  cursor:pointer;font-weight:700;padding:8px 10px;text-align:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;
+}
+@media (max-width:700px){
+  .top-panels-row > details.panel{flex:1 1 100%;min-width:100%}
+}
+</style>
+<div class="top-panels-row">
 <details id="form-det" class="panel">
 <summary>Diseñá tus ejercicios</summary>
 <div class="panel-body">
@@ -332,6 +349,7 @@ body.sb-show{visibility:visible}
   <div id="cmp-ses-content" style="margin-top:10px"></div>
 </div>
 </div></details>
+</div><!-- /.top-panels-row -->
 
 <!-- NAVEGACIÓN PRINCIPAL -->
 <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0">
@@ -25315,6 +25333,31 @@ setTimeout(function(){
     document.body.classList.add('sb-show');
   }
 }, 5000);
+</script>
+
+<script>
+// Hacer que los 4 paneles superiores se abran de a uno (cerrar los demás al abrir uno)
+(function(){
+  function setupExclusivePanels(){
+    var row = document.querySelector('.top-panels-row');
+    if(!row) return;
+    var panels = row.querySelectorAll('details.panel');
+    panels.forEach(function(d){
+      d.addEventListener('toggle', function(){
+        if(d.open){
+          panels.forEach(function(other){
+            if(other !== d && other.open) other.open = false;
+          });
+        }
+      });
+    });
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', setupExclusivePanels);
+  } else {
+    setupExclusivePanels();
+  }
+})();
 </script>
 
 </body>
