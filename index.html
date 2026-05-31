@@ -397,9 +397,11 @@ body.sb-show{visibility:visible}
 <div class="cats" id="cf"></div>
 <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:9px">
 <div class="tabs">
-  <button class="tb on" id="t1" onclick="sTab(1)">Vista categoría</button>
-  <button class="tb" id="t2" onclick="sTab(2)">Ejercicio seleccionado</button>
-  <span id="sc2" style="font-size:11px;color:#666;align-self:center;margin-left:4px"></span>
+  <!-- Tabs ocultos: el sistema sigue funcionando internamente con la "vista 2" (Ejercicio seleccionado).
+       La vista 1 (Vista categoría) se mantiene en el DOM pero invisible para no romper el código que la actualiza. -->
+  <button class="tb on" id="t1" onclick="sTab(1)" style="display:none">Vista categoría</button>
+  <button class="tb on" id="t2" onclick="sTab(2)" style="display:none">Ejercicio seleccionado</button>
+  <span id="sc2" style="font-size:11px;color:#666;align-self:center"></span>
 </div>
 <div style="display:flex;align-items:center;gap:6px">
   <span style="font-size:11px;color:#555;font-weight:600">Modo de datos:</span>
@@ -409,12 +411,13 @@ body.sb-show{visibility:visible}
 </div>
 </div>
 
-<div id="p1">
+<!-- p1 (Vista categoría) escondida: la mantengo en el DOM para que el código que la actualiza no rompa -->
+<div id="p1" style="display:none">
   <div class="mc-row" id="cards1"></div>
   <div style="position:relative;height:185px;max-width:400px;margin-bottom:9px"><canvas id="r1"></canvas></div>
 </div>
 
-<div id="p2" style="display:none">
+<div id="p2">
   <div class="sel-tags" id="tags2"></div>
   <div class="sel-body">
     <div class="sel-radar"><canvas id="r2"></canvas></div>
@@ -437,7 +440,13 @@ body.sb-show{visibility:visible}
       <div id="diag-display"></div>
     </div>
   </div>
-  <div style="font-size:11px;color:#999;margin-top:5px" id="info2">Marcá ejercicios con el checkbox para ver el radar y el mapa de cancha.</div>
+  <!-- Mensaje cuando no hay selección -->
+  <div id="empty-sel-msg" style="display:none;padding:30px 20px;text-align:center;background:#f5f8ff;border:2px dashed #c0cde8;border-radius:10px;margin:10px 0">
+    <div style="font-size:32px;margin-bottom:8px;opacity:0.5">📋</div>
+    <div style="font-size:14px;font-weight:700;color:#3B4D88;margin-bottom:4px">Seleccioná uno o más ejercicios</div>
+    <div style="font-size:11px;color:#888">Marcá los ejercicios con el checkbox a la izquierda de la tabla para ver el radar, las métricas y el mapa de cancha.</div>
+  </div>
+  <div style="font-size:11px;color:#999;margin-top:5px;display:none" id="info2"></div>
   <div id="vol-bars" style="display:none;margin-top:10px;background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 14px"></div>
 </div>
 
@@ -910,7 +919,7 @@ function stats(rows){
   return{n:rows.length,mts:avg(g('mts')),hsr:avg(hc),h2:avg(h2c),h25:avg(h25c),acc:avg(g('acc')),dcc:avg(g('dcc')),rhie:avg(g('rhie')),pl:avg(g('pl')),vmax:avg(g('vmax')),eii:ev.length?avg(ev):null,en:ev.length,isVol:false};
 }
 
-let af='all',sk='date',tab=1,sel=new Set(),rc1=null,rc2=null,viewMode='min';
+let af='all',sk='date',tab=2,sel=new Set(),rc1=null,rc2=null,viewMode='min';
 const gf=()=>{let r=af==='all'?D:D.filter(x=>x.cat===af);if(document.getElementById('fe').checked)r=r.filter(x=>calcEII(x)!==null);return r;};
 
 function setMode(m){
@@ -1067,7 +1076,20 @@ function updateSel(){
   const rows=D.filter(r=>sel.has(r.id));
   document.getElementById('sc2').textContent=sel.size?`${sel.size} seleccionados`:'';
   const tags=document.getElementById('tags2'),info=document.getElementById('info2'),cards=document.getElementById('cards2');
-  if(!sel.size){tags.innerHTML='';info.textContent='Marcá ejercicios con el checkbox.';cards.innerHTML='';if(rc2){rc2.destroy();rc2=null;}document.getElementById('pitch-panel').style.display='none';document.getElementById('vol-bars').style.display='none';if(typeof window._diagUpdateHook==='function')window._diagUpdateHook([]);return;}
+  const emptyMsg=document.getElementById('empty-sel-msg');
+  if(!sel.size){
+    if(emptyMsg) emptyMsg.style.display='block';
+    tags.innerHTML='';info.textContent='';cards.innerHTML='';
+    if(rc2){rc2.destroy();rc2=null;}
+    document.getElementById('pitch-panel').style.display='none';
+    document.getElementById('vol-bars').style.display='none';
+    var diagPanel=document.getElementById('diag-panel');if(diagPanel)diagPanel.style.display='none';
+    if(typeof window._diagUpdateHook==='function')window._diagUpdateHook([]);
+    // Limpiar canvas r2
+    var r2c=document.getElementById('r2');if(r2c){var ctx=r2c.getContext('2d');ctx&&ctx.clearRect(0,0,r2c.width,r2c.height);}
+    return;
+  }
+  if(emptyMsg) emptyMsg.style.display='none';
   tags.innerHTML=rows.map(r=>{const c=BC[r.cat]||'#888';return`<span class="sp-tag" style="border-color:${c};color:${c};background:${c}18" onclick="tSel(${r.id})">${r.n} ×</span>`;}).join('');
   const s=stats(rows),label=sel.size===1?rows[0].n:`Promedio (${sel.size})`,color=sel.size===1?(BC[rows[0].cat]||'#3B4D88'):'#3B4D88';
   rc2=buildRadar('r2',s,label,color,rc2);
@@ -1098,7 +1120,7 @@ function updateSel(){
 
 function tSel(id){if(sel.has(id))sel.delete(id);else sel.add(id);document.querySelectorAll(`input[data-s="${id}"]`).forEach(c=>c.checked=sel.has(id));if(tab===2)updateSel();document.getElementById('sc2').textContent=sel.size?`${sel.size} seleccionados`:'';if(typeof updateMergeBtn==='function')updateMergeBtn();}
 window.tSel=tSel;
-function sTab(t){tab=t;document.getElementById('p1').style.display=t===1?'':'none';document.getElementById('p2').style.display=t===2?'':'none';document.getElementById('t1').classList.toggle('on',t===1);document.getElementById('t2').classList.toggle('on',t===2);if(t===2)updateSel();}
+function sTab(t){tab=2;document.getElementById('p1').style.display='none';document.getElementById('p2').style.display='';updateSel();}
 window.sTab=sTab;
 function setCat(c){af=c;document.querySelectorAll('.cb').forEach(b=>{const on=b.dataset.cat===c;b.classList.toggle('on',on);b.style.background=on?(BC[c]||'#3B4D88'):'transparent';b.style.borderColor=on?(BC[c]||'#3B4D88'):'#ccc';b.style.color=on?'#fff':'#555';});refresh();}
 window.setCat=setCat;
@@ -1109,8 +1131,19 @@ function rebuildCatBtns(){
   D.forEach(r=>{
     if(!CATS.includes(r.cat)){CATS.push(r.cat);CATN.push(r.cat);BC[r.cat]='#888780';CS[r.cat]=r.cat.slice(0,4);}
   });
+  // Construir un array de índices ordenados alfabéticamente por nombre visible (CATN),
+  // dejando "Sin categoría" siempre al final si existe.
+  var idxs=CATS.map(function(_,i){return i;});
+  idxs.sort(function(a,b){
+    var na=CATN[a]||CATS[a], nb=CATN[b]||CATS[b];
+    var aSin=(CATS[a]==='Sin categoría'), bSin=(CATS[b]==='Sin categoría');
+    if(aSin && !bSin) return 1;
+    if(bSin && !aSin) return -1;
+    return String(na).localeCompare(String(nb),'es',{sensitivity:'base'});
+  });
   const cf=document.getElementById('cf');cf.innerHTML='';
-  CATS.forEach((c,i)=>{
+  idxs.forEach(function(i){
+    var c=CATS[i];
     const b=document.createElement('button');
     b.className='cb'+(af===c?' on':'');
     b.textContent=CATN[i];b.dataset.cat=c;
@@ -1122,10 +1155,15 @@ function rebuildCatBtns(){
 }
 
 function rebuildCatPanels(){
-  // Rename list
+  // Rename list (orden alfabético, "Sin categoría" al final)
   const rl=document.getElementById('cat-rename-list');
   if(!rl)return;
-  const userCats=CATS.filter(c=>c!=='all');
+  const userCats=CATS.filter(c=>c!=='all').slice().sort(function(a,b){
+    var aSin=(a==='Sin categoría'), bSin=(b==='Sin categoría');
+    if(aSin && !bSin) return 1;
+    if(bSin && !aSin) return -1;
+    return String(a).localeCompare(String(b),'es',{sensitivity:'base'});
+  });
   rl.innerHTML='';
   userCats.forEach(cat=>{
     const row=document.createElement('div');row.className='cat-rename-row';
@@ -1248,8 +1286,14 @@ function applyReassigns(){
 window.applyReassigns=applyReassigns;
 
 function rebuildCatSelects(){
-  // Update f-cat and csv-cat dropdowns with current CATS list
-  const opts=CATS.filter(c=>c!=='all').map(c=>`<option>${c}</option>`).join('');
+  // Update f-cat and csv-cat dropdowns with current CATS list (alfabético, "Sin categoría" al final)
+  var sorted=CATS.filter(function(c){return c!=='all';}).slice().sort(function(a,b){
+    var aSin=(a==='Sin categoría'), bSin=(b==='Sin categoría');
+    if(aSin && !bSin) return 1;
+    if(bSin && !aSin) return -1;
+    return String(a).localeCompare(String(b),'es',{sensitivity:'base'});
+  });
+  const opts=sorted.map(c=>`<option>${c}</option>`).join('');
   const fc=document.getElementById('f-cat');
   if(fc){const v=fc.value;fc.innerHTML=`<option value="">— elegir —</option>${opts}`;fc.value=v;}
   const cc=document.getElementById('csv-cat');
