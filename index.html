@@ -154,20 +154,45 @@ body.sb-show{visibility:visible}
 </div>
 </div></div></div>
 
-<!-- ── PANELES SUPERIORES: los 4 details lado a lado, uno abierto a la vez ── -->
+<!-- ── PANELES SUPERIORES: 4 botones-tab fijos arriba, contenido debajo, uno a la vez ── -->
 <style>
-/* Contenedor flex para los 4 paneles superiores */
-.top-panels-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-start}
-.top-panels-row > details.panel{flex:1 1 200px;min-width:180px;max-width:100%}
-/* Cuando un details está abierto, ocupa toda la fila para que el contenido se vea bien */
-.top-panels-row > details.panel[open]{flex:1 1 100%;max-width:100%}
-/* Summary clickeable más visible */
-.top-panels-row > details.panel > summary{
-  cursor:pointer;font-weight:700;padding:8px 10px;text-align:center;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;
+/* Fila de tabs (siempre visible, no cambia de posición) */
+.top-panels-row{
+  display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:stretch;
 }
+.top-panels-row > details.panel{
+  flex:1 1 200px;min-width:160px;
+  /* Reset visual del details: ahora solo lo usamos como contenedor lógico */
+  border:none;background:none;padding:0;margin:0;
+}
+/* El summary es el tab clickeable */
+.top-panels-row > details.panel > summary{
+  list-style:none;cursor:pointer;font-weight:700;
+  padding:9px 12px;text-align:center;font-size:11px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:#f0f3f8;border:1px solid #d0d6e0;border-radius:6px;
+  color:#3B4D88;transition:all 0.15s ease;user-select:none;
+}
+.top-panels-row > details.panel > summary::-webkit-details-marker{display:none}
+.top-panels-row > details.panel > summary:hover{background:#e3e9f3;border-color:#a8b3c8}
+/* Tab activo (cuando el details está abierto) */
+.top-panels-row > details.panel[open] > summary{
+  background:#3B4D88;color:#fff;border-color:#3B4D88;
+  box-shadow:0 2px 8px rgba(59,77,136,0.3);
+}
+/* El contenido del panel (panel-body) se reposiciona DEBAJO de la fila completa
+   usando un contenedor reservado. Lo hacemos con un truco: el details abierto
+   muestra su panel-body con position:absolute o lo mostramos en un slot común. */
+.top-panels-row > details.panel > .panel-body{display:none}
+/* Cuando está abierto, mostramos el cuerpo en su lugar (debajo de la row) */
+.top-panel-content{
+  background:#fff;border:1px solid #d0d6e0;border-radius:6px;
+  padding:14px;margin-bottom:10px;
+  /* Se llena dinámicamente con el contenido del details abierto via JS */
+}
+.top-panel-content:empty{display:none}
 @media (max-width:700px){
-  .top-panels-row > details.panel{flex:1 1 100%;min-width:100%}
+  .top-panels-row > details.panel{flex:1 1 calc(50% - 6px);min-width:0}
 }
 </style>
 <div class="top-panels-row">
@@ -350,6 +375,7 @@ body.sb-show{visibility:visible}
 </div>
 </div></details>
 </div><!-- /.top-panels-row -->
+<div id="top-panel-slot" class="top-panel-content"></div>
 
 <!-- NAVEGACIÓN PRINCIPAL -->
 <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0">
@@ -25336,19 +25362,51 @@ setTimeout(function(){
 </script>
 
 <script>
-// Hacer que los 4 paneles superiores se abran de a uno (cerrar los demás al abrir uno)
+// Sistema de tabs para los 4 paneles superiores:
+// - Los 4 botones (summary) quedan SIEMPRE en la misma fila arriba
+// - Al abrir uno, su contenido (panel-body) se muestra en un slot común DEBAJO de la fila
+// - Al abrir otro, se cierra el anterior y aparece el nuevo en el mismo slot
+// - El botón abierto queda destacado (clase [open] del details + CSS)
 (function(){
   function setupExclusivePanels(){
     var row = document.querySelector('.top-panels-row');
-    if(!row) return;
-    var panels = row.querySelectorAll('details.panel');
+    var slot = document.getElementById('top-panel-slot');
+    if(!row || !slot) return;
+    var panels = Array.prototype.slice.call(row.querySelectorAll('details.panel'));
+    // Guardo referencia al body original de cada details para poder devolverlo
+    var bodies = {};
+    panels.forEach(function(d){
+      bodies[d.id] = d.querySelector('.panel-body');
+    });
+    function refreshSlot(){
+      // Devolver todos los bodies a sus details primero
+      panels.forEach(function(d){
+        var b = bodies[d.id];
+        if(b && b.parentNode !== d){
+          b.style.display = '';
+          d.appendChild(b);
+        }
+      });
+      // Mover al slot el del details abierto (si hay uno)
+      var open = panels.find(function(d){return d.open;});
+      slot.innerHTML = '';
+      if(open){
+        var b = bodies[open.id];
+        if(b){
+          b.style.display = 'block';
+          slot.appendChild(b);
+        }
+      }
+    }
     panels.forEach(function(d){
       d.addEventListener('toggle', function(){
         if(d.open){
+          // Cerrar los demás
           panels.forEach(function(other){
             if(other !== d && other.open) other.open = false;
           });
         }
+        refreshSlot();
       });
     });
   }
