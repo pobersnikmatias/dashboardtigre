@@ -106,6 +106,12 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 </style>
 <!-- Supabase JS SDK v2 (CDN) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* Ocultar el dashboard hasta que sbInit decida qué mostrar.
+   Evita que se vea el contenido un instante antes del login overlay. */
+body{visibility:hidden}
+body.sb-show{visibility:visible}
+</style>
 </head>
 <body>
 <header style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:14px;padding-bottom:10px;border-bottom:3px solid #304483">
@@ -23618,6 +23624,9 @@ function sbInit(){
 function sbShowLogin(){
   var overlay = document.getElementById('sb-login-overlay');
   if(overlay) overlay.style.display = 'flex';
+  // Mostrar el body ahora que el overlay de login está cubriendo todo
+  // (el overlay tiene z-index 99999 así que tapa cualquier render del dashboard)
+  document.body.classList.add('sb-show');
   // Enter envía
   var pwd = document.getElementById('sb-login-password');
   if(pwd) pwd.onkeydown = function(e){ if(e.key === 'Enter') sbDoLogin(); };
@@ -23628,6 +23637,8 @@ function sbShowLogin(){
 function sbHideLogin(){
   var overlay = document.getElementById('sb-login-overlay');
   if(overlay) overlay.style.display = 'none';
+  // Asegurar que el body esté visible (debería estarlo ya, pero por las dudas)
+  document.body.classList.add('sb-show');
 }
 
 function sbShowError(msg){
@@ -23659,6 +23670,12 @@ window.sbDoLogin = sbDoLogin;
 
 function sbDoLogout(){
   if(!confirm('¿Cerrar sesión?')) return;
+  // Ocultar el body inmediatamente para que no se vea el dashboard mientras
+  // hace el signOut + reload (sino se ve "trabado" un instante)
+  document.body.classList.remove('sb-show');
+  // Mostrar el overlay de login encima por si tarda el reload
+  var ov = document.getElementById('sb-login-overlay');
+  if(ov) ov.style.display = 'flex';
   sbClient.auth.signOut().then(function(){
     sbCurrentUser = null;
     sbReady = false;
@@ -23671,6 +23688,8 @@ function sbOnLoginSuccess(){
   sbHideLogin();
   sbLoadingShow();
   sbLoadingSet(10, 'Conectando con el servidor…', '');
+  // Revelar el body ahora que el loading overlay está cubriendo todo
+  document.body.classList.add('sb-show');
   console.log('[Supabase] Sesión activa:', sbCurrentUser.email);
   // Inyectar UI de "logueado como" en el header
   sbInjectUserBadge();
@@ -23706,19 +23725,30 @@ function sbOnLoginSuccess(){
 }
 
 function sbInjectUserBadge(){
-  // Buscar el botón Exportar y agregar al lado un badge con el usuario
+  // Buscar el botón Exportar y agregar al lado un badge con el usuario + botón logout
   var existing = document.getElementById('sb-user-badge');
   if(existing) return;
   var exportBtn = document.querySelector('[onclick="exportData()"]');
   if(!exportBtn) return;
-  var badge = document.createElement('div');
-  badge.id = 'sb-user-badge';
-  badge.style.cssText = 'display:inline-flex;align-items:center;gap:5px;background:#1D9E7518;border:1px solid #1D9E7566;border-radius:5px;padding:3px 8px;font-size:10px;color:#085041;font-weight:700;margin-left:6px';
+  // Wrapper inline para badge + botón
+  var wrap = document.createElement('span');
+  wrap.id = 'sb-user-badge';
+  wrap.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-left:6px';
   var emailShort = (sbCurrentUser.email||'').split('@')[0];
-  badge.innerHTML = '<span title="Sesión activa">🟢</span> '+
-    '<span>'+emailShort+'</span>' +
-    '<button onclick="sbDoLogout()" title="Cerrar sesión" style="background:none;border:none;cursor:pointer;color:#666;font-size:11px;padding:0;margin-left:3px">⎋</button>';
-  exportBtn.parentNode.insertBefore(badge, exportBtn.nextSibling);
+  // Badge verde con nombre
+  var badge = document.createElement('span');
+  badge.style.cssText = 'display:inline-flex;align-items:center;gap:5px;background:#1D9E7518;border:1px solid #1D9E7566;border-radius:5px;padding:3px 8px;font-size:10px;color:#085041;font-weight:700';
+  badge.innerHTML = '<span title="Sesión activa">🟢</span> <span>'+emailShort+'</span>';
+  wrap.appendChild(badge);
+  // Botón "Cerrar sesión" más visible
+  var logoutBtn = document.createElement('button');
+  logoutBtn.id = 'sb-logout-btn';
+  logoutBtn.onclick = sbDoLogout;
+  logoutBtn.title = 'Cerrar sesión y volver al login';
+  logoutBtn.style.cssText = 'background:#E24B4A;color:#fff;border:none;border-radius:5px;padding:4px 12px;font-size:10px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px';
+  logoutBtn.innerHTML = '⎋ Cerrar sesión';
+  wrap.appendChild(logoutBtn);
+  exportBtn.parentNode.insertBefore(wrap, exportBtn.nextSibling);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -25246,6 +25276,15 @@ if(document.readyState === 'loading'){
     setTimeout(sbInjectMigrateButton, 1500);
   }, 100);
 }
+// Fallback de seguridad: si en 5 segundos nada movió la visibilidad del body
+// (por ejemplo, si el SDK de Supabase falla al cargar), revelar el body para
+// que el usuario no se quede mirando una página en blanco.
+setTimeout(function(){
+  if(!document.body.classList.contains('sb-show')){
+    console.warn('[Supabase] Timeout de inicialización - revelando body como fallback.');
+    document.body.classList.add('sb-show');
+  }
+}, 5000);
 </script>
 
 </body>
