@@ -3495,13 +3495,100 @@ function mcGetRef(){
   const avg=k=>ms.reduce((a,m)=>a+(m[k]||0),0)/ms.length;
   return{mts:avg('mts'),hsr:avg('hsr'),h2:avg('h2'),h25:avg('h25'),acc:avg('acc'),dcc:avg('dcc'),rhie:avg('rhie')};
 }
+// Parser CSV por LAYOUT (orden de columnas), NO por nombre de header.
+// Se usa cuando el usuario eligió un layout custom/full/basic.
+// El layout debe incluir 'name' (y opcionalmente 'pos') si el CSV los tiene.
+// Cualquier valor numérico se pasa a positivo (Math.abs) para evitar
+// problemas con desaceleración expresada en negativo.
+function mcParseCsvByLayout(txt, layout){
+  txt=(txt||'').replace(/^\uFEFF/,'');
+  var lines=txt.trim().split('\n').map(function(l){return l.replace(/\r/,'');}).filter(function(l){return l.trim();});
+  if(lines.length<2) return [];
+  var sep=lines[0].indexOf('\t')>-1?'\t':lines[0].indexOf(';')>-1?';':',';
+  function splitLine(line){
+    if(sep!==',') return line.split(sep).map(function(x){return x.trim();});
+    // CSV con comillas: respetar comas dentro de campos entre comillas
+    var result=[],cur='',inQ=false;
+    for(var ci=0;ci<line.length;ci++){
+      var ch=line[ci];
+      if(ch==='"'){inQ=!inQ;}
+      else if(ch===','&&!inQ){result.push(cur.trim());cur='';}
+      else{cur+=ch;}
+    }
+    result.push(cur.trim());
+    return result;
+  }
+  function pn(x){
+    var v=parseFloat(String(x||'').replace(',','.'));
+    if(isNaN(v)) return 0;
+    return Math.abs(v); // todo a positivo
+  }
+  // Detectar si la primera línea son headers (no numérica en la columna de "name" o si todas las celdas no son números)
+  // Asumimos que la primera línea ES header si la mayoría de celdas no parsean como número.
+  var first=splitLine(lines[0]);
+  var numericRatio=first.filter(function(c){return /^-?\d+([.,]\d+)?$/.test(String(c).trim());}).length/first.length;
+  var startIdx=(numericRatio<0.4)?1:0; // si menos del 40% son números, asumimos header
+  var dataLines=lines.slice(startIdx);
+  // Métricas extra de Microciclo (igual que el parser viejo)
+  var mcExtras=(typeof extraMetricsFor==='function')?extraMetricsFor('microcycle'):[];
+  return dataLines.map(function(l){
+    var c=splitLine(l);
+    var p={name:'',pos:'',tot_dur:0,mts:0,mts_min:0,hsr:0,h2:0,h25:0,acc:0,dcc:0,rhie:0,vmax:0,spr:0,accmax:0,dccmax:0,pl:0,extra:{}};
+    for(var li=0;li<layout.length&&li<c.length;li++){
+      var key=layout[li]; if(!key||key==='_') continue;
+      var raw=c[li];
+      if(key==='name'){
+        p.name=String(raw||'').replace(/^"|"$/g,'').trim();
+        continue;
+      }
+      if(key==='pos'){
+        p.pos=String(raw||'').replace(/^"|"$/g,'').trim();
+        continue;
+      }
+      // Numérico
+      var v=pn(raw);
+      // 'min' del layout PDF se mapea a tot_dur. Para CSV usamos lo mismo.
+      if(key==='min'){
+        // Soportar formato HH:MM:SS
+        if(/\d+:\d+:\d+/.test(String(raw))){
+          var tp=String(raw).split(':').map(Number);
+          v=tp[0]*60+tp[1]+tp[2]/60;
+        } else if(v>300){
+          v=Math.round(v/60*10)/10; // segundos a minutos
+        }
+        p.tot_dur=v;
+      } else {
+        p[key]=v;
+      }
+    }
+    // Si no había mts pero sí mts_min y duración, calcular
+    if(!p.mts && p.mts_min && p.tot_dur) p.mts=Math.round(p.mts_min*p.tot_dur*10)/10;
+    // Filtrar filas inválidas
+    if(!p.name || p.name.length<2) return null;
+    return p;
+  }).filter(Boolean);
+}
+
 function mcParseCsv(txt){
+  // Si el modo de layout NO es 'auto', usar el parser por orden de columnas
+  // (ignora headers, todo por orden, todos los negativos a positivos)
+  if(typeof _mcLayoutMode!=='undefined' && _mcLayoutMode!=='auto'){
+    var lay=(typeof mcGetLayout==='function')?mcGetLayout(0):_mcLayout;
+    // Si el layout NO incluye 'name', agregamos 'name' al inicio
+    // (asumiendo que el CSV trae nombre primero) — esto es retrocompatible
+    // con layouts viejos que solo incluían métricas.
+    if(lay.indexOf('name')<0){
+      lay=['name'].concat(lay);
+    }
+    return mcParseCsvByLayout(txt, lay);
+  }
+  // Modo auto: detectar columnas por nombre de header (comportamiento original)
   // Remove BOM
   txt=txt.replace(/^\uFEFF/,'');
   var lines=txt.trim().split('\n').map(function(l){return l.replace(/\r/,'');}).filter(function(l){return l.trim();});
   if(lines.length<2)return[];
   var sep=lines[0].indexOf('\t')>-1?'\t':lines[0].indexOf(';')>-1?';':',';
-  var pn=function(x){var v=parseFloat((x||'').replace(',','.'));return isNaN(v)?0:v;};
+  var pn=function(x){var v=parseFloat((x||'').replace(',','.'));if(isNaN(v))return 0;return Math.abs(v);}; // todo a positivo
   var headers=lines[0].split(sep).map(function(h){return h.trim().replace(/^"|"$/g,'').toLowerCase();});
   function col(candidates){
     for(var ci=0;ci<candidates.length;ci++){
@@ -5034,9 +5121,10 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <select id="mc-col-preset" onchange="mcColPresetChange()" style="font-size:11px;padding:4px 7px;border:1px solid #ccc;border-radius:4px;background:#fff">
-          <option value="auto">Auto-detectar</option>
-          <option value="full">Completo (con AccMáx/DccMáx)</option>
-          <option value="basic">Básico (sin AccMáx/DccMáx)</option>
+          <option value="auto">Auto-detectar (por nombre de columna)</option>
+          <option value="full">PDF Catapult completo (con AccMáx/DccMáx)</option>
+          <option value="basic">PDF Catapult básico (sin AccMáx/DccMáx)</option>
+          <option value="csv-full">CSV Catapult completo (con nombre y posición)</option>
           <option value="custom">Personalizado</option>
         </select>
         <span style="font-size:10px;color:#888" id="mc-col-preset-info"></span>
@@ -7467,7 +7555,9 @@ var MC_PDF_LAYOUTS = {
   // Order after name+pos: min, mts, mts_min, hsr, h2, h25, spr, vmax, rhie,
   // acc, dcc, accmax, dccmax, pl
   'full':  ['min','mts','mts_min','hsr','h2','h25','spr','vmax','rhie','acc','dcc','accmax','dccmax','pl'],
-  'basic': ['min','mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','rhie']
+  'basic': ['min','mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','rhie'],
+  // Layout para CSV con nombre+posición como columnas regulares (orden por defecto Catapult)
+  'csv-full': ['name','pos','min','mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','rhie','accmax','dccmax','pl']
 };
 var _mcLayout = JSON.parse(localStorage.getItem('mc_pdf_layout')||'null') || MC_PDF_LAYOUTS.full.slice();
 var _mcLayoutMode = localStorage.getItem('mc_pdf_layout_mode') || 'auto';
@@ -7478,8 +7568,9 @@ function mcGetLayout(numCols){
     if(numCols>=11) return MC_PDF_LAYOUTS.basic.slice();
     return MC_PDF_LAYOUTS.full.slice();
   }
-  if(_mcLayoutMode==='full')  return MC_PDF_LAYOUTS.full.slice();
-  if(_mcLayoutMode==='basic') return MC_PDF_LAYOUTS.basic.slice();
+  if(_mcLayoutMode==='full')     return MC_PDF_LAYOUTS.full.slice();
+  if(_mcLayoutMode==='basic')    return MC_PDF_LAYOUTS.basic.slice();
+  if(_mcLayoutMode==='csv-full') return MC_PDF_LAYOUTS['csv-full'].slice();
   return _mcLayout.slice(); // custom
 }
 
@@ -7504,14 +7595,17 @@ function mcColEditorRefresh(){
     inp.value=MC_PDF_LAYOUTS.full.join(', ');
   } else if(_mcLayoutMode==='basic'){
     inp.value=MC_PDF_LAYOUTS.basic.join(', ');
+  } else if(_mcLayoutMode==='csv-full'){
+    inp.value=MC_PDF_LAYOUTS['csv-full'].join(', ');
   } else {
     inp.value=_mcLayout.join(', ');
   }
   mcColPreviewMap();
   if(info) info.textContent = _mcLayoutMode==='auto'
-    ? 'Se detecta automáticamente según la cantidad de columnas del PDF'
-    : _mcLayoutMode==='full' ? 'full: con AccMáx y DccMáx (PDF Catapult con resumen completo)'
-    : _mcLayoutMode==='basic' ? 'basic: sin AccMáx/DccMáx'
+    ? 'Detecta automáticamente por nombre de columna (compatible con CSV viejo de Catapult)'
+    : _mcLayoutMode==='full' ? 'PDF Catapult con AccMáx/DccMáx'
+    : _mcLayoutMode==='basic' ? 'PDF Catapult básico'
+    : _mcLayoutMode==='csv-full' ? 'CSV con nombre y posición como primeras columnas'
     : 'Personalizado';
 }
 
@@ -7521,14 +7615,16 @@ function mcColPresetChange(){
   var info=document.getElementById('mc-col-preset-info');
   if(!sel) return;
   var mode=sel.value;
-  if(mode==='full') inp.value=MC_PDF_LAYOUTS.full.join(', ');
-  else if(mode==='basic') inp.value=MC_PDF_LAYOUTS.basic.join(', ');
-  else if(mode==='auto') inp.value=MC_PDF_LAYOUTS.full.join(', ');
+  if(mode==='full')          inp.value=MC_PDF_LAYOUTS.full.join(', ');
+  else if(mode==='basic')    inp.value=MC_PDF_LAYOUTS.basic.join(', ');
+  else if(mode==='csv-full') inp.value=MC_PDF_LAYOUTS['csv-full'].join(', ');
+  else if(mode==='auto')     inp.value=MC_PDF_LAYOUTS.full.join(', ');
   mcColPreviewMap();
   if(info) info.textContent = mode==='auto'
-    ? 'Se detecta automáticamente según la cantidad de columnas del PDF'
-    : mode==='full' ? 'full: con AccMáx y DccMáx'
-    : mode==='basic' ? 'basic: sin AccMáx/DccMáx'
+    ? 'Detecta automáticamente por nombre de columna (modo viejo)'
+    : mode==='full' ? 'PDF Catapult con AccMáx/DccMáx'
+    : mode==='basic' ? 'PDF Catapult básico'
+    : mode==='csv-full' ? 'CSV con nombre y posición como primeras columnas'
     : 'Personalizado';
 }
 window.mcColPresetChange=mcColPresetChange;
@@ -7538,10 +7634,10 @@ function mcColPreviewMap(){
   var out=document.getElementById('mc-col-preview-map');
   if(!inp||!out) return;
   var parts=inp.value.split(',').map(function(s){return s.trim();}).filter(Boolean);
-  var labels={min:'Tot Dur (min)',mts:'Distancia (m)',mts_min:'Mts/min',hsr:'18-21 km/h',h2:'21-25 km/h',h25:'+25 km/h',spr:'Sprints',vmax:'Vel Máx',acc:'Acc +3',dcc:'Dcc +3',accmax:'Max Acc',dccmax:'Max Dcc',rhie:'RHIE','_':'(salteada)'};
+  var labels={name:'Nombre',pos:'Posición',min:'Tot Dur (min)',mts:'Distancia (m)',mts_min:'Mts/min',hsr:'18-21 km/h',h2:'21-25 km/h',h25:'+25 km/h',spr:'Sprints',vmax:'Vel Máx',acc:'Acc +3',dcc:'Dcc +3',accmax:'Max Acc',dccmax:'Max Dcc',rhie:'RHIE',pl:'Player Load','_':'(salteada)'};
   var chips=parts.map(function(k,i){
     var label=labels[k]||k;
-    var color=k==='_'?'#bbb':k==='accmax'||k==='dccmax'?'#6A1B9A':k==='vmax'?'#B71C1C':k==='acc'||k==='dcc'?'#E65100':'#304483';
+    var color=k==='_'?'#bbb':k==='name'||k==='pos'?'#1D9E75':k==='accmax'||k==='dccmax'?'#6A1B9A':k==='vmax'?'#B71C1C':k==='acc'||k==='dcc'?'#E65100':'#304483';
     return '<span style="display:inline-flex;align-items:center;gap:3px;background:#f0f4ff;border:1px solid #b3ccf5;border-radius:4px;padding:1px 7px;margin:2px;font-size:10px">'
       +'<span style="color:#888;min-width:14px">'+(i+1)+'</span>'
       +'<span style="color:'+color+';font-weight:600">'+k+'</span>'
