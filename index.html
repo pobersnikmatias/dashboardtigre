@@ -3565,6 +3565,8 @@ function mcParseCsvByLayout(txt, layout){
     if(!p.mts && p.mts_min && p.tot_dur) p.mts=Math.round(p.mts_min*p.tot_dur*10)/10;
     // Filtrar filas inválidas
     if(!p.name || p.name.length<2) return null;
+    // Filtrar filas resumen (Total, Promedio, Average, etc.)
+    if(/^(total|promedio|average|media|prom|tot|equipo|team)\s*$/i.test(p.name)) return null;
     return p;
   }).filter(Boolean);
 }
@@ -3600,19 +3602,19 @@ function mcParseCsv(txt){
   var iName=col(['name','nombre','jugador','player']);
   var iPos=col(['position name','position','pos','posicion','puesto']);
   var iDate=col(['date','fecha']);
-  var iMin =col(['minutos prom','min prom','minutos','duration','dur']);
-  var iMts =col(['distancia total','dist total','total distance','distancia (m)','distancia(m)']);
-  var iMmin=col(['mts por min','m/min','meters per min','mts/min','distance per min']);
-  var iVb6 =col(['band 6 average distance (m)','velocity band 6 average dist','18-21','18 to 21']);
-  var iVb7 =col(['band 7 average distance (m)','velocity band 7 average dist','21-25','21 to 25']);
-  var iVb8 =col(['band 8 average distance (m)','velocity band 8 average dist','25+','+25']);
-  var iAcc =col(['acc prom esf','acc prom','acc+3','accel prom','acc esf']);
-  var iDcc =col(['dcc prom esf','dcc prom','dcc+3','decel prom','dcc esf']);
-  var iRhie=col(['rhie']);
-  var iVmax=col(['vel max','max vel','max speed','vmax']);
+  var iMin =col(['minutos prom','min prom','minutos','duration','dur','totdur','tot dur','tiempo']);
+  var iMts =col(['distancia total','dist total','total distance','distancia (m)','distancia(m)','distancia','total m']);
+  var iMmin=col(['mts por min','m/min','meters per min','mts/min','distance per min','mts por min','mtspormin']);
+  var iVb6 =col(['band 6 average distance (m)','velocity band 6 average dist','18-21','18 to 21','18 21','18-21 km','metros 18']);
+  var iVb7 =col(['band 7 average distance (m)','velocity band 7 average dist','21-25','21 to 25','21 25','21-25 km','metros 21']);
+  var iVb8 =col(['band 8 average distance (m)','velocity band 8 average dist','25+','+25','+25 km','+ 25','metros +25','metros mas 25']);
+  var iAcc =col(['acc prom esf','acc prom','acc+3','accel prom','acc esf','accesf','accesfmas','acc esf +3']);
+  var iDcc =col(['dcc prom esf','dcc prom','dcc+3','decel prom','dcc esf','dccesf','dccesfmas','dcc esf +3']);
+  var iRhie=col(['rhie tot','rhie total','rhie_tot','rhie totbouts','rhie']);
+  var iVmax=col(['vel max','max vel','max speed','velmax','vel_max','vmax']);
   var iSpr =col(['band 8 average effort count','effort count','sprint count','sprints +25','sprints']);
-  var iAccmax=col(['max acc','accmax','acc max']);
-  var iDccmax=col(['max dec','dccmax','dec max','max decel']);
+  var iAccmax=col(['max acc','accmax','acc max','maxacc']);
+  var iDccmax=col(['max dec','dccmax','dec max','max decel','maxdecel','max decel','maxdec']);
   var iPL=col(['tot pl','totpl','player load','playerload','carga del jugador','pl total','total player load','pl']);
 
   // Auto-detectar índices para métricas extra que se muestran en Microciclo
@@ -3640,6 +3642,8 @@ function mcParseCsv(txt){
     })(l,sep);
     var name=(iName>-1?c[iName]||'':c[0]||'').replace(/^"|"$/g,'').trim();
     if(!name||name.length<2)return null;
+    // Filtrar filas resumen (Total, Promedio, etc.)
+    if(/^(total|promedio|average|media|prom|tot|equipo|team)\s*$/i.test(name))return null;
     var minsRaw = iMin>-1?c[iMin]:'';
     var mins;
     if(/\d+:\d+:\d+/.test(minsRaw)){var tp=minsRaw.split(':').map(Number);mins=tp[0]*60+tp[1]+tp[2]/60;}
