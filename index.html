@@ -441,9 +441,9 @@ body.sb-show{visibility:visible}
     </div>
   </div>
   <!-- Mensaje cuando no hay selección -->
-  <div id="empty-sel-msg" style="display:none;padding:30px 20px;text-align:center;background:#f5f8ff;border:2px dashed #c0cde8;border-radius:10px;margin:10px 0">
-    <div style="font-size:32px;margin-bottom:8px;opacity:0.5">📋</div>
-    <div style="font-size:14px;font-weight:700;color:#3B4D88;margin-bottom:4px">Seleccioná uno o más ejercicios</div>
+  <div id="empty-sel-msg" style="display:none;padding:20px 18px;text-align:center;background:#f5f8ff;border:2px dashed #c0cde8;border-radius:10px;margin:0 0 8px 0">
+    <div style="font-size:26px;margin-bottom:6px;opacity:0.5">📋</div>
+    <div style="font-size:13px;font-weight:700;color:#3B4D88;margin-bottom:3px">Seleccioná uno o más ejercicios</div>
     <div style="font-size:11px;color:#888">Marcá los ejercicios con el checkbox a la izquierda de la tabla para ver el radar, las métricas y el mapa de cancha.</div>
   </div>
   <div style="font-size:11px;color:#999;margin-top:5px;display:none" id="info2"></div>
@@ -1077,8 +1077,13 @@ function updateSel(){
   document.getElementById('sc2').textContent=sel.size?`${sel.size} seleccionados`:'';
   const tags=document.getElementById('tags2'),info=document.getElementById('info2'),cards=document.getElementById('cards2');
   const emptyMsg=document.getElementById('empty-sel-msg');
+  // El sel-body contiene radar, cards, pitch-panel, diag-panel — ocupan espacio
+  // aunque estén vacíos (el canvas tiene altura por CSS). Lo ocultamos cuando
+  // no hay selección para que el mensaje "Seleccioná..." quede arriba.
+  const selBody=document.querySelector('#p2 .sel-body');
   if(!sel.size){
     if(emptyMsg) emptyMsg.style.display='block';
+    if(selBody) selBody.style.display='none';
     tags.innerHTML='';info.textContent='';cards.innerHTML='';
     if(rc2){rc2.destroy();rc2=null;}
     document.getElementById('pitch-panel').style.display='none';
@@ -1090,6 +1095,7 @@ function updateSel(){
     return;
   }
   if(emptyMsg) emptyMsg.style.display='none';
+  if(selBody) selBody.style.display='';
   tags.innerHTML=rows.map(r=>{const c=BC[r.cat]||'#888';return`<span class="sp-tag" style="border-color:${c};color:${c};background:${c}18" onclick="tSel(${r.id})">${r.n} ×</span>`;}).join('');
   const s=stats(rows),label=sel.size===1?rows[0].n:`Promedio (${sel.size})`,color=sel.size===1?(BC[rows[0].cat]||'#3B4D88'):'#3B4D88';
   rc2=buildRadar('r2',s,label,color,rc2);
