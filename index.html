@@ -14120,9 +14120,9 @@ function gymRenderSessions(){
       +(s.notes?'<span style="font-size:10px;color:#888;font-style:italic">'+s.notes+'</span>':'')
       +'</div>'
       +'<div style="display:flex;gap:5px;align-items:center">'
-      +'<button onclick="gymOpenLoadSheet('+JSON.stringify(String(s.id))+')" style="border:1px solid #3B4D8844;background:#f0f5ff;cursor:pointer;border-radius:5px;font-size:10px;padding:2px 9px;color:#3B4D88;font-weight:600" title="Ver cargas por jugador">📋 Cargas</button>'
-      +'<button onclick="gymEditSession('+JSON.stringify(String(s.id))+')" style="border:none;background:none;cursor:pointer;font-size:12px;padding:0 4px;color:#888;opacity:0.7" title="Editar">✏️</button>'
-      +'<button onclick="gymDeleteSession('+JSON.stringify(String(s.id))+')" style="border:none;background:none;cursor:pointer;font-size:12px;padding:0 4px;color:#ccc" title="Eliminar">🗑</button>'
+      +'<button onclick="gymOpenLoadSheet(\''+String(s.id).replace(/\\/g,'\\\\').replace(/\'/g,"\\\'")+'\')" style="border:1px solid #3B4D8844;background:#f0f5ff;cursor:pointer;border-radius:5px;font-size:10px;padding:2px 9px;color:#3B4D88;font-weight:600" title="Ver cargas por jugador">📋 Cargas</button>'
+      +'<button onclick="gymEditSession(\''+String(s.id).replace(/\\/g,'\\\\').replace(/\'/g,"\\\'")+'\')" style="border:none;background:none;cursor:pointer;font-size:12px;padding:0 4px;color:#888;opacity:0.7" title="Editar">✏️</button>'
+      +'<button onclick="gymDeleteSession(\''+String(s.id).replace(/\\/g,'\\\\').replace(/\'/g,"\\\'")+'\')" style="border:none;background:none;cursor:pointer;font-size:12px;padding:0 4px;color:#ccc" title="Eliminar">🗑</button>'
       +'</div></div>'
       +'<div style="padding:8px 12px">'
       +(s.exercises&&s.exercises.length ? exRows : '<span style="font-size:10px;color:#aaa">Sin ejercicios registrados.</span>')
