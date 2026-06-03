@@ -381,7 +381,6 @@ body.sb-show{visibility:visible}
 <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0">
   <button id="nav-train" onclick="setMainView('train')" style="padding:7px 18px;border:none;border-bottom:2px solid #3B4D88;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#3B4D88;cursor:pointer">📋 Ejercicios</button>
   <button id="nav-match" onclick="setMainView('match')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">⚽ Partidos</button>
-  <button id="nav-players" onclick="setMainView('players')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👥 Jugadores</button>
   <button id="nav-micro" onclick="setMainView('micro')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📅 Microciclo</button>
   <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
   <button id="nav-profiles" onclick="setMainView('profiles')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👤 Perfiles</button>
@@ -5547,8 +5546,9 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
 <div id="view-profiles" style="display:none">
 
 <!-- Subtabs de Perfiles -->
-<div style="display:flex;gap:4px;border-bottom:1px solid #eee;margin-bottom:12px">
+<div style="display:flex;gap:4px;border-bottom:1px solid #eee;margin-bottom:12px;flex-wrap:wrap">
   <button id="prof-subtab-general" onclick="profSetSubtab('general')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#0D1B2A;cursor:pointer;border-bottom:2px solid #304483;margin-bottom:-1px">👤 Datos generales</button>
+  <button id="prof-subtab-competencia" onclick="profSetSubtab('competencia')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🏆 Perfil de competencia</button>
   <button id="prof-subtab-nutricional" onclick="profSetSubtab('nutricional')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🥗 Nutricional</button>
   <button id="prof-subtab-movilidad" onclick="profSetSubtab('movilidad')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🦵 Movilidad</button>
 </div>
@@ -5612,6 +5612,34 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   <div id="profiles-table-wrap"><div style="color:#aaa;font-size:11px;text-align:center;padding:20px">Sin perfiles cargados.</div></div>
 </div></div>
 </div><!-- /prof-subview-general -->
+
+<!-- SUBTAB: Perfil de competencia (registro máximo/promedio en partidos oficiales) -->
+<div id="prof-subview-competencia" style="display:none">
+  <div class="panel"><div class="panel-body" style="padding:12px 14px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+      <div>
+        <div style="font-size:12px;font-weight:700;color:#0D1B2A">🏆 Perfil de competencia</div>
+        <div style="font-size:11px;color:#666;margin-top:3px">Registros máximos y promedios del jugador en <strong>partidos oficiales</strong>. Por defecto se incluyen solo los partidos donde jugó al menos 60 minutos.</div>
+      </div>
+    </div>
+    <!-- Filtros -->
+    <div style="background:#f7f9fc;border:1px solid #e0e8f5;border-radius:7px;padding:10px 14px;margin-bottom:12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:11px;font-weight:600;color:#0C447C;display:flex;align-items:center;gap:6px">
+        Jugador:
+        <select id="comp-player" onchange="compRender()" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px;background:#fff;min-width:200px">
+          <option value="">— Seleccioná un jugador —</option>
+        </select>
+      </label>
+      <label style="font-size:11px;font-weight:600;color:#0C447C;display:flex;align-items:center;gap:6px">
+        Minutos mínimos:
+        <input id="comp-min-mins" type="number" value="60" min="0" max="120" step="5" onchange="compRender()" style="width:60px;padding:5px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center">
+      </label>
+      <span id="comp-info" style="font-size:10px;color:#666"></span>
+    </div>
+    <!-- Tablas -->
+    <div id="comp-content"></div>
+  </div></div>
+</div><!-- /prof-subview-competencia -->
 
 <!-- SUBTAB: Nutricional -->
 <div id="prof-subview-nutricional" style="display:none">
@@ -21326,18 +21354,136 @@ window.cargaRenderDolores=cargaRenderDolores;
 // Subtab switcher de Perfiles (general / nutricional / movilidad)
 function profSetSubtab(t){
   document.getElementById('prof-subview-general').style.display=t==='general'?'':'none';
+  var cv=document.getElementById('prof-subview-competencia'); if(cv)cv.style.display=t==='competencia'?'':'none';
   document.getElementById('prof-subview-nutricional').style.display=t==='nutricional'?'':'none';
   var mv=document.getElementById('prof-subview-movilidad'); if(mv)mv.style.display=t==='movilidad'?'':'none';
   var bg=document.getElementById('prof-subtab-general');
+  var bc=document.getElementById('prof-subtab-competencia');
   var bn=document.getElementById('prof-subtab-nutricional');
   var bm=document.getElementById('prof-subtab-movilidad');
   if(bg){bg.style.color=t==='general'?'#0D1B2A':'#aaa';bg.style.borderBottomColor=t==='general'?'#304483':'transparent';}
+  if(bc){bc.style.color=t==='competencia'?'#0D1B2A':'#aaa';bc.style.borderBottomColor=t==='competencia'?'#304483':'transparent';}
   if(bn){bn.style.color=t==='nutricional'?'#0D1B2A':'#aaa';bn.style.borderBottomColor=t==='nutricional'?'#304483':'transparent';}
   if(bm){bm.style.color=t==='movilidad'?'#0D1B2A':'#aaa';bm.style.borderBottomColor=t==='movilidad'?'#304483':'transparent';}
+  if(t==='competencia'){compInit();}
   if(t==='nutricional'){nutRender();}
   if(t==='movilidad'){if(typeof mobRender==='function')mobRender();}
 }
 window.profSetSubtab=profSetSubtab;
+
+// ═══════════════════════════════════════════════════════════════
+// PERFIL DE COMPETENCIA — registros máximos y promedios en partidos
+// ═══════════════════════════════════════════════════════════════
+function compInit(){
+  // Construir el dropdown de jugadores a partir de los partidos
+  var sel=document.getElementById('comp-player');
+  if(!sel) return;
+  var prevValue=sel.value;
+  var names={};
+  if(typeof plGetAllData==='function'){
+    plGetAllData().forEach(function(r){
+      if(r.name) names[r.name.toLowerCase()]={display:r.name, key:r.name.toLowerCase()};
+    });
+  }
+  var sorted=Object.values(names).sort(function(a,b){return a.display.localeCompare(b.display,'es',{sensitivity:'base'});});
+  sel.innerHTML='<option value="">— Seleccioná un jugador —</option>'+
+    sorted.map(function(n){return '<option value="'+n.key+'">'+n.display+'</option>';}).join('');
+  if(prevValue && names[prevValue]) sel.value=prevValue;
+  compRender();
+}
+window.compInit=compInit;
+
+function compRender(){
+  var sel=document.getElementById('comp-player');
+  var minInput=document.getElementById('comp-min-mins');
+  var info=document.getElementById('comp-info');
+  var cont=document.getElementById('comp-content');
+  if(!sel||!cont) return;
+  var pkey=sel.value;
+  var minMins=parseFloat(minInput?minInput.value:60)||0;
+  if(!pkey){
+    cont.innerHTML='<div style="color:#aaa;font-size:11px;text-align:center;padding:30px;background:#f5f8ff;border:2px dashed #c0cde8;border-radius:10px">📋 Seleccioná un jugador para ver su perfil de competencia.</div>';
+    if(info) info.textContent='';
+    return;
+  }
+  // Obtener todos los partidos del jugador con min >= filtro
+  if(typeof plGetAllData!=='function'){
+    cont.innerHTML='<div style="color:#aaa;font-size:11px;text-align:center;padding:20px">Sin partidos cargados.</div>';
+    return;
+  }
+  var rows=plGetAllData().filter(function(r){
+    return r.name && r.name.toLowerCase()===pkey && (r.min||0)>=minMins;
+  });
+  if(!rows.length){
+    cont.innerHTML='<div style="color:#aaa;font-size:11px;text-align:center;padding:30px;background:#fffaf2;border:1px dashed #f0d0a0;border-radius:8px">'+
+      '⚠ No hay partidos de este jugador con al menos '+minMins+' minutos jugados.'+
+      '<div style="margin-top:6px;font-size:10px">Probá bajar el filtro de minutos mínimos.</div></div>';
+    if(info) info.textContent='';
+    return;
+  }
+  if(info) info.textContent=rows.length+' partido'+(rows.length>1?'s':'')+' usado'+(rows.length>1?'s':'')+' para el cálculo';
+
+  // Métricas a mostrar
+  // HSR = 18-21 + 21-25 + +25 (sumatoria de alta intensidad)
+  function hsrTot(r){return (r.hsr||0)+(r.h2||0)+(r.h25||0);}
+  function avg(vals){return vals.reduce(function(a,b){return a+b;},0)/vals.length;}
+  function maxOf(vals){return Math.max.apply(null, vals);}
+  // Para la fecha del máximo
+  function rowOfMax(rows, getter){
+    var best=rows[0], bv=getter(rows[0]);
+    rows.forEach(function(r){var v=getter(r); if(v>bv){bv=v;best=r;}});
+    return {row:best, value:bv};
+  }
+
+  var metrics=[
+    {k:'mts',  lbl:'Distancia total (m)',   fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.mts||0;}},
+    {k:'hsr_t',lbl:'HSR — Alta intensidad (m)', sub:'18-21 + 21-25 + +25 km/h', fmt:function(v){return v.toFixed(0);}, getter:hsrTot},
+    {k:'acc',  lbl:'Acc esfuerzo (+3 m/s²)', fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.acc||0;}},
+    {k:'dcc',  lbl:'Dec esfuerzo (+3 m/s²)', fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.dcc||0;}},
+    {k:'spr',  lbl:'Sprints (+25 km/h)',    fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.spr||0;}},
+    {k:'vmax', lbl:'Vmax (km/h)',           fmt:function(v){return v.toFixed(1);}, getter:function(r){return r.vmax||0;}},
+    {k:'rhie', lbl:'RHIE (bouts)',          fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.rhie||0;}},
+    {k:'min',  lbl:'Minutos jugados',       fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.min||0;}},
+  ];
+
+  // Tabla 1: MÁXIMOS
+  var maxHtml='<div style="margin-bottom:18px"><div style="font-size:11px;font-weight:700;color:#0D1B2A;margin-bottom:6px">⭐ Perfil MÁXIMO de competencia</div>'+
+    '<div style="font-size:10px;color:#666;margin-bottom:7px">El mejor registro individual del jugador en un partido (con su fecha).</div>'+
+    '<div style="overflow-x:auto;border:1px solid #dde4f0;border-radius:6px;background:#fff">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
+    '<thead><tr style="background:#fff8e1"><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0d878">Métrica</th><th style="padding:6px 10px;text-align:right;border-bottom:1px solid #f0d878;color:#9c5a00">Máximo</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0d878;font-size:10px;color:#888">Partido</th></tr></thead><tbody>';
+  metrics.forEach(function(m){
+    var info=rowOfMax(rows, m.getter);
+    var dateTxt=info.row.fecha?info.row.fecha.split('-').reverse().join('/'):'—';
+    var rival=info.row.rival||'';
+    var sub=m.sub?'<div style="font-size:9px;color:#999">'+m.sub+'</div>':'';
+    maxHtml+='<tr><td style="padding:6px 10px;border-bottom:0.5px solid #eee;font-weight:600">'+m.lbl+sub+'</td>'+
+      '<td style="padding:6px 10px;border-bottom:0.5px solid #eee;text-align:right;font-weight:700;color:#9c5a00;font-size:13px">'+m.fmt(info.value)+'</td>'+
+      '<td style="padding:6px 10px;border-bottom:0.5px solid #eee;font-size:10px;color:#666">'+dateTxt+(rival?' · '+rival:'')+'</td></tr>';
+  });
+  maxHtml+='</tbody></table></div></div>';
+
+  // Tabla 2: PROMEDIOS
+  var avgHtml='<div><div style="font-size:11px;font-weight:700;color:#0D1B2A;margin-bottom:6px">📊 Perfil PROMEDIO de competencia</div>'+
+    '<div style="font-size:10px;color:#666;margin-bottom:7px">Promedio del jugador sobre los '+rows.length+' partidos con ≥'+minMins+' min.</div>'+
+    '<div style="overflow-x:auto;border:1px solid #dde4f0;border-radius:6px;background:#fff">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
+    '<thead><tr style="background:#e8f3ee"><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #b8dcc4">Métrica</th><th style="padding:6px 10px;text-align:right;border-bottom:1px solid #b8dcc4;color:#0F6E56">Promedio</th><th style="padding:6px 10px;text-align:right;border-bottom:1px solid #b8dcc4;font-size:10px;color:#888">Rango (mín–máx)</th></tr></thead><tbody>';
+  metrics.forEach(function(m){
+    var vals=rows.map(m.getter);
+    var avgV=avg(vals);
+    var minV=Math.min.apply(null, vals);
+    var maxV=Math.max.apply(null, vals);
+    var sub=m.sub?'<div style="font-size:9px;color:#999">'+m.sub+'</div>':'';
+    avgHtml+='<tr><td style="padding:6px 10px;border-bottom:0.5px solid #eee;font-weight:600">'+m.lbl+sub+'</td>'+
+      '<td style="padding:6px 10px;border-bottom:0.5px solid #eee;text-align:right;font-weight:700;color:#0F6E56;font-size:13px">'+m.fmt(avgV)+'</td>'+
+      '<td style="padding:6px 10px;border-bottom:0.5px solid #eee;text-align:right;font-size:10px;color:#888">'+m.fmt(minV)+' — '+m.fmt(maxV)+'</td></tr>';
+  });
+  avgHtml+='</tbody></table></div></div>';
+
+  cont.innerHTML=maxHtml+avgHtml;
+}
+window.compRender=compRender;
 
 // Vista grupo / jugador
 var _nutView='group';
