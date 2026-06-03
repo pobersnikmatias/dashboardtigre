@@ -4491,54 +4491,7 @@ function mcRenderWeek(){
     <span style="font-size:9px;color:#D85A30;font-weight:700;text-transform:uppercase;letter-spacing:.4px;min-width:90px">Comparar vs:</span>
     ${refWeekSel} ${refDayChips} ${resetRefBtn}
   </div>
-  <table style="font-size:10px;width:100%;border-collapse:collapse;min-width:400px">
-  <thead><tr style="background:#f0f2f5">
-    <th style="padding:4px 8px;text-align:left;border-bottom:1px solid #ddd">Métrica</th>
-    <th style="padding:4px 8px;border-bottom:1px solid #ddd;text-align:center">Total semana</th>
-    ${refLabel?'<th style="padding:4px 8px;border-bottom:1px solid #ddd;text-align:center;color:#aaa">vs '+refLabel+'</th>':''}
-    ${sessions.some(s=>s._isEstimated)?'<th style="padding:4px 8px;border-bottom:1px solid #ddd;text-align:center;color:#7F77DD">GPS</th><th style="padding:4px 8px;border-bottom:1px solid #ddd;text-align:center;color:#7F77DD">Estimado</th>':''}
-  </tr></thead>
-  <tbody>
-  ${(function(){
-    var rows=[
-      {k:'mts',l:'Distancia total (m)',dec:0,color:'#3B4D88'},
-      {k:'hsr',l:'HSR 18-21 km/h (m)',dec:0,color:'#1D9E75'},
-      {k:'h2', l:'HSR 21-25 km/h (m)',dec:0,color:'#7F77DD'},
-      {k:'h25',l:'Mts >25 km/h (m)',dec:1,color:'#EF9F27'},
-      {k:'acc',l:'Acc +3 m/s²',dec:1,color:'#D85A30'},
-      {k:'dcc',l:'Dec +3 m/s²',dec:1,color:'#D4537E'},
-      {k:'rhie',l:'RHIE',dec:1,color:'#0F6E56'},
-      {k:'spr',l:'Sprints +25',dec:0,color:'#EF9F27'}
-    ];
-    // Agregar extras activas en Microciclo, marcadas con _isExtra para el render
-    var mcExtras=(typeof extraMetricsFor==='function')?extraMetricsFor('microcycle'):[];
-    mcExtras.forEach(function(m){
-      rows.push({k:m.key, l:'★ '+m.label+(m.unit?' ('+m.unit+')':''), dec:m.kind==='value'?1:0, color:'#8E44AD', _isExtra:true});
-    });
-    return rows;
-  })().map(m=>{
-    // Para extras leemos de curTot.extra; para built-in de curTot directo
-    function val(tot,k){ if(!tot)return 0; if(m._isExtra){return (tot.extra&&tot.extra[k])||0;} return tot[k]||0; }
-    var curV=val(curTot, m.k);
-    var prevV=prevTot?val(prevTot, m.k):0;
-    const ratio=prevTot && prevV ? mcRatioChip(curV, prevV, m._isExtra?'mts':m.k) : '';
-    const refValTxt=prevTot?'<span style="color:#aaa;font-size:9px;display:block;margin-top:1px">('+prevV.toFixed(m.dec)+')</span>':'';
-    // Split GPS vs estimated if there are estimated sessions
-    const gpsSess=sessions.filter(s=>!s._isEstimated);
-    const estSess=sessions.filter(s=>s._isEstimated);
-    const gpsTot=gpsSess.length?mcWeekTotals(gpsSess):null;
-    const estTot=estSess.length?mcWeekTotals(estSess):null;
-    const hasEst=estSess.length>0;
-    return'<tr><td style="padding:4px 8px;border-bottom:0.5px solid #eee;color:'+m.color+';font-weight:600">'+m.l+'</td>'
-      +'<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center;font-weight:700;color:#1a1a1a">'+curV.toFixed(m.dec)+'</td>'
-      +(refLabel?'<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center">'+ratio+refValTxt+'</td>':'')
-      +(hasEst
-        ?'<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center;color:#555">'+(gpsTot?val(gpsTot,m.k).toFixed(m.dec):'—')+'</td>'
-         +'<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center;color:#7F77DD;font-style:italic">'+(estTot?'~'+val(estTot,m.k).toFixed(m.dec):'—')+'</td>'
-        :'')
-      +'</tr>';
-  }).join('')}
-  </tbody></table></div>`;
+  </div>`;
 
   // ── Per-player weekly totals vs prev week ──
   // Collect all unique player names in this week
@@ -4575,7 +4528,7 @@ function mcRenderWeek(){
     {k:'_vmax_chk',l:'≥90% Vmax',dec:0,color:'#2E7D32',special:'vmax_check'},
   ];
 
-  html+=`<div style="margin-top:12px;border:1px solid #dde4f0;border-radius:7px;overflow-x:auto;background:#fff">
+  html+=`<div style="margin-top:8px;border:1px solid #dde4f0;border-radius:7px;overflow-x:auto;background:#fff">
   <div style="padding:6px 10px;font-size:11px;font-weight:700;color:#0D1B2A;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span>&#128100; Total semanal por jugador</span>
     ${sinMdBadge}${dayBadge}
@@ -4587,6 +4540,79 @@ function mcRenderWeek(){
     <th style="padding:4px 8px;border-bottom:1px solid #ddd;color:#888">Pos</th>
     ${METRICS_LIST.map(m=>'<th style="padding:4px 5px;border-bottom:1px solid #ddd;text-align:center;color:'+m.color+'">'+m.l+'</th>').join('')}
   </tr></thead><tbody>`;
+
+  // ── Fila EQUIPO (suma de TODOS los jugadores de la semana) ──
+  // Va arriba de todo, destacada visualmente.
+  (function buildTeamRow(){
+    var teamTot={};
+    METRICS_LIST.forEach(function(m){
+      if(m.special) return;
+      teamTot[m.k]=0;
+    });
+    sessTot.forEach(function(sess){
+      (sess.players||[]).forEach(function(p){
+        METRICS_LIST.forEach(function(m){
+          if(m.special) return;
+          teamTot[m.k]+=(p[m.k]||0);
+        });
+      });
+    });
+    // Prev team totals
+    var prevTeamTot=null;
+    if(refSess.length){
+      prevTeamTot={};
+      METRICS_LIST.forEach(function(m){
+        if(m.special) return;
+        prevTeamTot[m.k]=0;
+      });
+      refSess.forEach(function(sess){
+        (sess.players||[]).forEach(function(p){
+          METRICS_LIST.forEach(function(m){
+            if(m.special) return;
+            prevTeamTot[m.k]+=(p[m.k]||0);
+          });
+        });
+      });
+    }
+    html+='<tr style="background:#fff8e1;border-top:2px solid #f0c468">';
+    html+='<td style="padding:6px 8px;border-bottom:1px solid #f0c468;font-weight:800;color:#7c4f00;white-space:nowrap"><span style="font-size:11px">🏆</span> EQUIPO</td>';
+    html+='<td style="padding:6px 5px;border-bottom:1px solid #f0c468;text-align:center;color:#aaa;font-size:9px">'+playerNames.length+' jug.</td>';
+    METRICS_LIST.forEach(function(m){
+      if(m.special==='vmax_check'){
+        // Para el equipo: contar cuántos jugadores llegaron al ≥90% de su PB
+        var reached=0, withPb=0;
+        playerNames.forEach(function(nm){
+          var key=nm.trim().toLowerCase();
+          var pb=(typeof PLAYER_PROFILES!=='undefined' && PLAYER_PROFILES[key] && PLAYER_PROFILES[key].vmax)||0;
+          if(!pb) return;
+          withPb++;
+          var maxW=0;
+          sessTot.forEach(function(sess){
+            (sess.players||[]).forEach(function(p){
+              if(p.name===nm) maxW=Math.max(maxW, +p.vmax||0);
+            });
+          });
+          if(pb>0 && (maxW/pb)*100>=90) reached++;
+        });
+        var tooltip='Jugadores que alcanzaron ≥90% de su Vmax personal en alguna sesión de la semana';
+        html+='<td style="padding:6px 5px;border-bottom:1px solid #f0c468;border-right:0.5px solid #f0d878;text-align:center;vertical-align:middle" title="'+tooltip+'">'+
+          '<div style="font-weight:800;font-size:13px;color:#2E7D32">'+reached+'/'+withPb+'</div>'+
+          '<div style="font-size:9px;color:#999;margin-top:1px">jugadores</div>'+
+          '</td>';
+        return;
+      }
+      var val=teamTot[m.k];
+      var txt=val.toFixed(m.dec);
+      var prevV=prevTeamTot?prevTeamTot[m.k]:null;
+      var chip=(prevV&&prevV>0)?mcRatioChip(val,prevV,m.k):'<span style="color:#ccc;font-size:9px">—</span>';
+      var prevTxt=(prevV!==null&&prevV>0)?'<span style="color:#999;font-size:9px"> ('+prevV.toFixed(m.dec)+')</span>':'';
+      html+='<td style="padding:6px 5px;border-bottom:1px solid #f0c468;border-right:0.5px solid #f0d878;text-align:center;vertical-align:top">'
+        +'<div style="font-weight:800;font-size:12px;color:#5c3800">'+txt+'</div>'
+        +'<div style="font-size:9px;white-space:nowrap;margin-top:2px" title="vs sem. anterior">📊 '+chip+prevTxt+'</div>'
+        +'</td>';
+    });
+    html+='</tr>';
+  })();
 
   // Build prev week position averages
   var prevPosTotals={};
@@ -4692,7 +4718,6 @@ function mcRenderWeek(){
 
   html+='</tbody></table></div>';
 
-  html+='</div>';
   wrap.innerHTML=html;
 }
 window.mcRenderWeek=mcRenderWeek;
