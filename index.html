@@ -4556,7 +4556,7 @@ function mcRenderWeek(){
       refSess.forEach(function(sess){ (sess.players||[]).forEach(function(p){ if(p.name===name) rows.push(p); }); });
       if(rows.length){
         var tot={};
-        ['mts','hsr','h2','h25','acc','dcc','rhie'].forEach(function(k){ tot[k]=rows.reduce(function(a,r){return a+(r[k]||0);},0); });
+        ['mts','hsr','h2','h25','acc','dcc','rhie','spr'].forEach(function(k){ tot[k]=rows.reduce(function(a,r){return a+(r[k]||0);},0); });
         prevPlayerTotals[name]=tot;
       }
     });
@@ -4570,6 +4570,10 @@ function mcRenderWeek(){
     {k:'acc',l:'Acc+3',dec:1,color:'#D85A30'},
     {k:'dcc',l:'Dec+3',dec:1,color:'#D4537E'},
     {k:'rhie',l:'RHIE',dec:1,color:'#0F6E56'},
+    {k:'spr',l:'Sprints',dec:0,color:'#B71C1C'},
+    // Métrica especial: tilde verde si en ALGUNA sesión llegó al ≥90% de su Vmax personal.
+    // No se suma, se calcula aparte (ver loop más abajo).
+    {k:'_vmax_chk',l:'≥90% Vmax',dec:0,color:'#2E7D32',special:'vmax_check'},
   ];
 
   html+=`<div style="margin-top:12px;border:1px solid #dde4f0;border-radius:7px;overflow-x:auto;background:#fff">
@@ -4595,6 +4599,7 @@ function mcRenderWeek(){
         if(!prevPosTotals[p.pos]) prevPosTotals[p.pos]={};
         if(!prevPosCounts[p.pos]) prevPosCounts[p.pos]=0;
         METRICS_LIST.forEach(function(m){
+          if(m.special) return;
           prevPosTotals[p.pos][m.k]=(prevPosTotals[p.pos][m.k]||0)+(p[m.k]||0);
         });
         prevPosCounts[p.pos]++;
@@ -4616,6 +4621,7 @@ function mcRenderWeek(){
       var names=[...prevPosPlayers[pos]];
       prevPosTotals[pos]={};
       METRICS_LIST.forEach(function(m){
+        if(m.special) return;
         var posSum=0;
         names.forEach(function(name){
           var rows=[];
@@ -4632,7 +4638,10 @@ function mcRenderWeek(){
     sessTot.forEach(function(sess){ (sess.players||[]).forEach(function(p){ if(p.name===name) rows.push(p); }); });
     if(!rows.length) return;
     var tot={};
-    METRICS_LIST.forEach(function(m){ tot[m.k]=rows.reduce(function(a,r){return a+(r[m.k]||0);},0); });
+    METRICS_LIST.forEach(function(m){
+      if(m.special) return; // métricas especiales no se suman
+      tot[m.k]=rows.reduce(function(a,r){return a+(r[m.k]||0);},0);
+    });
     var prev=prevPlayerTotals[name]||null;
     var pos=rows[rows.length-1].pos||'';
     var prevPos=pos&&prevPosTotals[pos]?prevPosTotals[pos]:null;
@@ -4641,6 +4650,26 @@ function mcRenderWeek(){
     html+='<td style="padding:4px 8px;border-bottom:0.5px solid #eee;font-weight:600;white-space:nowrap">'+name+'</td>';
     html+='<td style="padding:4px 5px;border-bottom:0.5px solid #eee;text-align:center;color:#888;font-size:10px">'+pos+'</td>';
     METRICS_LIST.forEach(function(m){
+      // Caso especial: tilde si en alguna sesión el jugador llegó al ≥90% de su Vmax personal
+      if(m.special==='vmax_check'){
+        var key=name.trim().toLowerCase();
+        var pbVmax=(typeof PLAYER_PROFILES!=='undefined' && PLAYER_PROFILES[key] && PLAYER_PROFILES[key].vmax) || 0;
+        if(!pbVmax){
+          html+='<td style="padding:4px 5px;border-bottom:0.5px solid #eee;border-right:0.5px solid #f0f0f0;text-align:center;color:#ccc;font-size:14px" title="Sin Vmax personal registrado">—</td>';
+          return;
+        }
+        var maxThisWeek=rows.reduce(function(mx,r){return Math.max(mx, +r.vmax||0);}, 0);
+        var pct=pbVmax>0 ? (maxThisWeek/pbVmax)*100 : 0;
+        var reached=pct>=90;
+        var titleTxt='Vmax semana: '+maxThisWeek.toFixed(1)+' km/h\nVmax personal: '+pbVmax.toFixed(1)+' km/h\n'+pct.toFixed(0)+'% del PB';
+        html+='<td style="padding:4px 5px;border-bottom:0.5px solid #eee;border-right:0.5px solid #f0f0f0;text-align:center;vertical-align:middle" title="'+titleTxt+'">'
+          +(reached
+            ? '<div style="font-size:18px;color:#2E7D32;font-weight:700;line-height:1">✓</div>'
+            : '<div style="font-size:14px;color:#ccc;line-height:1">—</div>')
+          +'<div style="font-size:9px;color:'+(reached?'#2E7D32':'#aaa')+';margin-top:2px">'+pct.toFixed(0)+'%</div>'
+          +'</td>';
+        return;
+      }
       var val=tot[m.k];
       var txt=val.toFixed(m.dec);
       // Individual vs prev week
