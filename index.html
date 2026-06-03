@@ -5615,30 +5615,40 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
 
 <!-- SUBTAB: Perfil de competencia (registro máximo/promedio en partidos oficiales) -->
 <div id="prof-subview-competencia" style="display:none">
-  <div class="panel"><div class="panel-body" style="padding:12px 14px">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">
-      <div>
-        <div style="font-size:12px;font-weight:700;color:#0D1B2A">🏆 Perfil de competencia</div>
-        <div style="font-size:11px;color:#666;margin-top:3px">Registros máximos y promedios del jugador en <strong>partidos oficiales</strong>. Por defecto se incluyen solo los partidos donde jugó al menos 60 minutos.</div>
+  <!-- Cabecera: cuadritos máximo+promedio a la derecha, header descriptivo a la izquierda -->
+  <div style="display:flex;gap:10px;align-items:stretch;margin-bottom:10px;flex-wrap:wrap">
+    <!-- Izquierda: descripción + filtros -->
+    <div style="flex:1;min-width:280px;background:#f7f9fc;border:1px solid #e0e8f5;border-radius:7px;padding:10px 14px">
+      <div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:3px">🏆 Perfil de competencia</div>
+      <div style="font-size:11px;color:#666;margin-bottom:8px">Registros máximos y promedios del jugador en <strong>partidos oficiales</strong>.</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:11px;font-weight:600;color:#0C447C;display:flex;align-items:center;gap:5px">
+          Jugador:
+          <select id="comp-player" onchange="compRender()" style="padding:4px 7px;border:1px solid #ccc;border-radius:4px;font-size:11px;background:#fff;min-width:170px">
+            <option value="">— Seleccioná un jugador —</option>
+          </select>
+        </label>
+        <label style="font-size:11px;font-weight:600;color:#0C447C;display:flex;align-items:center;gap:5px">
+          Min ≥:
+          <input id="comp-min-mins" type="number" value="60" min="0" max="120" step="5" onchange="compRender()" style="width:55px;padding:4px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center">
+        </label>
+        <span id="comp-info" style="font-size:10px;color:#666"></span>
       </div>
     </div>
-    <!-- Filtros -->
-    <div style="background:#f7f9fc;border:1px solid #e0e8f5;border-radius:7px;padding:10px 14px;margin-bottom:12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-      <label style="font-size:11px;font-weight:600;color:#0C447C;display:flex;align-items:center;gap:6px">
-        Jugador:
-        <select id="comp-player" onchange="compRender()" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px;background:#fff;min-width:200px">
-          <option value="">— Seleccioná un jugador —</option>
-        </select>
-      </label>
-      <label style="font-size:11px;font-weight:600;color:#0C447C;display:flex;align-items:center;gap:6px">
-        Minutos mínimos:
-        <input id="comp-min-mins" type="number" value="60" min="0" max="120" step="5" onchange="compRender()" style="width:60px;padding:5px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center">
-      </label>
-      <span id="comp-info" style="font-size:10px;color:#666"></span>
+    <!-- Derecha: dos cuadritos compactos lado a lado -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div id="comp-max-box" style="background:#fff8e1;border:1px solid #f0d878;border-radius:7px;padding:10px 12px;min-width:230px">
+        <div style="font-size:11px;font-weight:700;color:#9c5a00;margin-bottom:6px;border-bottom:1px solid #f0d878;padding-bottom:4px">⭐ Perfil MÁXIMO</div>
+        <div id="comp-max-content" style="font-size:10px;color:#aaa">Seleccioná un jugador.</div>
+      </div>
+      <div id="comp-avg-box" style="background:#e8f3ee;border:1px solid #b8dcc4;border-radius:7px;padding:10px 12px;min-width:230px">
+        <div style="font-size:11px;font-weight:700;color:#0F6E56;margin-bottom:6px;border-bottom:1px solid #b8dcc4;padding-bottom:4px">📊 Perfil PROMEDIO</div>
+        <div id="comp-avg-content" style="font-size:10px;color:#aaa">Seleccioná un jugador.</div>
+      </div>
     </div>
-    <!-- Tablas -->
-    <div id="comp-content"></div>
-  </div></div>
+  </div>
+  <!-- Slot donde se inyecta TODO el contenido original de la pestaña Jugadores -->
+  <div id="comp-jugadores-slot"></div>
 </div><!-- /prof-subview-competencia -->
 
 <!-- SUBTAB: Nutricional -->
@@ -21374,7 +21384,25 @@ window.profSetSubtab=profSetSubtab;
 // ═══════════════════════════════════════════════════════════════
 // PERFIL DE COMPETENCIA — registros máximos y promedios en partidos
 // ═══════════════════════════════════════════════════════════════
+// Al primer uso, "mueve" el contenido completo de la vieja vista
+// view-players adentro del slot, para que todo lo que ya estaba
+// (PDF import, multi-select, gráficos, etc.) siga funcionando igual.
+var _compMovedJugadores = false;
+function _compMoveJugadoresContent(){
+  if(_compMovedJugadores) return;
+  var slot = document.getElementById('comp-jugadores-slot');
+  var src  = document.getElementById('view-players');
+  if(!slot || !src) return;
+  // Mover TODOS los hijos de view-players al slot
+  while(src.firstChild){
+    slot.appendChild(src.firstChild);
+  }
+  _compMovedJugadores = true;
+}
+
 function compInit(){
+  // Mover el contenido de view-players al slot la primera vez
+  _compMoveJugadoresContent();
   // Construir el dropdown de jugadores a partir de los partidos
   var sel=document.getElementById('comp-player');
   if(!sel) return;
@@ -21389,6 +21417,8 @@ function compInit(){
   sel.innerHTML='<option value="">— Seleccioná un jugador —</option>'+
     sorted.map(function(n){return '<option value="'+n.key+'">'+n.display+'</option>';}).join('');
   if(prevValue && names[prevValue]) sel.value=prevValue;
+  // Llamar también a plRebuild() para que se llene el contenido viejo de Jugadores
+  if(typeof plRebuild==='function') try{ plRebuild(); }catch(e){}
   compRender();
 }
 window.compInit=compInit;
@@ -21397,91 +21427,66 @@ function compRender(){
   var sel=document.getElementById('comp-player');
   var minInput=document.getElementById('comp-min-mins');
   var info=document.getElementById('comp-info');
-  var cont=document.getElementById('comp-content');
-  if(!sel||!cont) return;
+  var maxCont=document.getElementById('comp-max-content');
+  var avgCont=document.getElementById('comp-avg-content');
+  if(!sel||!maxCont||!avgCont) return;
   var pkey=sel.value;
   var minMins=parseFloat(minInput?minInput.value:60)||0;
+  // Sincronizar con el dropdown grande de la vieja vista Jugadores
+  var bigSel=document.getElementById('pl-player-sel');
+  if(bigSel && pkey){
+    // Asegurar que ese jugador esté seleccionado (multi-select)
+    Array.from(bigSel.options).forEach(function(o){o.selected=(o.value===pkey);});
+    if(typeof plRender==='function') try{ plRender(); }catch(e){}
+  }
   if(!pkey){
-    cont.innerHTML='<div style="color:#aaa;font-size:11px;text-align:center;padding:30px;background:#f5f8ff;border:2px dashed #c0cde8;border-radius:10px">📋 Seleccioná un jugador para ver su perfil de competencia.</div>';
+    maxCont.innerHTML='<span style="color:#aaa">Seleccioná un jugador.</span>';
+    avgCont.innerHTML='<span style="color:#aaa">Seleccioná un jugador.</span>';
     if(info) info.textContent='';
     return;
   }
-  // Obtener todos los partidos del jugador con min >= filtro
   if(typeof plGetAllData!=='function'){
-    cont.innerHTML='<div style="color:#aaa;font-size:11px;text-align:center;padding:20px">Sin partidos cargados.</div>';
+    maxCont.innerHTML='<span style="color:#aaa">Sin datos.</span>';
+    avgCont.innerHTML='<span style="color:#aaa">Sin datos.</span>';
     return;
   }
   var rows=plGetAllData().filter(function(r){
     return r.name && r.name.toLowerCase()===pkey && (r.min||0)>=minMins;
   });
   if(!rows.length){
-    cont.innerHTML='<div style="color:#aaa;font-size:11px;text-align:center;padding:30px;background:#fffaf2;border:1px dashed #f0d0a0;border-radius:8px">'+
-      '⚠ No hay partidos de este jugador con al menos '+minMins+' minutos jugados.'+
-      '<div style="margin-top:6px;font-size:10px">Probá bajar el filtro de minutos mínimos.</div></div>';
+    maxCont.innerHTML='<span style="color:#c87000">⚠ Sin partidos con ≥'+minMins+' min</span>';
+    avgCont.innerHTML='<span style="color:#c87000">⚠ Sin partidos con ≥'+minMins+' min</span>';
     if(info) info.textContent='';
     return;
   }
-  if(info) info.textContent=rows.length+' partido'+(rows.length>1?'s':'')+' usado'+(rows.length>1?'s':'')+' para el cálculo';
+  if(info) info.textContent=rows.length+' partido'+(rows.length>1?'s':'')+' incluido'+(rows.length>1?'s':'');
 
-  // Métricas a mostrar
-  // HSR = 18-21 + 21-25 + +25 (sumatoria de alta intensidad)
+  // HSR = 18-21 + 21-25 + +25
   function hsrTot(r){return (r.hsr||0)+(r.h2||0)+(r.h25||0);}
-  function avg(vals){return vals.reduce(function(a,b){return a+b;},0)/vals.length;}
-  function maxOf(vals){return Math.max.apply(null, vals);}
-  // Para la fecha del máximo
-  function rowOfMax(rows, getter){
-    var best=rows[0], bv=getter(rows[0]);
-    rows.forEach(function(r){var v=getter(r); if(v>bv){bv=v;best=r;}});
-    return {row:best, value:bv};
-  }
+  function maxOf(g){return Math.max.apply(null, rows.map(g));}
+  function avgOf(g){var v=rows.map(g);return v.reduce(function(a,b){return a+b;},0)/v.length;}
 
+  // Métricas para mostrar (compactas, 1 columna)
   var metrics=[
-    {k:'mts',  lbl:'Distancia total (m)',   fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.mts||0;}},
-    {k:'hsr_t',lbl:'HSR — Alta intensidad (m)', sub:'18-21 + 21-25 + +25 km/h', fmt:function(v){return v.toFixed(0);}, getter:hsrTot},
-    {k:'acc',  lbl:'Acc esfuerzo (+3 m/s²)', fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.acc||0;}},
-    {k:'dcc',  lbl:'Dec esfuerzo (+3 m/s²)', fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.dcc||0;}},
-    {k:'spr',  lbl:'Sprints (+25 km/h)',    fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.spr||0;}},
-    {k:'vmax', lbl:'Vmax (km/h)',           fmt:function(v){return v.toFixed(1);}, getter:function(r){return r.vmax||0;}},
-    {k:'rhie', lbl:'RHIE (bouts)',          fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.rhie||0;}},
-    {k:'min',  lbl:'Minutos jugados',       fmt:function(v){return v.toFixed(0);}, getter:function(r){return r.min||0;}},
+    {lbl:'Mts',     getter:function(r){return r.mts||0;}, fmt:function(v){return Math.round(v).toLocaleString('es-AR');}},
+    {lbl:'HSR',     getter:hsrTot,                         fmt:function(v){return Math.round(v).toLocaleString('es-AR')+' m';}, hint:'18-21 + 21-25 + +25'},
+    {lbl:'Acc',     getter:function(r){return r.acc||0;}, fmt:function(v){return Math.round(v);}},
+    {lbl:'Dec',     getter:function(r){return r.dcc||0;}, fmt:function(v){return Math.round(v);}},
+    {lbl:'Sprints', getter:function(r){return r.spr||0;}, fmt:function(v){return Math.round(v);}},
+    {lbl:'Vmax',    getter:function(r){return r.vmax||0;}, fmt:function(v){return v.toFixed(1)+' km/h';}},
+    {lbl:'RHIE',    getter:function(r){return r.rhie||0;}, fmt:function(v){return Math.round(v);}},
   ];
 
-  // Tabla 1: MÁXIMOS
-  var maxHtml='<div style="margin-bottom:18px"><div style="font-size:11px;font-weight:700;color:#0D1B2A;margin-bottom:6px">⭐ Perfil MÁXIMO de competencia</div>'+
-    '<div style="font-size:10px;color:#666;margin-bottom:7px">El mejor registro individual del jugador en un partido (con su fecha).</div>'+
-    '<div style="overflow-x:auto;border:1px solid #dde4f0;border-radius:6px;background:#fff">'+
-    '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
-    '<thead><tr style="background:#fff8e1"><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0d878">Métrica</th><th style="padding:6px 10px;text-align:right;border-bottom:1px solid #f0d878;color:#9c5a00">Máximo</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0d878;font-size:10px;color:#888">Partido</th></tr></thead><tbody>';
-  metrics.forEach(function(m){
-    var info=rowOfMax(rows, m.getter);
-    var dateTxt=info.row.fecha?info.row.fecha.split('-').reverse().join('/'):'—';
-    var rival=info.row.rival||'';
-    var sub=m.sub?'<div style="font-size:9px;color:#999">'+m.sub+'</div>':'';
-    maxHtml+='<tr><td style="padding:6px 10px;border-bottom:0.5px solid #eee;font-weight:600">'+m.lbl+sub+'</td>'+
-      '<td style="padding:6px 10px;border-bottom:0.5px solid #eee;text-align:right;font-weight:700;color:#9c5a00;font-size:13px">'+m.fmt(info.value)+'</td>'+
-      '<td style="padding:6px 10px;border-bottom:0.5px solid #eee;font-size:10px;color:#666">'+dateTxt+(rival?' · '+rival:'')+'</td></tr>';
-  });
-  maxHtml+='</tbody></table></div></div>';
+  function buildList(getValue, color){
+    return metrics.map(function(m){
+      var v=getValue(m.getter);
+      var hint=m.hint?'<span style="font-size:9px;color:#999;margin-left:4px">('+m.hint+')</span>':'';
+      return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:0.5px dotted #ddd"><span style="font-size:10px;color:#555">'+m.lbl+hint+'</span><span style="font-size:11px;font-weight:700;color:'+color+'">'+m.fmt(v)+'</span></div>';
+    }).join('');
+  }
 
-  // Tabla 2: PROMEDIOS
-  var avgHtml='<div><div style="font-size:11px;font-weight:700;color:#0D1B2A;margin-bottom:6px">📊 Perfil PROMEDIO de competencia</div>'+
-    '<div style="font-size:10px;color:#666;margin-bottom:7px">Promedio del jugador sobre los '+rows.length+' partidos con ≥'+minMins+' min.</div>'+
-    '<div style="overflow-x:auto;border:1px solid #dde4f0;border-radius:6px;background:#fff">'+
-    '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
-    '<thead><tr style="background:#e8f3ee"><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #b8dcc4">Métrica</th><th style="padding:6px 10px;text-align:right;border-bottom:1px solid #b8dcc4;color:#0F6E56">Promedio</th><th style="padding:6px 10px;text-align:right;border-bottom:1px solid #b8dcc4;font-size:10px;color:#888">Rango (mín–máx)</th></tr></thead><tbody>';
-  metrics.forEach(function(m){
-    var vals=rows.map(m.getter);
-    var avgV=avg(vals);
-    var minV=Math.min.apply(null, vals);
-    var maxV=Math.max.apply(null, vals);
-    var sub=m.sub?'<div style="font-size:9px;color:#999">'+m.sub+'</div>':'';
-    avgHtml+='<tr><td style="padding:6px 10px;border-bottom:0.5px solid #eee;font-weight:600">'+m.lbl+sub+'</td>'+
-      '<td style="padding:6px 10px;border-bottom:0.5px solid #eee;text-align:right;font-weight:700;color:#0F6E56;font-size:13px">'+m.fmt(avgV)+'</td>'+
-      '<td style="padding:6px 10px;border-bottom:0.5px solid #eee;text-align:right;font-size:10px;color:#888">'+m.fmt(minV)+' — '+m.fmt(maxV)+'</td></tr>';
-  });
-  avgHtml+='</tbody></table></div></div>';
-
-  cont.innerHTML=maxHtml+avgHtml;
+  maxCont.innerHTML=buildList(maxOf, '#9c5a00');
+  avgCont.innerHTML=buildList(avgOf, '#0F6E56');
 }
 window.compRender=compRender;
 
