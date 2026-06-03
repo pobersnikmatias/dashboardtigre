@@ -4395,7 +4395,7 @@ function mcRenderWeek(){
 
   let html='<div style="padding:10px">';
 
-  // ── Sessions ──
+  // ── Sessions defs (usado en mcBuildTable) ──
   var METRIC_DEFS=[
     {k:'mts',l:'Dist (m)',dec:0,color:'#3B4D88'},
     {k:'hsr',l:'18-21 km/h',dec:0,color:'#1D9E75'},
@@ -4405,26 +4405,7 @@ function mcRenderWeek(){
     {k:'dcc',l:'Dec+3',dec:1,color:'#D4537E'},
     {k:'rhie',l:'RHIE',dec:1,color:'#0F6E56'},
   ];
-  sessions.forEach((sess,si)=>{
-    const uaStr=sess.ua!=null?'<span style="background:#9C59D122;color:#9C59D1;border:1px solid #9C59D155;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700">UA: '+sess.ua+'</span>':'';
-    const estBadge=sess._isEstimated?'<span style="background:#7F77DD22;color:#7F77DD;border:1px solid #7F77DD55;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700">📐 Estimado</span>':'';
-    const fechaStr=sess.fecha?'<span style="font-size:10px;color:#555;background:#f0f2f5;border-radius:4px;padding:1px 7px">📅 '+sess.fecha.split('-').reverse().join('/')+'</span>':'';
-    var refChips='';
-    var moveButtons='<div style="display:flex;gap:2px;margin-left:auto">'
-      +'<button onclick="mcMoveDay(\''+week+'\','+si+',-1)" style="border:1px solid #ddd;background:#f9f9f9;cursor:pointer;border-radius:3px;padding:1px 7px;font-size:11px;color:#555" title="Subir"'+(si===0?' disabled':'')+'>↑</button>'
-      +'<button onclick="mcMoveDay(\''+week+'\','+si+',1)" style="border:1px solid #ddd;background:#f9f9f9;cursor:pointer;border-radius:3px;padding:1px 7px;font-size:11px;color:#555" title="Bajar"'+(si===sessions.length-1?' disabled':'')+'>↓</button>'
-      +'</div>';
-    html+='<div style="margin-bottom:16px"><div style="font-size:11px;font-weight:700;color:#0D1B2A;margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-      +'<span style="background:#3B4D88;color:#fff;padding:2px 10px;border-radius:12px">'+sess.day+'</span>'
-      +fechaStr
-      +'<span style="color:#888">'+sess.week+'</span>'
-      +(sess.pse?'<span style="color:#EF9F27;font-size:10px">PSE: '+sess.pse+'</span>':'')
-      +uaStr+estBadge
-      +(sess.ref?'<span style="font-size:10px;color:#aaa;font-weight:400">Ref: '+Math.round(sess.ref.mts)+'m · '+Math.round(sess.ref.hsr)+'m 18-21</span>':'<span style="font-size:10px;color:#E24B4A">Sin ref de partido</span>')
-      +moveButtons
-      +'</div>'+refChips
-      +'<div style="overflow-x:auto">'+mcBuildTable(sess.players,sess.ref,{week:week,day:sess.day})+'</div></div>';
-  });
+  // [El render de sesiones individuales por día se hace al FINAL, después de la tabla unificada]
 
   // ── Weekly TOTAL row ──
   const mk=(metrics_list)=>metrics_list.map(m=>{
@@ -4717,6 +4698,28 @@ function mcRenderWeek(){
   });
 
   html+='</tbody></table></div>';
+
+  // ── Sesiones individuales (desglose por día MD-N), ahora abajo de todo ──
+  sessions.forEach((sess,si)=>{
+    const uaStr=sess.ua!=null?'<span style="background:#9C59D122;color:#9C59D1;border:1px solid #9C59D155;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700">UA: '+sess.ua+'</span>':'';
+    const estBadge=sess._isEstimated?'<span style="background:#7F77DD22;color:#7F77DD;border:1px solid #7F77DD55;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700">📐 Estimado</span>':'';
+    const fechaStr=sess.fecha?'<span style="font-size:10px;color:#555;background:#f0f2f5;border-radius:4px;padding:1px 7px">📅 '+sess.fecha.split('-').reverse().join('/')+'</span>':'';
+    var refChips='';
+    var moveButtons='<div style="display:flex;gap:2px;margin-left:auto">'
+      +'<button onclick="mcMoveDay(\''+week+'\','+si+',-1)" style="border:1px solid #ddd;background:#f9f9f9;cursor:pointer;border-radius:3px;padding:1px 7px;font-size:11px;color:#555" title="Subir"'+(si===0?' disabled':'')+'>↑</button>'
+      +'<button onclick="mcMoveDay(\''+week+'\','+si+',1)" style="border:1px solid #ddd;background:#f9f9f9;cursor:pointer;border-radius:3px;padding:1px 7px;font-size:11px;color:#555" title="Bajar"'+(si===sessions.length-1?' disabled':'')+'>↓</button>'
+      +'</div>';
+    html+='<div style="margin-top:16px;margin-bottom:6px"><div style="font-size:11px;font-weight:700;color:#0D1B2A;margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      +'<span style="background:#3B4D88;color:#fff;padding:2px 10px;border-radius:12px">'+sess.day+'</span>'
+      +fechaStr
+      +'<span style="color:#888">'+sess.week+'</span>'
+      +(sess.pse?'<span style="color:#EF9F27;font-size:10px">PSE: '+sess.pse+'</span>':'')
+      +uaStr+estBadge
+      +(sess.ref?'<span style="font-size:10px;color:#aaa;font-weight:400">Ref: '+Math.round(sess.ref.mts)+'m · '+Math.round(sess.ref.hsr)+'m 18-21</span>':'<span style="font-size:10px;color:#E24B4A">Sin ref de partido</span>')
+      +moveButtons
+      +'</div>'+refChips
+      +'<div style="overflow-x:auto">'+mcBuildTable(sess.players,sess.ref,{week:week,day:sess.day})+'</div></div>';
+  });
 
   wrap.innerHTML=html;
 }
@@ -5277,10 +5280,39 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   <div style="padding:16px;color:#aaa;font-size:11px;text-align:center">Importá una sesión para comenzar</div>
 </div>
 
-<!-- Sesión estimada sin GPS -->
-<details style="margin-bottom:10px">
-<div class="panel"><summary style="cursor:pointer">📐 Agregar sesión estimada (sin GPS) — elegir jugadores y ejercicios</summary>
-<div class="panel-body" style="padding:10px 14px">
+<div class="panel">
+<div class="panel-body">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+    <span style="font-size:12px;font-weight:700;color:#0D1B2A">Carga aguda vs crónica</span>
+    <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">Crónica (sem previas):
+      <input type="number" id="mc-chronic-n" value="3" min="1" max="20" onchange="mcRenderLoad()" style="width:42px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center">
+    </label>
+    <select id="mc-load-metric" onchange="mcRenderLoad()" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff">
+      <option value="ua">UA (Unid. Arbitrarias)</option>
+      <option value="mts">Distancia total (m)</option>
+      <option value="hsr">18-21 km/h (m)</option>
+      <option value="h2">21-25 km/h (m)</option>
+      <option value="h25">+25 km/h (m)</option>
+      <option value="acc">Acc+3</option>
+      <option value="dcc">Dec+3</option>
+      <option value="rhie">RHIE</option>
+    </select>
+    <select id="mc-load-weeks" onchange="mcRenderLoad()" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff">
+      <option value="4">Últimas 4 semanas</option>
+      <option value="6">Últimas 6 semanas</option>
+      <option value="8">Últimas 8 semanas</option>
+      <option value="all">Todas</option>
+    </select>
+  </div>
+  <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px">
+    <canvas id="mc-load-chart" height="120"></canvas>
+  </div>
+</div></div>
+
+<!-- Sesión estimada sin GPS (botón desplegable estilo Importar) -->
+<details class="mc-import-toggle" style="margin-top:10px">
+<summary>📐 Agregar sesión estimada (sin GPS)</summary>
+<div style="padding:10px 14px">
   <div style="font-size:10px;color:#777;margin-bottom:10px">Registrá una sesión para jugadores sin GPS ese día, usando ejercicios de tu biblioteca. Las métricas se estiman a partir de los valores m/min del ejercicio.</div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
     <label style="font-size:10px;font-weight:600;display:flex;flex-direction:column;gap:3px">Semana
@@ -5327,44 +5359,17 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
     <span id="mc-est-msg" style="font-size:11px;color:#1D9E75"></span>
   </div>
   <div id="mc-est-preview" style="margin-top:10px"></div>
-</div></div>
+</div>
 </details>
 
-<details style="margin-bottom:8px">
-<div class="panel"><summary style="cursor:pointer">⚙ Configurar bandas de carga (umbrales y colores)</summary>
-<div class="panel-body" style="padding:8px 14px">
+<!-- Configurar bandas (botón desplegable estilo Importar) -->
+<details class="mc-import-toggle" style="margin-top:8px">
+<summary>⚙ Configurar bandas de carga (umbrales y colores)</summary>
+<div style="padding:10px 14px">
   <div style="font-size:10px;color:#777;margin-bottom:7px">Dos sistemas de bandas configurables: (1) <strong>Jugadores y promedio del día</strong> — umbrales en % vs partido de referencia. (2) <strong>Total semana vs semana anterior</strong> — umbrales de ratio (×N), similar a carga aguda/crónica.</div>
   <div id="mc-band-config"></div>
-</div></div></details>
-
-<div class="panel">
-<div class="panel-body">
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-    <span style="font-size:12px;font-weight:700;color:#0D1B2A">Carga aguda vs crónica</span>
-    <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">Crónica (sem previas):
-      <input type="number" id="mc-chronic-n" value="3" min="1" max="20" onchange="mcRenderLoad()" style="width:42px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center">
-    </label>
-    <select id="mc-load-metric" onchange="mcRenderLoad()" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff">
-      <option value="ua">UA (Unid. Arbitrarias)</option>
-      <option value="mts">Distancia total (m)</option>
-      <option value="hsr">18-21 km/h (m)</option>
-      <option value="h2">21-25 km/h (m)</option>
-      <option value="h25">+25 km/h (m)</option>
-      <option value="acc">Acc+3</option>
-      <option value="dcc">Dec+3</option>
-      <option value="rhie">RHIE</option>
-    </select>
-    <select id="mc-load-weeks" onchange="mcRenderLoad()" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff">
-      <option value="4">Últimas 4 semanas</option>
-      <option value="6">Últimas 6 semanas</option>
-      <option value="8">Últimas 8 semanas</option>
-      <option value="all">Todas</option>
-    </select>
-  </div>
-  <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px">
-    <canvas id="mc-load-chart" height="120"></canvas>
-  </div>
-</div></div>
+</div>
+</details>
 
 
 </div><!-- /view-micro -->
