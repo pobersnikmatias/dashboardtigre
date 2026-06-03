@@ -5145,10 +5145,32 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
 <!-- VISTA MICROCICLO -->
 <div id="view-micro" style="display:none">
 
-<div class="panel" style="margin-bottom:10px">
-<div class="panel-body" style="padding:10px 14px">
+<!-- ── Botón desplegable "Importar sesión GPS" (cerrado por defecto, se ilumina al abrir) ── -->
+<style>
+.mc-import-toggle{
+  display:block;width:100%;margin-bottom:8px;
+  border:1px solid #d0d6e0;border-radius:6px;background:#fff;overflow:hidden;
+}
+.mc-import-toggle > summary{
+  list-style:none;cursor:pointer;font-weight:700;padding:9px 14px;
+  font-size:12px;color:#3B4D88;background:#f0f3f8;
+  transition:all .15s ease;user-select:none;
+  display:flex;align-items:center;gap:8px;
+}
+.mc-import-toggle > summary::-webkit-details-marker{display:none}
+.mc-import-toggle > summary::before{
+  content:'▸';font-size:10px;color:#888;transition:transform .15s ease;
+}
+.mc-import-toggle[open] > summary{background:#3B4D88;color:#fff;box-shadow:0 2px 8px rgba(59,77,136,0.3)}
+.mc-import-toggle[open] > summary::before{transform:rotate(90deg);color:#fff}
+.mc-import-toggle > summary:hover{background:#e3e9f3}
+.mc-import-toggle[open] > summary:hover{background:#2d3d70}
+</style>
+
+<details class="mc-import-toggle">
+<summary>📥 Importar sesión GPS</summary>
+<div style="padding:10px 14px">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-    <span style="font-size:12px;font-weight:700;color:#0D1B2A">Importar sesión GPS</span>
     <select id="mc-day-sel" style="font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:5px;background:#fff">
       <option value="MD-5">MD-5</option><option value="MD-4">MD-4</option><option value="MD-3">MD-3</option>
       <option value="MD-2">MD-2</option><option value="MD-1">MD-1</option><option value="MD">MD (Partido)</option>
@@ -5238,7 +5260,8 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       <span id="mc-imp-msg" style="font-size:11px;color:#1D9E75"></span>
     </div>
   </div>
-</div></div>
+</div>
+</details>
 
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
   <span style="font-size:11px;font-weight:700;color:#333">Ver semana:</span>
@@ -5247,6 +5270,11 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   </select>
   <button class="btn bc" onclick="mcDeleteWeek()" style="font-size:10px;padding:3px 10px">Eliminar semana</button>
   <button class="btn bg" onclick="mcRoleOpenModal()" style="font-size:10px;padding:3px 10px" title="Comparar carga de Titulares (+60) vs Suplentes vs No convocados">📊 Titulares vs Suplentes</button>
+</div>
+
+<!-- TOTAL semana + por jugador (movido arriba) -->
+<div id="mc-week-table" style="overflow-x:auto;border:1px solid #ddd;border-radius:7px;background:#fff;margin-bottom:10px;min-height:40px">
+  <div style="padding:16px;color:#aaa;font-size:11px;text-align:center">Importá una sesión para comenzar</div>
 </div>
 
 <!-- Sesión estimada sin GPS -->
@@ -5308,10 +5336,6 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   <div style="font-size:10px;color:#777;margin-bottom:7px">Dos sistemas de bandas configurables: (1) <strong>Jugadores y promedio del día</strong> — umbrales en % vs partido de referencia. (2) <strong>Total semana vs semana anterior</strong> — umbrales de ratio (×N), similar a carga aguda/crónica.</div>
   <div id="mc-band-config"></div>
 </div></div></details>
-
-<div id="mc-week-table" style="overflow-x:auto;border:1px solid #ddd;border-radius:7px;background:#fff;margin-bottom:10px;min-height:40px">
-  <div style="padding:16px;color:#aaa;font-size:11px;text-align:center">Importá una sesión para comenzar</div>
-</div>
 
 <div class="panel">
 <div class="panel-body">
