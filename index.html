@@ -17982,8 +17982,46 @@ function fixStartEdit(n){
   document.getElementById('fix-panel-title').textContent = '✏️ Editando F'+n+' — '+fix.rival;
   document.getElementById('fix-panel-sub').textContent = (fix.cond==='Local'?'🏠':'✈️')+' '+fix.cond;
   document.getElementById('fix-panel-body').innerHTML = fixBuildEditHTML(n, fix, data);
+  // Construir el datalist de jugadores para el autocompletar
+  fixBuildPlayersDatalist();
 }
 window.fixStartEdit = fixStartEdit;
+
+// Construye un <datalist> global con todos los jugadores de PLAYER_PROFILES.
+// Para cada perfil, genera 3 opciones: nombre completo, solo apellido, solo nombre.
+// Los inputs de jugadores en la planilla referencian este datalist via list="fix-players-datalist".
+function fixBuildPlayersDatalist(){
+  // Eliminar datalist viejo si existe
+  var old = document.getElementById('fix-players-datalist');
+  if(old) old.remove();
+  var dl = document.createElement('datalist');
+  dl.id = 'fix-players-datalist';
+  var seen = {};
+  if(typeof PLAYER_PROFILES !== 'undefined'){
+    Object.keys(PLAYER_PROFILES).forEach(function(k){
+      var p = PLAYER_PROFILES[k];
+      var fullName = (p && p.name) ? String(p.name).trim() : '';
+      if(!fullName) return;
+      function addOption(val){
+        if(!val || seen[val.toLowerCase()]) return;
+        seen[val.toLowerCase()] = true;
+        var opt = document.createElement('option');
+        opt.value = val;
+        dl.appendChild(opt);
+      }
+      // Opción 1: nombre completo
+      addOption(fullName);
+      // Opciones 2 y 3: dividir por espacio y agregar última palabra (apellido) y primera (nombre)
+      var parts = fullName.split(/\s+/).filter(Boolean);
+      if(parts.length > 1){
+        addOption(parts[parts.length-1]);  // apellido (última palabra)
+        addOption(parts[0]);                // nombre (primera palabra)
+      }
+    });
+  }
+  document.body.appendChild(dl);
+}
+window.fixBuildPlayersDatalist = fixBuildPlayersDatalist;
 
 function fixBuildEditHTML(n, fix, data){
   var d = data || {};
@@ -18010,7 +18048,7 @@ function fixBuildEditHTML(n, fix, data){
   html += '<label style="'+label+'">Sist. propio<input id="fe-sist-prop" style="'+inp+'" value="'+(d.sist_propio||'')+'" placeholder="4-3-3"></label>';
   html += '<label style="'+label+'">Sist. rival<input id="fe-sist-riv" style="'+inp+'" value="'+(d.sist_rival||'')+'" placeholder="4-3-3"></label>';
   html += '<label style="'+label+'">Rendimiento (1-10)<input id="fe-rend" style="'+inpSm+'" type="number" min="1" max="10" value="'+(d.rendimiento||'')+'" placeholder="7"></label>';
-  html += '<label style="'+label+'">Figura<input id="fe-figura" style="'+inp+'" value="'+(d.figura||'')+'" placeholder="Nombre"></label>';
+  html += '<label style="'+label+'">Figura<input id="fe-figura" list="fix-players-datalist" style="'+inp+'" value="'+(d.figura||'')+'" placeholder="Nombre"></label>';
   html += '<label style="'+label+'">Clima<input id="fe-clima" style="'+inp+'" value="'+(d.clima||'')+'" placeholder="22° · Viento 5 km/h"></label>';
   html += '<label style="'+label+';grid-column:1/-1">Incidencias<input id="fe-incid" style="'+inp+'" value="'+(d.incidencias||'')+'" placeholder="Notas del partido"></label>';
   html += '</div></div>';
@@ -18024,7 +18062,7 @@ function fixBuildEditHTML(n, fix, data){
     var p=tit[i]||{n:i+1,j:'',min:'',rend:''};
     html+='<tr style="background:'+(i%2===0?'#fff':'#fafafa')+'">'
       +'<td style="padding:4px 7px;border:0.5px solid #eee;text-align:center;color:#aaa;font-weight:600">'+(i+1)+'</td>'
-      +'<td style="padding:4px 7px;border:0.5px solid #eee"><input style="'+inp+'" id="fe-tit-j-'+i+'" value="'+(p.j||'')+'" placeholder="Apellido"></td>'
+      +'<td style="padding:4px 7px;border:0.5px solid #eee"><input style="'+inp+'" list="fix-players-datalist" id="fe-tit-j-'+i+'" value="'+(p.j||'')+'" placeholder="Apellido"></td>'
       +'<td style="padding:4px 7px;border:0.5px solid #eee"><input style="'+inpSm+'" type="number" id="fe-tit-min-'+i+'" value="'+(p.min||'')+'" placeholder="90"></td>'
       +'<td style="padding:4px 7px;border:0.5px solid #eee"><input style="'+inpSm+'" type="number" min="1" max="10" id="fe-tit-rend-'+i+'" value="'+(p.rend||'')+'" placeholder="7"></td>'
       +'</tr>';
@@ -18040,7 +18078,7 @@ function fixBuildEditHTML(n, fix, data){
     var sp=sup[j]||{n:j+12,j:'',min:'',rend:''};
     html+='<tr style="background:'+(j%2===0?'#fff':'#fafafa')+'">'
       +'<td style="padding:4px 7px;border:0.5px solid #eee;text-align:center;color:#aaa;font-weight:600">'+(j+12)+'</td>'
-      +'<td style="padding:4px 7px;border:0.5px solid #eee"><input style="'+inp+'" id="fe-sup-j-'+j+'" value="'+(sp.j||'')+'" placeholder="Apellido"></td>'
+      +'<td style="padding:4px 7px;border:0.5px solid #eee"><input style="'+inp+'" list="fix-players-datalist" id="fe-sup-j-'+j+'" value="'+(sp.j||'')+'" placeholder="Apellido"></td>'
       +'<td style="padding:4px 7px;border:0.5px solid #eee"><input style="'+inpSm+'" type="number" id="fe-sup-min-'+j+'" value="'+(sp.min||'')+'" placeholder=""></td>'
       +'<td style="padding:4px 7px;border:0.5px solid #eee"><input style="'+inpSm+'" type="number" min="1" max="10" id="fe-sup-rend-'+j+'" value="'+(sp.rend||'')+'" placeholder=""></td>'
       +'</tr>';
@@ -18098,10 +18136,10 @@ function fixCambioRowHTML(idx, c){
   var inp2 = 'padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;background:#fff;width:100%;box-sizing:border-box';
   return '<div id="fe-cambio-'+idx+'" style="display:flex;gap:6px;align-items:center;margin-bottom:5px;background:#f7f8fa;border-radius:6px;padding:5px 8px">'
     +'<span style="font-size:10px;color:#1D9E75;font-weight:700;min-width:14px">↑</span>'
-    +'<input style="'+inp2+'" id="fe-cambio-entra-'+idx+'" placeholder="Entra" value="'+(c.entra||'')+'">'
+    +'<input style="'+inp2+'" list="fix-players-datalist" id="fe-cambio-entra-'+idx+'" placeholder="Entra" value="'+(c.entra||'')+'">'
     +'<span style="font-size:10px;color:#aaa">por</span>'
     +'<span style="font-size:10px;color:#888;font-weight:700;min-width:14px">↓</span>'
-    +'<input style="'+inp2+'" id="fe-cambio-sale-'+idx+'" placeholder="Sale" value="'+(c.sale||'')+'">'
+    +'<input style="'+inp2+'" list="fix-players-datalist" id="fe-cambio-sale-'+idx+'" placeholder="Sale" value="'+(c.sale||'')+'">'
     +'<input style="padding:4px 5px;border:1px solid #ddd;border-radius:4px;font-size:11px;width:46px;text-align:center" type="number" id="fe-cambio-min-'+idx+'" placeholder="Min" value="'+(c.min||'')+'">'
     +'<input style="'+inp2+'" id="fe-cambio-motivo-'+idx+'" placeholder="Motivo" value="'+(c.motivo||'')+'">'
     +'<button onclick="document.getElementById(\'fe-cambio-'+idx+'\').remove()" style="border:none;background:none;cursor:pointer;color:#ddd;font-size:14px;padding:0 2px;flex-shrink:0">✕</button>'
@@ -18113,9 +18151,9 @@ function fixGolRowHTML(idx, g){
   var inp2 = 'padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;background:#fff;width:100%;box-sizing:border-box';
   return '<div id="fe-gol-'+idx+'" style="display:flex;gap:6px;align-items:center;margin-bottom:5px;background:#f7f8fa;border-radius:6px;padding:5px 8px">'
     +'<span style="font-size:14px">⚽</span>'
-    +'<input style="'+inp2+'" id="fe-gol-gol-'+idx+'" placeholder="Goleador" value="'+(g.gol||'')+'">'
+    +'<input style="'+inp2+'" list="fix-players-datalist" id="fe-gol-gol-'+idx+'" placeholder="Goleador" value="'+(g.gol||'')+'">'
     +'<span style="font-size:10px;color:#aaa;flex-shrink:0">asist.</span>'
-    +'<input style="'+inp2+'" id="fe-gol-asist-'+idx+'" placeholder="Asistidor" value="'+(g.asist||'')+'">'
+    +'<input style="'+inp2+'" list="fix-players-datalist" id="fe-gol-asist-'+idx+'" placeholder="Asistidor" value="'+(g.asist||'')+'">'
     +'<input style="padding:4px 5px;border:1px solid #ddd;border-radius:4px;font-size:11px;width:46px;text-align:center" type="number" id="fe-gol-min-'+idx+'" placeholder="Min" value="'+(g.min||'')+'">'
     +'<input style="padding:4px 5px;border:1px solid #ddd;border-radius:4px;font-size:11px;width:58px;text-align:center" id="fe-gol-result-'+idx+'" placeholder="1-0" value="'+(g.result||'')+'">'
     +'<button onclick="document.getElementById(\'fe-gol-'+idx+'\').remove()" style="border:none;background:none;cursor:pointer;color:#ddd;font-size:14px;padding:0 2px;flex-shrink:0">✕</button>'
