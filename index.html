@@ -4521,9 +4521,11 @@ function mcRenderWeek(){
     ${METRICS_LIST.map(m=>'<th style="padding:4px 5px;border-bottom:1px solid #ddd;text-align:center;color:'+m.color+'">'+m.l+'</th>').join('')}
   </tr></thead><tbody>`;
 
-  // ── Fila EQUIPO (suma de TODOS los jugadores de la semana) ──
+  // ── Fila EQUIPO (PROMEDIO por jugador en la semana) ──
   // Va arriba de todo, destacada visualmente.
+  // Cada métrica = suma total de la semana / cantidad de jugadores únicos
   (function buildTeamRow(){
+    var nPlayers = playerNames.length || 1; // evitar /0
     var teamTot={};
     METRICS_LIST.forEach(function(m){
       if(m.special) return;
@@ -4537,10 +4539,21 @@ function mcRenderWeek(){
         });
       });
     });
-    // Prev team totals
-    var prevTeamTot=null;
+    // Convertir sumas en promedios por jugador
+    var teamAvg={};
+    METRICS_LIST.forEach(function(m){
+      if(m.special) return;
+      teamAvg[m.k] = teamTot[m.k] / nPlayers;
+    });
+    // Prev: promedio en la semana anterior
+    var prevTeamAvg=null;
     if(refSess.length){
-      prevTeamTot={};
+      var prevPlayerNames={};
+      refSess.forEach(function(sess){
+        (sess.players||[]).forEach(function(p){ if(p.name) prevPlayerNames[p.name]=true; });
+      });
+      var nPrev = Object.keys(prevPlayerNames).length || 1;
+      var prevTeamTot={};
       METRICS_LIST.forEach(function(m){
         if(m.special) return;
         prevTeamTot[m.k]=0;
@@ -4553,10 +4566,15 @@ function mcRenderWeek(){
           });
         });
       });
+      prevTeamAvg={};
+      METRICS_LIST.forEach(function(m){
+        if(m.special) return;
+        prevTeamAvg[m.k] = prevTeamTot[m.k] / nPrev;
+      });
     }
     html+='<tr style="background:#fff8e1;border-top:2px solid #f0c468">';
-    html+='<td style="padding:6px 8px;border-bottom:1px solid #f0c468;font-weight:800;color:#7c4f00;white-space:nowrap"><span style="font-size:11px">🏆</span> EQUIPO</td>';
-    html+='<td style="padding:6px 5px;border-bottom:1px solid #f0c468;text-align:center;color:#aaa;font-size:9px">'+playerNames.length+' jug.</td>';
+    html+='<td style="padding:6px 8px;border-bottom:1px solid #f0c468;font-weight:800;color:#7c4f00;white-space:nowrap" title="Promedio de la métrica entre todos los jugadores de la semana"><span style="font-size:11px">🏆</span> EQUIPO <span style="font-weight:500;font-size:9px;color:#9c7e3d">(prom.)</span></td>';
+    html+='<td style="padding:6px 5px;border-bottom:1px solid #f0c468;text-align:center;color:#aaa;font-size:9px">'+nPlayers+' jug.</td>';
     METRICS_LIST.forEach(function(m){
       if(m.special==='vmax_check'){
         // Para el equipo: contar cuántos jugadores llegaron al ≥90% de su PB
@@ -4581,9 +4599,9 @@ function mcRenderWeek(){
           '</td>';
         return;
       }
-      var val=teamTot[m.k];
+      var val=teamAvg[m.k];
       var txt=val.toFixed(m.dec);
-      var prevV=prevTeamTot?prevTeamTot[m.k]:null;
+      var prevV=prevTeamAvg?prevTeamAvg[m.k]:null;
       var chip=(prevV&&prevV>0)?mcRatioChip(val,prevV,m.k):'<span style="color:#ccc;font-size:9px">—</span>';
       var prevTxt=(prevV!==null&&prevV>0)?'<span style="color:#999;font-size:9px"> ('+prevV.toFixed(m.dec)+')</span>':'';
       html+='<td style="padding:6px 5px;border-bottom:1px solid #f0c468;border-right:0.5px solid #f0d878;text-align:center;vertical-align:top">'
