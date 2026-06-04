@@ -17841,10 +17841,122 @@ function fixLoad(){
 }
 fixLoad();
 
+// ── Migración: convertir nombres en planillas viejas a nombre completo ───────
+// Si una planilla tiene "Adamovsky" pero PLAYER_PROFILES tiene "Felipe Adamovsky",
+// reemplazar el nombre en la planilla por el nombre completo. Se ejecuta una vez
+// al cargar la página. Usa una flag en localStorage para no repetir innecesariamente,
+// pero igual re-corre si PLAYER_PROFILES cambia (porque se podrían agregar perfiles nuevos).
+function fixMigratePlanillasToFullName(){
+  if(typeof PLAYER_PROFILES === 'undefined') return 0;
+  var profileNames = []; // [{full, partsLower:[...]}, ...]
+  Object.keys(PLAYER_PROFILES).forEach(function(k){
+    var p = PLAYER_PROFILES[k];
+    var full = (p && p.name) ? String(p.name).trim() : '';
+    if(!full) return;
+    var parts = full.split(/\s+/).filter(Boolean).map(function(s){return s.toLowerCase();});
+    profileNames.push({full: full, partsLower: parts});
+  });
+  if(!profileNames.length) return 0;
+
+  // Dado un nombre tal como está en la planilla (puede ser apellido solo, nombre solo,
+  // o nombre completo), devuelve el nombre completo del perfil que matchea, o null si no hay match único.
+  function resolveFullName(name){
+    if(!name) return null;
+    var nm = String(name).trim();
+    if(!nm) return null;
+    var nmLower = nm.toLowerCase();
+    // Si ya está como nombre completo de algún perfil, devolverlo tal cual.
+    var exact = profileNames.find(function(pn){ return pn.full.toLowerCase() === nmLower; });
+    if(exact) return exact.full;
+    // Si es una sola palabra (apellido solo o nombre solo): buscar matches
+    var nmParts = nmLower.split(/\s+/).filter(Boolean);
+    if(nmParts.length === 1){
+      var matches = profileNames.filter(function(pn){
+        // Coincide si esa palabra aparece en cualquier parte del nombre del perfil
+        return pn.partsLower.indexOf(nmLower) >= 0;
+      });
+      if(matches.length === 1) return matches[0].full;
+      // Si hay varios matches, no migramos (sería ambiguo)
+      return null;
+    }
+    // Si tiene varias palabras pero no matchea exact, buscar perfil cuyo nombre completo contenga todas esas palabras
+    var multi = profileNames.filter(function(pn){
+      return nmParts.every(function(part){ return pn.partsLower.indexOf(part) >= 0; });
+    });
+    if(multi.length === 1) return multi[0].full;
+    return null;
+  }
+
+  var changes = 0;
+  Object.keys(FIX_PLANILLAS).forEach(function(matchId){
+    var planilla = FIX_PLANILLAS[matchId];
+    if(!planilla) return;
+    // Titulares y suplentes
+    ['titulares','suplentes'].forEach(function(arrKey){
+      var arr = planilla[arrKey];
+      if(!Array.isArray(arr)) return;
+      arr.forEach(function(p){
+        if(!p || !p.j) return;
+        var full = resolveFullName(p.j);
+        if(full && full !== p.j){ p.j = full; changes++; }
+      });
+    });
+    // Cambios (entra/sale)
+    if(Array.isArray(planilla.cambios)){
+      planilla.cambios.forEach(function(c){
+        if(!c) return;
+        ['entra','sale'].forEach(function(k){
+          if(c[k]){
+            var full = resolveFullName(c[k]);
+            if(full && full !== c[k]){ c[k] = full; changes++; }
+          }
+        });
+      });
+    }
+    // Goles (gol/asist)
+    if(Array.isArray(planilla.goles)){
+      planilla.goles.forEach(function(g){
+        if(!g) return;
+        ['gol','asist'].forEach(function(k){
+          if(g[k]){
+            var full = resolveFullName(g[k]);
+            if(full && full !== g[k]){ g[k] = full; changes++; }
+          }
+        });
+      });
+    }
+    // Figura
+    if(planilla.figura){
+      var fullFigura = resolveFullName(planilla.figura);
+      if(fullFigura && fullFigura !== planilla.figura){ planilla.figura = fullFigura; changes++; }
+    }
+    // Amarillas/Rojas (arrays de strings)
+    ['amarillas','rojas'].forEach(function(k){
+      if(Array.isArray(planilla[k])){
+        planilla[k] = planilla[k].map(function(n){
+          if(!n) return n;
+          var full = resolveFullName(n);
+          if(full && full !== n){ changes++; return full; }
+          return n;
+        });
+      }
+    });
+  });
+
+  if(changes > 0){
+    fixSave();
+    console.log('[Fixture] Migración de nombres: '+changes+' campos actualizados a nombre completo.');
+  }
+  return changes;
+}
+window.fixMigratePlanillasToFullName = fixMigratePlanillasToFullName;
+
 // Renderizar el fixture al cargar la página, ya que view-fixture es la vista por defecto.
 // Si no se hace acá, el grid sale vacío hasta que el usuario navega a otra vista y vuelve.
 document.addEventListener('DOMContentLoaded', function(){
   try{
+    // Migrar nombres viejos (apellido solo) a nombre completo
+    fixMigratePlanillasToFullName();
     if(typeof fixtureRender === 'function') fixtureRender();
     if(typeof fixSubTab === 'function') fixSubTab('fixture');
   }catch(e){ console.warn('Init fixture error:', e); }
@@ -17997,8 +18109,10 @@ function fixStartEdit(n){
 window.fixStartEdit = fixStartEdit;
 
 // Construye un <datalist> global con todos los jugadores de PLAYER_PROFILES.
-// Para cada perfil, genera 3 opciones: nombre completo, solo apellido, solo nombre.
+// Cada perfil agrega UNA SOLA opción: nombre completo (ej. "Felipe Adamovsky").
 // Los inputs de jugadores en la planilla referencian este datalist via list="fix-players-datalist".
+// El listener "input" oculta las sugerencias hasta que el usuario empieza a escribir
+// (sin esto, click en un input vacío mostraría la lista entera).
 function fixBuildPlayersDatalist(){
   // Eliminar datalist viejo si existe
   var old = document.getElementById('fix-players-datalist');
@@ -18011,24 +18125,38 @@ function fixBuildPlayersDatalist(){
       var p = PLAYER_PROFILES[k];
       var fullName = (p && p.name) ? String(p.name).trim() : '';
       if(!fullName) return;
-      function addOption(val){
-        if(!val || seen[val.toLowerCase()]) return;
-        seen[val.toLowerCase()] = true;
-        var opt = document.createElement('option');
-        opt.value = val;
-        dl.appendChild(opt);
-      }
-      // Opción 1: nombre completo
-      addOption(fullName);
-      // Opciones 2 y 3: dividir por espacio y agregar última palabra (apellido) y primera (nombre)
-      var parts = fullName.split(/\s+/).filter(Boolean);
-      if(parts.length > 1){
-        addOption(parts[parts.length-1]);  // apellido (última palabra)
-        addOption(parts[0]);                // nombre (primera palabra)
-      }
+      if(seen[fullName.toLowerCase()]) return;
+      seen[fullName.toLowerCase()] = true;
+      var opt = document.createElement('option');
+      opt.value = fullName;
+      dl.appendChild(opt);
     });
   }
   document.body.appendChild(dl);
+
+  // Aplicar el comportamiento "solo mostrar sugerencias mientras se escribe"
+  // a todos los inputs que usan el datalist.
+  // Truco: por default <input list="...">, al hacer focus muestra todas las opciones.
+  // Para evitarlo, quitamos el atributo 'list' cuando el input está vacío y lo restauramos al escribir.
+  document.querySelectorAll('input[list="fix-players-datalist"]').forEach(function(inp){
+    if(inp._fixDlAttached) return;
+    inp._fixDlAttached = true;
+    // Estado inicial: si está vacío, sin list. Si tiene valor, con list.
+    function syncList(){
+      if(inp.value && inp.value.length > 0){
+        inp.setAttribute('list', 'fix-players-datalist');
+      } else {
+        inp.removeAttribute('list');
+      }
+    }
+    syncList();
+    inp.addEventListener('input', syncList);
+    inp.addEventListener('focus', syncList);
+    inp.addEventListener('blur', function(){
+      // Al perder foco, dejar el atributo como está (no esconder si tiene valor)
+      // Esto permite que al volver a hacer focus en un input con texto, vea sugerencias filtradas
+    });
+  });
 }
 window.fixBuildPlayersDatalist = fixBuildPlayersDatalist;
 
@@ -24369,9 +24497,13 @@ function sbOnLoginSuccess(){
     if(typeof refresh === 'function') try{ refresh(); }catch(e){}
     if(typeof drawTable === 'function') try{ drawTable(); }catch(e){}
     if(typeof matchesRender === 'function') try{ matchesRender(); }catch(e){}
+    // Migrar nombres en planillas viejas a nombre completo (PLAYER_PROFILES ya está cargado)
+    if(typeof fixMigratePlanillasToFullName === 'function') try{ fixMigratePlanillasToFullName(); }catch(e){}
     // Re-renderizar el fixture (vista por defecto) — si no, queda vacío hasta que el usuario navega
     if(typeof fixtureRender === 'function') try{ fixtureRender(); }catch(e){}
     if(typeof fixSubTab === 'function') try{ fixSubTab('fixture'); }catch(e){}
+    // Si el usuario está en la subpestaña Jugadores, refrescar estadísticas
+    if(typeof fixRenderJugadores === 'function') try{ fixRenderJugadores(); }catch(e){}
     sbLoadingSet(100, '¡Listo!', '');
     setTimeout(sbLoadingHide, 400);
   }).catch(function(err){
