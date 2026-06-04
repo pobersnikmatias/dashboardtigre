@@ -17841,6 +17841,15 @@ function fixLoad(){
 }
 fixLoad();
 
+// Renderizar el fixture al cargar la página, ya que view-fixture es la vista por defecto.
+// Si no se hace acá, el grid sale vacío hasta que el usuario navega a otra vista y vuelve.
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    if(typeof fixtureRender === 'function') fixtureRender();
+    if(typeof fixSubTab === 'function') fixSubTab('fixture');
+  }catch(e){ console.warn('Init fixture error:', e); }
+});
+
 var _fixActive = null;
 
 // ── Grid render ──
@@ -24360,6 +24369,9 @@ function sbOnLoginSuccess(){
     if(typeof refresh === 'function') try{ refresh(); }catch(e){}
     if(typeof drawTable === 'function') try{ drawTable(); }catch(e){}
     if(typeof matchesRender === 'function') try{ matchesRender(); }catch(e){}
+    // Re-renderizar el fixture (vista por defecto) — si no, queda vacío hasta que el usuario navega
+    if(typeof fixtureRender === 'function') try{ fixtureRender(); }catch(e){}
+    if(typeof fixSubTab === 'function') try{ fixSubTab('fixture'); }catch(e){}
     sbLoadingSet(100, '¡Listo!', '');
     setTimeout(sbLoadingHide, 400);
   }).catch(function(err){
@@ -24367,6 +24379,9 @@ function sbOnLoginSuccess(){
     sbLoadingHide();
     alert('No se pudieron cargar datos de Supabase. Vas a seguir con tu datos locales. Error: ' + (err.message||err));
     sbReady = true;
+    // Renderizar el fixture igual, con datos locales
+    if(typeof fixtureRender === 'function') try{ fixtureRender(); }catch(e){}
+    if(typeof fixSubTab === 'function') try{ fixSubTab('fixture'); }catch(e){}
   });
 }
 
