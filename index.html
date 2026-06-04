@@ -379,18 +379,17 @@ body.sb-show{visibility:visible}
 
 <!-- NAVEGACIÓN PRINCIPAL -->
 <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0">
-  <button id="nav-train" onclick="setMainView('train')" style="padding:7px 18px;border:none;border-bottom:2px solid #3B4D88;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#3B4D88;cursor:pointer">📋 Ejercicios</button>
-  <button id="nav-match" onclick="setMainView('match')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">⚽ Partidos</button>
+  <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid #3B4D88;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#3B4D88;cursor:pointer">&#9917; Equipo</button>
+  <button id="nav-train" onclick="setMainView('train')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📋 Ejercicios</button>
   <button id="nav-micro" onclick="setMainView('micro')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📅 Microciclo</button>
   <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
   <button id="nav-profiles" onclick="setMainView('profiles')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👤 Perfiles</button>
   <button id="nav-gym" onclick="setMainView('gym')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🏋️ Gimnasio</button>
   <button id="nav-carga" onclick="setMainView('carga')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📊 Carga</button>
-  <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">&#128203; Entrenador</button>
 </div>
 
 <!-- VISTA ENTRENAMIENTOS -->
-<div id="view-train">
+<div id="view-train" style="display:none">
 
 <!-- FILTROS -->
 <div class="cats" id="cf"></div>
@@ -2825,7 +2824,7 @@ const MATCH_METRICS=[
 ];
 
 // Navegación principal
-let mainView='train';
+let mainView='fixture';
 var _SMV_COLORS={train:'#3B4D88',match:'#3B4D88',players:'#1D9E75',micro:'#3B4D88',plan:'#EF9F27',profiles:'#9C59D1',gym:'#D85A30',fixture:'#1D9E75',carga:'#9C59D1'};
 function setMainView(v){
   mainView=v;
@@ -2837,7 +2836,7 @@ function setMainView(v){
     btn.style.color=v===vv?(_SMV_COLORS[vv]||'#3B4D88'):'#aaa';
     btn.style.borderBottom=v===vv?'2px solid '+(_SMV_COLORS[vv]||'#3B4D88'):'2px solid transparent';
   });
-  if(v==='match'){renderMatchTable();renderMatchKPI();renderMatchCharts();}
+  // 'match' ya no tiene botón en el nav principal — ahora vive dentro de fixture como subtab GPS
   if(v==='micro'){mcRebuildWeekSel();if(typeof mcRebuildLoadMetricSelector==='function')mcRebuildLoadMetricSelector();mcRenderWeek();mcRenderLoad();mcRenderBandConfig();mcEstInit();}
   if(v==='profiles'){if(typeof renderProfilesTable==='function')renderProfilesTable();}
   if(v==='players'){if(typeof plRebuild==='function')plRebuild();}
@@ -13351,11 +13350,11 @@ document.addEventListener('DOMContentLoaded',function(){
 </div><!-- end view-gym -->
 
 <!-- VISTA FIXTURE -->
-<div id="view-fixture" style="display:none">
+<div id="view-fixture">
 
 <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
   <div>
-    <div style="font-size:15px;font-weight:700;color:#0D1B2A">&#128203; Entrenador &mdash; 5ta Divisi&oacute;n AFA 2025</div>
+    <div style="font-size:15px;font-weight:700;color:#0D1B2A">&#9917; Equipo &mdash; 5ta Divisi&oacute;n AFA 2025</div>
     <div style="font-size:11px;color:#888;margin-top:2px">Club Atl&eacute;tico Tigre &middot; Categor&iacute;a 2007 &middot; Toc&aacute; un partido para ver la planilla</div>
   </div>
   <div style="display:flex;gap:8px;font-size:10px;color:#888;align-items:center;flex-wrap:wrap">
@@ -13372,11 +13371,12 @@ document.addEventListener('DOMContentLoaded',function(){
 <div style="margin-top:18px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">
 
   <!-- Sub-nav -->
-  <div style="display:flex;background:#f5f7fa;border-bottom:1px solid #e0e0e0">
+  <div style="display:flex;background:#f5f7fa;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">
     <button id="fix-tab-fixture" onclick="fixSubTab('fixture')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#3B4D88;border-bottom:2px solid #3B4D88;cursor:pointer">📋 Fixture</button>
-    <button id="fix-tab-equipo" onclick="fixSubTab('equipo')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#aaa;border-bottom:2px solid transparent;cursor:pointer">🏆 Equipo</button>
+    <button id="fix-tab-equipo" onclick="fixSubTab('equipo')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#aaa;border-bottom:2px solid transparent;cursor:pointer">📊 Estadísticas</button>
     <button id="fix-tab-jugadores" onclick="fixSubTab('jugadores')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#aaa;border-bottom:2px solid transparent;cursor:pointer">👤 Jugadores</button>
     <button id="fix-tab-tareas" onclick="fixSubTab('tareas')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#aaa;border-bottom:2px solid transparent;cursor:pointer">🎯 Tareas</button>
+    <button id="fix-tab-gps" onclick="fixSubTab('gps')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#aaa;border-bottom:2px solid transparent;cursor:pointer">📡 GPS</button>
   </div>
 
   <!-- Fixture tab content (existing grid + panel) -->
@@ -13407,6 +13407,11 @@ document.addEventListener('DOMContentLoaded',function(){
   <!-- Tareas tab -->
   <div id="fix-content-tareas" style="display:none;padding:16px">
     <div id="fix-tareas-body"></div>
+  </div>
+
+  <!-- GPS tab — acá se mueve el contenido completo de view-match (Partidos) -->
+  <div id="fix-content-gps" style="display:none;padding:16px">
+    <div id="fix-gps-slot"></div>
   </div>
 
 </div>
@@ -18233,8 +18238,21 @@ window.fixClosePanel = fixClosePanel;
 // FIXTURE STATS — sub-tabs equipo + jugadores
 // ══════════════════════════════════════════════
 
+// Variable de control: mueve el contenido de view-match al slot GPS la primera vez
+var _fixMovedMatch = false;
+function _fixMoveMatchToGpsSlot(){
+  if(_fixMovedMatch) return;
+  var slot = document.getElementById('fix-gps-slot');
+  var src  = document.getElementById('view-match');
+  if(!slot || !src) return;
+  while(src.firstChild){
+    slot.appendChild(src.firstChild);
+  }
+  _fixMovedMatch = true;
+}
+
 function fixSubTab(tab){
-  ['fixture','equipo','jugadores','tareas'].forEach(function(t){
+  ['fixture','equipo','jugadores','tareas','gps'].forEach(function(t){
     var btn=document.getElementById('fix-tab-'+t);
     var content=document.getElementById('fix-content-'+t);
     var isActive=t===tab;
@@ -18244,6 +18262,14 @@ function fixSubTab(tab){
   if(tab==='equipo') fixRenderEquipo();
   if(tab==='jugadores') fixRenderJugadores();
   if(tab==='tareas') fixRenderTareas();
+  if(tab==='gps'){
+    // Mover el contenido completo de view-match al slot la primera vez
+    _fixMoveMatchToGpsSlot();
+    // Refrescar la tabla y gráficos de Partidos
+    if(typeof renderMatchTable==='function') try{ renderMatchTable(); }catch(e){}
+    if(typeof renderMatchKPI==='function')   try{ renderMatchKPI();   }catch(e){}
+    if(typeof renderMatchCharts==='function')try{ renderMatchCharts();}catch(e){}
+  }
 }
 window.fixSubTab=fixSubTab;
 
