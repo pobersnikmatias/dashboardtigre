@@ -20389,8 +20389,11 @@ function cargaRenderWellPse(){
   // ── Construir layout ──
   var html = '';
 
-  // Sección 1: Wellness (con Evolución arriba) + PSE lado a lado
-  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:14px">';
+  // Sección 1: Wellness + PSE lado a lado. Si solo hay uno, ocupa todo el ancho.
+  // (No mostramos un aviso "Sin datos de PSE" porque visualmente queda raro al ocupar
+  // media columna casi vacía. El usuario ya tiene el botón de Subir PSE arriba.)
+  var bothPresent = nWell && nPse;
+  html += '<div style="display:grid;grid-template-columns:'+(bothPresent?'repeat(auto-fit,minmax(380px,1fr))':'1fr')+';gap:12px;margin-bottom:14px">';
 
   // Cuadro Wellness: header + Evolución arriba + separador + tabla abajo
   if(nWell){
@@ -20421,12 +20424,6 @@ function cargaRenderWellPse(){
     html += '</div>';
   }
 
-  // Aviso si solo hay uno de los dos
-  if(nWell && !nPse){
-    html += '<div style="background:#fffaf2;border:1px dashed #f0d0a0;border-radius:10px;padding:18px;color:#9c5a00;font-size:11px;display:flex;align-items:center;gap:8px"><span style="font-size:20px">🏃</span><div><strong>Sin datos de PSE individual.</strong><br>Importalos desde "📥 Importar datos" para tener una visión completa.</div></div>';
-  } else if(!nWell && nPse){
-    html += '<div style="background:#fffaf2;border:1px dashed #f0d0a0;border-radius:10px;padding:18px;color:#9c5a00;font-size:11px;display:flex;align-items:center;gap:8px"><span style="font-size:20px">🧘</span><div><strong>Sin datos de Wellness.</strong><br>Importalos desde "📥 Importar datos" para ver la evolución del grupo y los dolores reportados.</div></div>';
-  }
   html += '</div>';
 
   // Sección 2: Dolores (todo el ancho, abajo) — solo si hay wellness
@@ -21169,7 +21166,7 @@ function cargaRenderEvolucion(layout){
   }else{
     // SVG grande: viewBox responsive
     h+='<div style="max-width:900px;margin:0 auto">';
-    h+=_miniLineSVG(ser,activeMetric.max||5,col,{W:800,H:280,padL:42,padR:18,padT:24,padB:32,allXLabels:true,bars:_cargaEvoView==='dia'});
+    h+=_miniLineSVG(ser,activeMetric.max||5,col,{W:800,H:280,padL:42,padR:18,padT:24,padB:32,allXLabels:true,bars:true});
     h+='</div>';
   }
   h+='</div>';
