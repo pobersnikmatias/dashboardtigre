@@ -20257,6 +20257,15 @@ function cargaImportPSE(){
 window.cargaImportPSE=cargaImportPSE;
 
 function cargaClearData(type){
+  // Si no hay datos cargados localmente, no hay nada que limpiar y no debemos avisar
+  // "estás por borrar todo" (porque no hay nada que borrar).
+  var hasData = (type==='wellness')
+    ? (typeof WELLNESS_DATA!=='undefined' && WELLNESS_DATA.length>0)
+    : (typeof PSE_DATA!=='undefined' && PSE_DATA.length>0);
+  if(!hasData){
+    alert('No hay datos de '+(type==='wellness'?'Wellness':'PSE')+' cargados actualmente.');
+    return;
+  }
   if(!confirm('¿Eliminar todos los datos de '+(type==='wellness'?'Wellness':'PSE')+'?'))return;
   if(type==='wellness'){
     WELLNESS_DATA.length=0;
