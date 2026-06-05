@@ -13508,9 +13508,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
   <div style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto">
     <button id="carga-view-cuadrante" onclick="cargaSetView('cuadrante')" style="padding:5px 14px;border:none;background:#3B4D88;color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid #3B4D88">📊 Cuadrante</button>
-    <button id="carga-view-pse" onclick="cargaSetView('pse')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🏃 PSE</button>
-    <button id="carga-view-wellness" onclick="cargaSetView('wellness')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🧘 Wellness</button>
-    <button id="carga-view-tendencia" onclick="cargaSetView('tendencia')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">📈 Tendencia</button>
+    <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">💚 Wellness &amp; PSE</button>
     <button id="carga-view-dolores" onclick="cargaSetView('dolores')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🩹 Dolores</button>
   </div>
 </div>
@@ -20307,7 +20305,7 @@ window.cargaWeekChange=cargaWeekChange;
 // ── View switcher ──
 function cargaSetView(view){
   document.getElementById('carga-tab-mode').value=view;
-  ['cuadrante','pse','wellness','tendencia','dolores'].forEach(function(t){
+  ['cuadrante','wellpse','dolores'].forEach(function(t){
     var btn=document.getElementById('carga-view-'+t);
     if(btn){btn.style.background=t===view?'#3B4D88':'none';btn.style.color=t===view?'#fff':'#aaa';btn.style.borderBottom=t===view?'2px solid #3B4D88':'2px solid transparent';}
   });
@@ -20319,13 +20317,98 @@ window.cargaSetView=cargaSetView;
 function cargaRender(){
   cargaUpdateDataIndicator();
   var tab=document.getElementById('carga-tab-mode')?document.getElementById('carga-tab-mode').value:'cuadrante';
+  // Compatibilidad con tabs viejas: 'pse', 'wellness', 'tendencia' redirigen a 'wellpse'
+  if(tab==='pse'||tab==='wellness'||tab==='tendencia') tab='wellpse';
   if(tab==='cuadrante')cargaRenderCuadrante();
-  else if(tab==='pse')cargaRenderPSE();
-  else if(tab==='wellness')cargaRenderWellnessTable();
-  else if(tab==='tendencia')cargaRenderTendencia();
+  else if(tab==='wellpse')cargaRenderWellPse();
   else if(tab==='dolores')cargaRenderDolores();
 }
 window.cargaRender=cargaRender;
+
+// ═══════════════════════════════════════════════════════════════
+// VISTA COMBINADA: Wellness + PSE + Evolución del grupo
+// ═══════════════════════════════════════════════════════════════
+// Las funciones cargaRenderWellnessTable, cargaRenderPSE y cargaRenderTendencia
+// escriben directamente en #carga-main-content. Para combinarlas, las hacemos correr
+// dentro de divs temporales y luego juntamos su HTML en una sola vista.
+function cargaRenderWellPse(){
+  var out=document.getElementById('carga-main-content'); if(!out) return;
+  // Si no hay nada cargado, mensaje claro
+  var nWell=(typeof WELLNESS_DATA!=='undefined')?WELLNESS_DATA.length:0;
+  var nPse=(typeof PSE_DATA!=='undefined')?PSE_DATA.length:0;
+  if(!nWell && !nPse){
+    out.innerHTML=
+      '<div style="padding:30px;text-align:center;background:#fff;border:2px dashed #e0e0e0;border-radius:10px">'+
+        '<div style="font-size:30px;margin-bottom:10px">💚</div>'+
+        '<div style="font-size:14px;font-weight:700;color:#0D1B2A;margin-bottom:6px">Sin datos de Wellness ni PSE</div>'+
+        '<div style="font-size:11px;color:#666;line-height:1.7;max-width:520px;margin:0 auto">'+
+          'Importá los reportes desde el panel <strong>📥 Importar datos — Wellness y PSE individual</strong> de arriba. '+
+          'En cuanto tengas datos, vas a ver acá las tablas individuales y la evolución del grupo.'+
+        '</div>'+
+      '</div>';
+    return;
+  }
+
+  // Helper: ejecutar una función render que escribe en out.innerHTML, y capturar lo que escribió
+  function capture(fn){
+    var saved = out.innerHTML;
+    out.innerHTML = '';
+    try{ fn(); }catch(e){ console.warn('Render error:', e); }
+    var captured = out.innerHTML;
+    out.innerHTML = saved;
+    return captured;
+  }
+
+  var wellnessHtml = nWell ? capture(cargaRenderWellnessTable) : '';
+  var pseHtml      = nPse  ? capture(cargaRenderPSE)           : '';
+  // Evolución del grupo (parte de Tendencia) — solo si hay wellness
+  var evoHtml = '';
+  if(nWell){
+    try{
+      var wlayout = (typeof WELLNESS_LAYOUT !== 'undefined' && WELLNESS_LAYOUT) || cargaDefaultWellnessLayout();
+      evoHtml = cargaRenderEvolucion(wlayout) || '';
+    }catch(e){ console.warn('Evolución error:', e); }
+  }
+
+  // Construir layout combinado: 2 columnas (Wellness + PSE) arriba, Evolución abajo
+  var html = '';
+
+  // Sección 1: tablas individuales lado a lado
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:14px">';
+  if(wellnessHtml){
+    html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">';
+    html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:8px;display:flex;align-items:center;gap:6px">'+
+      '<span>🧘 Wellness</span>'+
+      '<span style="font-size:10px;color:#888;font-weight:400">— '+nWell+' registros</span>'+
+      '</div>';
+    html += wellnessHtml;
+    html += '</div>';
+  }
+  if(pseHtml){
+    html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">';
+    html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:8px;display:flex;align-items:center;gap:6px">'+
+      '<span>🏃 PSE individual</span>'+
+      '<span style="font-size:10px;color:#888;font-weight:400">— '+nPse+' registros</span>'+
+      '</div>';
+    html += pseHtml;
+    html += '</div>';
+  }
+  // Si solo hay uno de los dos, mensaje sutil con el faltante
+  if(nWell && !nPse){
+    html += '<div style="background:#fffaf2;border:1px dashed #f0d0a0;border-radius:10px;padding:18px;color:#9c5a00;font-size:11px;display:flex;align-items:center;gap:8px"><span style="font-size:20px">🏃</span><div><strong>Sin datos de PSE individual.</strong><br>Importalos desde "📥 Importar datos" para tener una visión completa.</div></div>';
+  } else if(!nWell && nPse){
+    html += '<div style="background:#fffaf2;border:1px dashed #f0d0a0;border-radius:10px;padding:18px;color:#9c5a00;font-size:11px;display:flex;align-items:center;gap:8px"><span style="font-size:20px">🧘</span><div><strong>Sin datos de Wellness.</strong><br>Importalos desde "📥 Importar datos" para ver la evolución del grupo.</div></div>';
+  }
+  html += '</div>';
+
+  // Sección 2: evolución del grupo (gráficos)
+  if(evoHtml){
+    html += evoHtml;
+  }
+
+  out.innerHTML = html;
+}
+window.cargaRenderWellPse = cargaRenderWellPse;
 
 // Indicador permanente de cuántos datos hay cargados.
 // Sirve para que el usuario vea de un vistazo si los datos se guardaron o no.
