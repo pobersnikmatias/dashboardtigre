@@ -20353,13 +20353,24 @@ function cargaRenderWellPse(){
     return;
   }
 
-  // Helper: ejecutar una función render que escribe en out.innerHTML, y capturar lo que escribió
+  // Helper: ejecutar una función render que escribe en out.innerHTML, y capturar lo que escribió.
+  // Usamos un div fantasma temporal con el mismo id ('carga-main-content') que el original
+  // para que las funciones que hacen getElementById('carga-main-content') escriban acá.
+  // Después restauramos el id en el original y devolvemos el HTML capturado.
   function capture(fn){
-    var saved = out.innerHTML;
-    out.innerHTML = '';
-    try{ fn(); }catch(e){ console.warn('Render error:', e); }
-    var captured = out.innerHTML;
-    out.innerHTML = saved;
+    var ghostDiv = document.createElement('div');
+    ghostDiv.style.display = 'none';
+    // Renombramos el out original temporalmente para que getElementById vea el ghost
+    out.id = 'carga-main-content-orig';
+    ghostDiv.id = 'carga-main-content';
+    document.body.appendChild(ghostDiv);
+    var captured = '';
+    try{ fn(); captured = ghostDiv.innerHTML; }
+    catch(e){ console.warn('Render error:', e); }
+    finally{
+      ghostDiv.remove();
+      out.id = 'carga-main-content';
+    }
     return captured;
   }
 
@@ -20823,15 +20834,18 @@ function cargaNamePartsForDisplay(fullName){
 
 // Estado: semana seleccionada para el detalle intra-semanal (compartido entre grupo y jugadores)
 var _cargaEvoWeek=null;
-function cargaEvoSetWeek(w){_cargaEvoWeek=w;cargaRenderTendencia();}
+// IMPORTANTE: estas funciones llaman a cargaRender() (el dispatcher), NO a cargaRenderTendencia()
+// directamente. Si llamaran a cargaRenderTendencia() romperían la vista combinada Wellness+PSE+Dolores,
+// porque esa función escribe directo en #carga-main-content sobreescribiendo todo.
+function cargaEvoSetWeek(w){_cargaEvoWeek=w;cargaRender();}
 window.cargaEvoSetWeek=cargaEvoSetWeek;
 // Estado: vista activa del gráfico interactivo del grupo ('dia' por defecto)
 var _cargaEvoView='dia';
-function cargaEvoSetView(v){_cargaEvoView=v;cargaRenderTendencia();}
+function cargaEvoSetView(v){_cargaEvoView=v;cargaRender();}
 window.cargaEvoSetView=cargaEvoSetView;
 // Estado: métrica seleccionada en el gráfico interactivo del grupo
 var _cargaEvoMetric=null;
-function cargaEvoSetMetric(k){_cargaEvoMetric=k;cargaRenderTendencia();}
+function cargaEvoSetMetric(k){_cargaEvoMetric=k;cargaRender();}
 window.cargaEvoSetMetric=cargaEvoSetMetric;
 
 // Para cada semana declarada en MICROCICLO, calcula el rango [fechaMin, fechaMax]
@@ -20848,22 +20862,103 @@ function cargaMicroWeeksByDate(){
     }
     if(s.day)byW[s.week].dateToDay[f]=s.day;
   });
-  return Object.values(byW).sort(function(a,b){return a.start<b.start?-1:1;});
+  // Ordenar por start
+  var wks = Object.values(byW).sort(function(a,b){return a.start<b.start?-1:1;});
+  // Expandir rangos: cada semana cubre del día siguiente al fin de la anterior
+  // hasta el día anterior al inicio de la siguiente (sin solapamientos).
+  // Esto permite que un wellness con fecha de MD-1 caiga en la semana correcta
+  // aunque solo se hayan cargado sesiones de MD-3/MD-2 (que dejarían start/end estrechos).
+  // Para los extremos: extender 7 días para adelante y atrás (un microciclo típico).
+  function shiftDate(iso, days){
+    var d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0,10);
+  }
+  wks.forEach(function(w, i){
+    w.startExt = (i === 0) ? shiftDate(w.start, -7) : shiftDate(wks[i-1].end, 1);
+    // Si el rango extendido invade el siguiente "real" start, ajustar al punto medio
+    if(i > 0){
+      var prevEnd = wks[i-1].end;
+      var curStart = w.start;
+      if(prevEnd < curStart){
+        // Punto medio entre el fin de la anterior y el inicio de esta
+        var prevEndDate = new Date(prevEnd + 'T00:00:00');
+        var curStartDate = new Date(curStart + 'T00:00:00');
+        var gapDays = Math.floor((curStartDate - prevEndDate) / 86400000);
+        var halfGap = Math.floor(gapDays / 2);
+        wks[i-1].endExt = shiftDate(prevEnd, halfGap);
+        w.startExt = shiftDate(prevEnd, halfGap + 1);
+      }
+    }
+    w.endExt = (i === wks.length-1) ? shiftDate(w.end, 7) : w.endExt || shiftDate(w.end, 1);
+  });
+  // Re-calcular endExt para todas menos la última
+  for(var j = 0; j < wks.length - 1; j++){
+    if(!wks[j].endExt || wks[j].endExt >= wks[j+1].startExt){
+      // Ajustar al punto medio
+      var endDate = new Date(wks[j].end + 'T00:00:00');
+      var nextStartDate = new Date(wks[j+1].start + 'T00:00:00');
+      var gap = Math.floor((nextStartDate - endDate) / 86400000);
+      var half = Math.floor(gap / 2);
+      wks[j].endExt = shiftDate(wks[j].end, half);
+      wks[j+1].startExt = shiftDate(wks[j].end, half + 1);
+    }
+  }
+  return wks;
 }
 
 function cargaMicroWeekForDate(iso,wks){
   if(!iso||!wks||!wks.length)return null;
   for(var i=0;i<wks.length;i++){
-    if(iso>=wks[i].start&&iso<=wks[i].end)return wks[i];
+    // Usar rango EXTENDIDO en lugar del rango exacto, para tolerar fechas de wellness
+    // que caen en días MD-N que aún no se cargaron en MICROCICLO.
+    var startCheck = wks[i].startExt || wks[i].start;
+    var endCheck = wks[i].endExt || wks[i].end;
+    if(iso>=startCheck&&iso<=endCheck)return wks[i];
   }
   return null;
 }
 
-// Día del microciclo para una fecha; si no hay match exacto devuelve MM-DD.
+// Día del microciclo para una fecha. Si hay match exacto en sesiones cargadas, devuelve ese día.
+// Si NO hay match exacto (porque la sesión de ese día no se cargó en MICROCICLO),
+// intentar inferir el día asumiendo que MD es el último día de la semana (típicamente).
+// Si no se puede inferir, devuelve MM-DD como fallback.
 function cargaDayLabelForDate(iso,weekObj){
   if(!weekObj)return iso.slice(5);
   var d=weekObj.dateToDay[iso];
   if(d)return d;
+  // Intentar inferir: si MD está cargado, usar diferencia en días
+  var mdDate = null;
+  Object.keys(weekObj.dateToDay).forEach(function(date){
+    if(weekObj.dateToDay[date] === 'MD') mdDate = date;
+  });
+  if(mdDate){
+    var diff = Math.round((new Date(iso+'T00:00:00') - new Date(mdDate+'T00:00:00')) / 86400000);
+    if(diff === 0) return 'MD';
+    if(diff < 0) return 'MD'+diff;       // -1 → MD-1, etc.
+    if(diff > 0) return 'MD+'+diff;
+  }
+  // Fallback: usar la fecha más cercana cargada para inferir
+  var dates = Object.keys(weekObj.dateToDay);
+  if(dates.length){
+    var closest = dates.reduce(function(best, d){
+      var dist = Math.abs(new Date(iso+'T00:00:00') - new Date(d+'T00:00:00'));
+      return (best === null || dist < best.dist) ? {date:d, dist:dist} : best;
+    }, null);
+    if(closest){
+      var closestDay = weekObj.dateToDay[closest.date]; // ej. "MD-3"
+      var closestDiff = Math.round((new Date(iso+'T00:00:00') - new Date(closest.date+'T00:00:00')) / 86400000);
+      // Si closestDay es "MD-3" y closestDiff es +2, la fecha es 2 días después de MD-3 = MD-1
+      var m = closestDay.match(/^MD([+-]?\d*)$/);
+      if(m){
+        var baseDiff = m[1] === '' ? 0 : parseInt(m[1], 10);
+        var newDiff = baseDiff + closestDiff;
+        if(newDiff === 0) return 'MD';
+        if(newDiff < 0) return 'MD'+newDiff;
+        if(newDiff > 0) return 'MD+'+newDiff;
+      }
+    }
+  }
   return iso.slice(5);
 }
 
