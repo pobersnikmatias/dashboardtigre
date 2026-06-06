@@ -13466,7 +13466,7 @@ document.addEventListener('DOMContentLoaded',function(){
         <button class="btn bg" onclick="cargaImportWellness()" style="font-size:11px;padding:5px 16px">✓ Importar</button>
         <button class="btn" onclick="cargaOpenLayoutEditor('wellness')" style="font-size:11px;padding:5px 10px;background:#e8efff;color:#0C447C;border:1px solid #b3ccf5">⚙️ Columnas</button>
         <button class="btn" onclick="cargaOpenManualEntry('wellness')" style="font-size:11px;padding:5px 10px;background:#f0fff8;color:#1D9E75;border:1px solid #1D9E7555">✏️ Carga manual</button>
-        <button class="btn bc" onclick="cargaClearData('wellness')" style="font-size:11px;padding:5px 10px;color:#E24B4A;border-color:#E24B4A55">🗑 Limpiar todo</button>
+        <button class="btn bc" onclick="cargaClearData('wellness')" style="font-size:11px;padding:5px 10px;color:#888" title="Vacía el cuadro de importar (no toca los datos ya cargados)">🧹 Limpiar form</button>
         <span id="carga-wellness-msg" style="font-size:11px;font-weight:600"></span>
       </div>
     </div>
@@ -13488,7 +13488,7 @@ document.addEventListener('DOMContentLoaded',function(){
         <button class="btn bg" onclick="cargaImportPSE()" style="font-size:11px;padding:5px 16px">✓ Importar</button>
         <button class="btn" onclick="cargaOpenLayoutEditor('pse')" style="font-size:11px;padding:5px 10px;background:#e8efff;color:#0C447C;border:1px solid #b3ccf5">⚙️ Columnas</button>
         <button class="btn" onclick="cargaOpenManualEntry('pse')" style="font-size:11px;padding:5px 10px;background:#f0fff8;color:#1D9E75;border:1px solid #1D9E7555">✏️ Carga manual</button>
-        <button class="btn bc" onclick="cargaClearData('pse')" style="font-size:11px;padding:5px 10px;color:#E24B4A;border-color:#E24B4A55">🗑 Limpiar todo</button>
+        <button class="btn bc" onclick="cargaClearData('pse')" style="font-size:11px;padding:5px 10px;color:#888" title="Vacía el cuadro de importar (no toca los datos ya cargados)">🧹 Limpiar form</button>
         <span id="carga-pse-msg" style="font-size:11px;font-weight:600"></span>
       </div>
     </div>
@@ -20257,37 +20257,27 @@ function cargaImportPSE(){
 window.cargaImportPSE=cargaImportPSE;
 
 function cargaClearData(type){
-  // Si no hay datos cargados localmente, no hay nada que limpiar y no debemos avisar
-  // "estás por borrar todo" (porque no hay nada que borrar).
-  var hasData = (type==='wellness')
-    ? (typeof WELLNESS_DATA!=='undefined' && WELLNESS_DATA.length>0)
-    : (typeof PSE_DATA!=='undefined' && PSE_DATA.length>0);
-  if(!hasData){
-    alert('No hay datos de '+(type==='wellness'?'Wellness':'PSE')+' cargados actualmente.');
-    return;
-  }
-  if(!confirm('¿Eliminar todos los datos de '+(type==='wellness'?'Wellness':'PSE')+'?'))return;
+  // Esta función limpia SOLO el formulario de importar (textarea, archivo elegido, mensaje),
+  // NO los datos acumulados en WELLNESS_DATA / PSE_DATA. Es para descartar lo que estabas
+  // por importar y empezar de nuevo, sin perder lo que ya cargaste antes.
   if(type==='wellness'){
-    WELLNESS_DATA.length=0;
-    // Limpiar UI del lado wellness
     var ta=document.getElementById('carga-wellness-csv'); if(ta)ta.value='';
     var wn=document.getElementById('carga-well-drop-name'); if(wn)wn.textContent='';
     var wf=document.getElementById('carga-well-file'); if(wf)wf.value='';
     var wm=document.getElementById('carga-wellness-msg'); if(wm)wm.textContent='';
   } else {
-    PSE_DATA.length=0;
     var ta2=document.getElementById('carga-pse-csv'); if(ta2)ta2.value='';
     var pn=document.getElementById('carga-pse-drop-name'); if(pn)pn.textContent='';
     var pf=document.getElementById('carga-pse-file'); if(pf)pf.value='';
     var pm=document.getElementById('carga-pse-msg'); if(pm)pm.textContent='';
   }
-  // Si había un review abierto, cerrarlo
+  // Si había un review abierto (preview antes de aplicar), cerrarlo
   var area=document.getElementById('carga-review-area');
   if(area)area.innerHTML='';
   window._cargaPendingRows=null;
   window._cargaPendingType=null;
-  saveData();
-  cargaRender();
+  // NO tocar WELLNESS_DATA / PSE_DATA, NO llamar a saveData() ni cargaRender().
+  // Solo se limpia el form de carga; los datos acumulados se mantienen intactos.
 }
 window.cargaClearData=cargaClearData;
 
