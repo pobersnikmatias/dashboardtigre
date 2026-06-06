@@ -17,11 +17,11 @@ details[open] .panel summary::before{content:"▼"}
    Replica los estilos visuales del panel para mantener la misma apariencia
    y permitir que el browser muestre el texto del summary en lugar del
    placeholder "Detalles". */
-#gym-new-det, #carga-imp-det{background:#fff;border:1px solid #ddd;border-radius:8px;margin-bottom:10px}
-#gym-new-det > summary, #carga-imp-det > summary{font-weight:700;font-size:12px;color:#0D1B2A;cursor:pointer;user-select:none;padding:10px 14px;display:flex;align-items:center;gap:6px;list-style:none}
-#gym-new-det > summary::-webkit-details-marker, #carga-imp-det > summary::-webkit-details-marker{display:none}
-#gym-new-det > summary::before, #carga-imp-det > summary::before{content:"▶";font-size:10px;color:#3B4D88}
-#gym-new-det[open] > summary::before, #carga-imp-det[open] > summary::before{content:"▼"}
+#gym-new-det, #carga-imp-det, #match-form-det{background:#fff;border:1px solid #ddd;border-radius:8px;margin-bottom:10px}
+#gym-new-det > summary, #carga-imp-det > summary, #match-form-det > summary{font-weight:700;font-size:12px;color:#0D1B2A;cursor:pointer;user-select:none;padding:10px 14px;display:flex;align-items:center;gap:6px;list-style:none}
+#gym-new-det > summary::-webkit-details-marker, #carga-imp-det > summary::-webkit-details-marker, #match-form-det > summary::-webkit-details-marker{display:none}
+#gym-new-det > summary::before, #carga-imp-det > summary::before, #match-form-det > summary::before{content:"▶";font-size:10px;color:#3B4D88}
+#gym-new-det[open] > summary::before, #carga-imp-det[open] > summary::before, #match-form-det[open] > summary::before{content:"▼"}
 #gym-new-det > .panel, #carga-imp-det > .panel{background:none;border:none;border-radius:0;margin-bottom:0}
 .panel-body{padding:10px 14px 14px}
 .ref-grid{display:flex;gap:7px;flex-wrap:wrap}
@@ -493,8 +493,8 @@ body.sb-show{visibility:visible}
 <div id="view-match" style="display:none">
 
 <!-- FORM AGREGAR PARTIDO -->
-<details id="match-form-det">
-<div class="panel"><summary>Registrar partido</summary>
+<details id="match-form-det" class="panel">
+<summary>Registrar partido</summary>
 <div class="panel-body">
 
 <div style="background:#f0f5ff;border:1px solid #b3ccf5;border-radius:7px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -570,7 +570,7 @@ body.sb-show{visibility:visible}
   <button class="btn bg" onclick="addMatch()">Guardar partido</button>
   <span id="m-msg" style="font-size:11px"></span>
 </div>
-</div></div></details>
+</div></details>
 
 <!-- SELECTOR DE REFERENCIA -->
 <div class="panel" style="margin-bottom:10px">
