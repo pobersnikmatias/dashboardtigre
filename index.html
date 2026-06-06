@@ -493,14 +493,15 @@ body.sb-show{visibility:visible}
 <div id="view-match" style="display:none">
 
 <!-- FORM AGREGAR PARTIDO -->
-<details id="match-form-det" open>
+<details id="match-form-det">
 <div class="panel"><summary>Registrar partido</summary>
 <div class="panel-body">
 
 <div style="background:#f0f5ff;border:1px solid #b3ccf5;border-radius:7px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-  <span style="font-size:11px;font-weight:700;color:#0C447C">📄 PDF Catapult</span>
+  <span style="font-size:11px;font-weight:700;color:#0C447C">📄 PDF / CSV Catapult</span>
   <span style="font-size:10px;color:#555">Subí el reporte del partido — lee la tabla "Datos Generales" y completa los campos GPS. Filtrá por minutos jugados.</span>
   <label class="btn bb" style="font-size:10px;padding:4px 12px;cursor:pointer;margin:0">📂 Subir PDF<input type="file" accept=".pdf" onchange="pdfImportMatch(event)" style="display:none"></label>
+  <label class="btn bb" style="font-size:10px;padding:4px 12px;cursor:pointer;margin:0">📂 Subir CSV<input type="file" accept=".csv,.txt" onchange="csvImportMatch(event)" style="display:none"></label>
   <span id="pdf-match-status" style="font-size:11px"></span>
 </div>
 <div id="pdf-match-preview" style="display:none;margin-bottom:10px">
@@ -508,8 +509,9 @@ body.sb-show{visibility:visible}
     <span style="font-size:11px;font-weight:600;color:#333">Layout de columnas:</span>
     <select id="pdf-layout-select" onchange="pdfChangeLayout()" style="padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;background:#fff">
       <option value="auto">Auto-detectar</option>
-      <option value="full">Con MaxAcc/MaxDec (13 cols)</option>
-      <option value="basic">Sin MaxAcc/MaxDec (11 cols)</option>
+      <option value="full">PDF — con MaxAcc/MaxDec (13 cols)</option>
+      <option value="basic">PDF — sin MaxAcc/MaxDec (11 cols)</option>
+      <option value="csv-full">CSV Catapult completo (con nombre y posición)</option>
       <option value="custom">Personalizado…</option>
     </select>
     <button class="btn bg" onclick="pdfEditLayout()" style="padding:3px 10px;font-size:11px" title="Editar el orden de columnas">⚙️ Editar columnas</button>
@@ -7374,7 +7376,10 @@ var _matchPdfExcludedManual = {};
 // Use "_" to skip a column
 var PDF_LAYOUTS = {
   'full':  ['min','mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','accmax','dccmax','rhie'],
-  'basic': ['min','mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','rhie']
+  'basic': ['min','mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','rhie'],
+  // 'csv-full' incluye name+pos al inicio (vienen en columnas separadas del CSV Catapult)
+  // pero como pdfApplyLayoutToRow ya recibe name+pos como argumentos, el layout solo lista las numéricas
+  'csv-full': ['min','mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','accmax','dccmax','rhie']
 };
 var _currentLayout = JSON.parse(localStorage.getItem('pdf_match_layout')||'null') || PDF_LAYOUTS.full.slice();
 var _currentLayoutMode = localStorage.getItem('pdf_match_layout_mode') || 'auto';
@@ -7532,6 +7537,130 @@ async function pdfImportMatch(ev){
 }
 window.pdfImportMatch = pdfImportMatch;
 
+// ─────────────────────────────────────────────────────────────
+// IMPORTAR CSV CATAPULT (alternativa al PDF)
+// Reusa todo el pipeline del PDF: parsea el CSV en rawRows {name,pos,nums[]}
+// y deja que pdfRebuildPlayersFromRaw / pdfRenderTable hagan el resto.
+// Asume layout 'csv-full': columnas name, pos, después las numéricas según orden definido.
+// ─────────────────────────────────────────────────────────────
+function csvImportMatch(ev){
+  var file = ev && ev.target && ev.target.files && ev.target.files[0];
+  if(!file) return;
+  var status = document.getElementById('pdf-match-status');
+  var preview = document.getElementById('pdf-match-preview');
+  if(status){ status.style.color = '#555'; status.textContent = 'Leyendo CSV...'; }
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var txt = String(e.target.result || '').replace(/^\uFEFF/,'');
+      var rows = csvParseMatchToRawRows(txt);
+      if(!rows.length) throw new Error('No se encontraron jugadores en el CSV.');
+
+      _matchPdfRawRows = rows;
+      _matchPdfExcludedAuto = {};
+      _matchPdfExcludedManual = {};
+
+      // Forzar layout 'csv-full' al subir CSV (el PDF tiene su propia auto-detección distinta)
+      _currentLayoutMode = 'csv-full';
+      _currentLayout = PDF_LAYOUTS['csv-full'].slice();
+      try{
+        localStorage.setItem('pdf_match_layout_mode', 'csv-full');
+        localStorage.setItem('pdf_match_layout', JSON.stringify(_currentLayout));
+      }catch(e){}
+      var layoutSel = document.getElementById('pdf-layout-select');
+      if(layoutSel) layoutSel.value = 'csv-full';
+
+      pdfRebuildPlayersFromRaw();
+      window._pendingMatchPlayers = _matchPdfAllPlayers.slice();
+
+      var msg = document.getElementById('pdf-layout-msg');
+      if(msg) msg.textContent = '(CSV con '+_currentLayout.length+' columnas numéricas)';
+
+      if(status){
+        status.style.color = '#1D9E75';
+        status.textContent = _matchPdfAllPlayers.length + ' jugadores leídos del CSV.';
+      }
+      pdfRenderTable(_matchPdfAllPlayers);
+      if(preview) preview.style.display = 'block';
+    }catch(err){
+      if(status){ status.style.color = '#E24B4A'; status.textContent = 'Error: '+err.message; }
+      console.error('CSV import error:', err);
+    }
+  };
+  reader.onerror = function(){
+    if(status){ status.style.color = '#E24B4A'; status.textContent = 'Error leyendo el archivo.'; }
+  };
+  reader.readAsText(file);
+}
+window.csvImportMatch = csvImportMatch;
+
+// Parser CSV → rawRows [{name, pos, nums[]}]
+// Asume que las primeras 2 columnas son name y pos. El resto son numéricas.
+// Detecta automáticamente si la primera línea es header.
+// Aplica Math.abs a valores numéricos.
+function csvParseMatchToRawRows(txt){
+  var lines = txt.trim().split('\n').map(function(l){return l.replace(/\r/,'');}).filter(function(l){return l.trim();});
+  if(lines.length < 1) return [];
+  var sep = lines[0].indexOf('\t') > -1 ? '\t' : lines[0].indexOf(';') > -1 ? ';' : ',';
+  function splitLine(line){
+    if(sep !== ',') return line.split(sep).map(function(x){return x.trim();});
+    // CSV con comillas: respetar comas dentro de campos entre comillas
+    var result = [], cur = '', inQ = false;
+    for(var ci = 0; ci < line.length; ci++){
+      var ch = line[ci];
+      if(ch === '"'){ inQ = !inQ; }
+      else if(ch === ',' && !inQ){ result.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    result.push(cur.trim());
+    return result;
+  }
+  function pn(x){
+    if(x == null || x === '') return null;
+    var s = String(x).trim();
+    // Soporte para formato HH:MM:SS de duraciones
+    if(/^\d+:\d+(:\d+)?$/.test(s)){
+      var tp = s.split(':').map(Number);
+      var minutes = tp[0] * 60 + tp[1] + (tp[2] || 0) / 60;
+      return minutes;
+    }
+    var v = parseFloat(s.replace(',', '.'));
+    if(isNaN(v)) return null;
+    return Math.abs(v);
+  }
+  // Detectar si la primera línea es header
+  var first = splitLine(lines[0]);
+  // Si la primera celda no parece nombre (números o vacía), o la mayoría son números, asumimos header
+  var firstCells = first.slice(2); // celdas después de name+pos
+  var numericRatio = firstCells.filter(function(c){return /^-?\d+([.,]\d+)?$/.test(String(c).trim());}).length / Math.max(1, firstCells.length);
+  var startIdx = (numericRatio < 0.4) ? 1 : 0;
+  var dataLines = lines.slice(startIdx);
+
+  var rawRows = [];
+  dataLines.forEach(function(l){
+    var cells = splitLine(l);
+    if(cells.length < 3) return;
+    var name = String(cells[0] || '').replace(/^"|"$/g, '').trim();
+    var pos = String(cells[1] || '').replace(/^"|"$/g, '').trim();
+    if(!name || name.length < 2) return;
+    // Filtrar filas resumen
+    if(/^(total|promedio|average|media|prom|tot|equipo|team)\s*$/i.test(name)) return;
+    var nums = cells.slice(2).map(pn).filter(function(v){return v !== null;});
+    if(nums.length < 3) return; // muy pocos números, probablemente no es una fila de jugador
+    rawRows.push({name: name, pos: pos, nums: nums});
+  });
+
+  // Deduplicar por nombre
+  var seen = {};
+  return rawRows.filter(function(r){
+    var k = r.name.toLowerCase();
+    if(seen[k]) return false;
+    seen[k] = true;
+    return true;
+  });
+}
+window.csvParseMatchToRawRows = csvParseMatchToRawRows;
+
 function pdfRenderTable(players){
   var minF = parseInt((document.getElementById('pdf-min-filter')||{}).value)||0;
   var hasMax = _currentLayout.indexOf('accmax')>=0 || _currentLayout.indexOf('dccmax')>=0;
@@ -7596,6 +7725,7 @@ function pdfChangeLayout(){
   localStorage.setItem('pdf_match_layout_mode', mode);
   if(mode === 'full')  _currentLayout = PDF_LAYOUTS.full.slice();
   else if(mode === 'basic') _currentLayout = PDF_LAYOUTS.basic.slice();
+  else if(mode === 'csv-full') _currentLayout = PDF_LAYOUTS['csv-full'].slice();
   else if(mode === 'auto'){
     // Re-detect from raw rows
     var maxCols = _matchPdfRawRows.reduce(function(a,r){ return Math.max(a, r.nums.length); }, 0);
