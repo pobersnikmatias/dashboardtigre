@@ -2841,7 +2841,27 @@ function setMainView(v){
   if(v==='micro'){mcRebuildWeekSel();if(typeof mcRebuildLoadMetricSelector==='function')mcRebuildLoadMetricSelector();mcRenderWeek();mcRenderLoad();mcRenderBandConfig();mcEstInit();}
   if(v==='profiles'){if(typeof renderProfilesTable==='function')renderProfilesTable();}
   if(v==='players'){if(typeof plRebuild==='function')plRebuild();}
-  if(v==='plan'){if(typeof planRenderWeeksList==='function'){planRenderWeeksList();if(typeof _planEditData!=='undefined'&&_planEditData){planRenderDays();planRenderWeekSummary();}}}
+  if(v==='plan'){
+    if(typeof planRenderWeeksList==='function'){
+      planRenderWeeksList();
+      // Si NO se está editando ninguna semana, abrir el editor de la más reciente
+      if(typeof _planEditData==='undefined' || !_planEditData){
+        try{
+          if(typeof PLAN_WEEKS!=='undefined' && PLAN_WEEKS.length){
+            var lastIdx = 0, lastCreated = '';
+            PLAN_WEEKS.forEach(function(w, i){
+              if((w.created||'') > lastCreated){ lastCreated = w.created||''; lastIdx = i; }
+            });
+            if(typeof planEditWeek==='function') planEditWeek(lastIdx);
+          }
+        }catch(e){ console.warn('Auto-open last plan week:', e); }
+      } else if(_planEditData){
+        // Ya hay una en edición — solo refrescar el render
+        planRenderDays();
+        planRenderWeekSummary();
+      }
+    }
+  }
   if(v==='gym'){if(typeof gymRender==='function')gymRender();}
   if(v==='fixture'){if(typeof fixtureRender==='function')fixtureRender();}
   if(v==='carga'){if(typeof cargaRebuildWeekSel==='function')cargaRebuildWeekSel();if(typeof cargaRender==='function')cargaRender();}
@@ -5532,7 +5552,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       </div>
 
       <!-- Day columns -->
-      <div id="plan-days-grid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:14px"></div>
+      <div id="plan-days-grid" style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:14px;overflow:hidden"></div>
 
       <!-- Weekly summary -->
       <div id="plan-week-summary" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 14px"></div>
@@ -9297,6 +9317,20 @@ function planSwitchSubtab(tab){
     }
     if(pane) pane.style.display = isActive?'':'none';
   });
+  if(tab==='weeks'){
+    // Al entrar a "Planificación semanal", abrir directamente el editor de la última
+    // semana creada — si hay alguna y no se está editando ya otra
+    try{
+      if(typeof PLAN_WEEKS!=='undefined' && PLAN_WEEKS.length && !_planEditData){
+        // Encontrar la más reciente
+        var lastIdx = 0, lastCreated = '';
+        PLAN_WEEKS.forEach(function(w, i){
+          if((w.created||'') > lastCreated){ lastCreated = w.created||''; lastIdx = i; }
+        });
+        planEditWeek(lastIdx);
+      }
+    }catch(e){ console.warn('Auto-open last week error:', e); }
+  }
   if(tab==='compare') planCmpRender();
   if(tab==='micro'){
     // Mover el contenido de view-micro al slot la primera vez, después refrescar
@@ -10799,25 +10833,91 @@ function planRenderWeeksList(){
     wrap.innerHTML='<div style="font-size:11px;color:#aaa;padding:10px 0">No hay semanas guardadas. Creá una nueva.</div>';
     return;
   }
-  wrap.innerHTML=PLAN_WEEKS.map(function(w,i){
-    var d=new Date(w.created);
-    var dateStr=d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();
-    var totalMins=w.days.reduce(function(a,day){
-      // support both old (exercises[]) and new (blocks[]) formats
-      if(day.blocks) return a+planSumDay(day).totalMins;
-      return a+(day.exercises||[]).reduce(function(b,e){return b+e.mins;},0);
-    },0);
-    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border:1px solid #e0e0e0;border-radius:7px;flex-wrap:wrap">'+
-      '<div style="flex:1;min-width:120px">'+
-        '<div style="font-size:12px;font-weight:700;color:#0D1B2A">'+w.name+'</div>'+
-        '<div style="font-size:10px;color:#888">Creada '+dateStr+' · '+totalMins+' min planificados</div>'+
+
+  // Construir índices ordenados: el último creado va primero
+  // Mantenemos el índice original (i) porque planEditWeek/planDeleteWeek operan sobre PLAN_WEEKS[i]
+  var indexed = PLAN_WEEKS.map(function(w, i){return {w:w, i:i};});
+  indexed.sort(function(a, b){
+    // Comparar por fecha de creación descendente (más nuevo primero)
+    return (b.w.created||'').localeCompare(a.w.created||'');
+  });
+
+  function summarize(item){
+    var w = item.w;
+    var d = new Date(w.created);
+    var dateStr = d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();
+    var totalMins = w.days.reduce(function(a,day){
+      if(day.blocks) return a + planSumDay(day).totalMins;
+      return a + (day.exercises||[]).reduce(function(b,e){return b+e.mins;},0);
+    }, 0);
+    return {name:w.name, dateStr:dateStr, totalMins:totalMins};
+  }
+
+  var html = '';
+
+  // 1) La última semana destacada (siempre la primera)
+  var first = indexed[0];
+  var fs = summarize(first);
+  html +=
+    '<div style="background:linear-gradient(135deg,#3B4D88 0%,#2d3d70 100%);border-radius:9px;padding:12px 14px;color:#fff;box-shadow:0 2px 6px rgba(59,77,136,0.2)">'+
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+        '<span style="font-size:9px;background:#fff3;padding:1px 7px;border-radius:9px;letter-spacing:.5px;font-weight:700">⭐ ÚLTIMA</span>'+
+        '<div style="flex:1;min-width:120px">'+
+          '<div style="font-size:13px;font-weight:800">'+fs.name+'</div>'+
+          '<div style="font-size:10px;opacity:.85">Creada '+fs.dateStr+' · '+fs.totalMins+' min planificados</div>'+
+        '</div>'+
+        '<button onclick="planEditWeek('+first.i+')" style="background:#fff;color:#3B4D88;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">✏️ Editar</button>'+
+        '<button onclick="planExportWeekPDF('+first.i+')" style="background:#fff3;color:#fff;border:1px solid #fff5;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer">🖨️ PDF</button>'+
+        '<button onclick="planDeleteWeek('+first.i+')" title="Eliminar" style="background:#fff2;color:#fff;border:none;border-radius:5px;padding:5px 9px;font-size:13px;cursor:pointer">🗑</button>'+
       '</div>'+
-      '<button class="btn bb" onclick="planEditWeek('+i+')" style="font-size:10px;padding:3px 10px">✏️ Editar</button>'+
-      '<button class="btn bg" onclick="planExportWeekPDF('+i+')" style="font-size:10px;padding:3px 10px">🖨️ PDF</button>'+
-      '<button class="btn-r" onclick="planDeleteWeek('+i+')" title="Eliminar" style="font-size:13px;padding:2px 6px">🗑</button>'+
     '</div>';
-  }).join('');
+
+  // 2) Selector dropdown para anteriores (si hay)
+  if(indexed.length > 1){
+    var optsHtml = indexed.slice(1).map(function(it){
+      var s = summarize(it);
+      return '<option value="'+it.i+'">'+s.name+' — '+s.dateStr+' · '+s.totalMins+' min</option>';
+    }).join('');
+    html +=
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:#fff;border:1px solid #e0e0e0;border-radius:7px;margin-top:8px">'+
+        '<span style="font-size:11px;font-weight:700;color:#555">📚 Microciclos anteriores:</span>'+
+        '<select id="plan-prev-week-sel" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;background:#fff">'+
+          '<option value="">— Seleccioná uno para editar/exportar —</option>'+
+          optsHtml+
+        '</select>'+
+        '<button onclick="planEditSelectedPrev()" style="background:#3B4D88;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">✏️ Editar</button>'+
+        '<button onclick="planExportSelectedPrev()" style="background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">🖨️ PDF</button>'+
+        '<button onclick="planDeleteSelectedPrev()" title="Eliminar" style="background:#fafafa;color:#E24B4A;border:1px solid #E24B4A55;border-radius:5px;padding:5px 9px;font-size:13px;cursor:pointer">🗑</button>'+
+      '</div>';
+  }
+
+  wrap.innerHTML = html;
 }
+
+// Helpers para el selector de anteriores
+function _planSelectedPrevIdx(){
+  var sel = document.getElementById('plan-prev-week-sel');
+  if(!sel || !sel.value) return null;
+  return parseInt(sel.value, 10);
+}
+function planEditSelectedPrev(){
+  var i = _planSelectedPrevIdx();
+  if(i==null){ alert('Elegí primero un microciclo anterior del menú.'); return; }
+  planEditWeek(i);
+}
+function planExportSelectedPrev(){
+  var i = _planSelectedPrevIdx();
+  if(i==null){ alert('Elegí primero un microciclo anterior del menú.'); return; }
+  planExportWeekPDF(i);
+}
+function planDeleteSelectedPrev(){
+  var i = _planSelectedPrevIdx();
+  if(i==null){ alert('Elegí primero un microciclo anterior del menú.'); return; }
+  planDeleteWeek(i);
+}
+window.planEditSelectedPrev = planEditSelectedPrev;
+window.planExportSelectedPrev = planExportSelectedPrev;
+window.planDeleteSelectedPrev = planDeleteSelectedPrev;
 
 function planDeleteWeek(i){
   if(!confirm('¿Eliminar "'+PLAN_WEEKS[i].name+'"?'))return;
@@ -11077,7 +11177,7 @@ function planRenderDays(){
 
         // Dim the row if parallel and not counting
         var dimmed=isParallel&&!item.countVolume;
-        return '<div style="background:'+(dimmed?'#f9f9f9':'#fff')+';border:1px solid '+(dimmed?'#eee':'#e0e0e0')+';border-radius:5px;padding:5px 7px;margin-bottom:4px;opacity:'+(dimmed?'0.6':'1')+'">'+
+        return '<div style="background:'+(dimmed?'#f9f9f9':'#fff')+';border:1px solid '+(dimmed?'#eee':'#e0e0e0')+';border-radius:5px;padding:5px 7px;margin-bottom:4px;opacity:'+(dimmed?'0.6':'1')+';min-width:0;overflow:hidden">'+
           '<div style="display:flex;align-items:flex-start;gap:4px">'+
             '<span style="width:6px;height:6px;border-radius:50%;background:'+catCol+';flex-shrink:0;margin-top:3px"></span>'+
             '<div style="flex:1;min-width:0">'+
@@ -11130,7 +11230,7 @@ function planRenderDays(){
             '</div>'
           : '');
 
-      return '<div style="border:1px solid '+(isParallel?'#7F77DD55':'#e8e8e8')+';border-radius:6px;padding:6px 7px;margin-bottom:6px;background:'+(isParallel?'#faf8ff':'#fafafa')+'">'+
+      return '<div style="border:1px solid '+(isParallel?'#7F77DD55':'#e8e8e8')+';border-radius:6px;padding:6px 7px;margin-bottom:6px;background:'+(isParallel?'#faf8ff':'#fafafa')+';min-width:0;overflow:hidden">'+
         blockLabel+
         '<div>'+exRows+'</div>'+
         '<button onclick="planOpenModal('+di+','+bi+')" style="width:100%;padding:3px;border:1px dashed '+(isParallel?'#7F77DD88':'#ccc')+';border-radius:4px;background:none;cursor:pointer;font-size:10px;color:#888" '+
@@ -11164,7 +11264,7 @@ function planRenderDays(){
     }
 
     var barW=Math.min(pctMts,100);
-    return '<div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:6px">'+
+    return '<div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;min-width:0;overflow:hidden">'+
       '<div style="display:flex;align-items:center;gap:5px">'+
         '<input type="text" value="'+day.mdLabel+'" '+
           'style="width:54px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;font-size:10px;font-weight:700;color:#3B4D88;text-align:center;background:#f0f5ff" '+
