@@ -381,7 +381,6 @@ body.sb-show{visibility:visible}
 <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0">
   <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid #3B4D88;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#3B4D88;cursor:pointer">&#9917; Equipo</button>
   <button id="nav-train" onclick="setMainView('train')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📋 Ejercicios</button>
-  <button id="nav-micro" onclick="setMainView('micro')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📅 Microciclo</button>
   <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
   <button id="nav-profiles" onclick="setMainView('profiles')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👤 Perfiles</button>
   <button id="nav-gym" onclick="setMainView('gym')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🏋️ Gimnasio</button>
@@ -5482,11 +5481,13 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   </div>
 
   <!-- Sub-tabs -->
-  <div style="display:flex;gap:0;border-bottom:1px solid #ddd;margin-bottom:12px">
+  <div style="display:flex;gap:0;border-bottom:1px solid #ddd;margin-bottom:12px;flex-wrap:wrap">
     <button id="plan-subtab-weeks" class="plan-subtab" onclick="planSwitchSubtab('weeks')"
-      style="background:none;border:none;border-bottom:3px solid #0D1B2A;color:#0D1B2A;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📅 Semanas guardadas</button>
+      style="background:none;border:none;border-bottom:3px solid #0D1B2A;color:#0D1B2A;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📅 Planificación semanal</button>
     <button id="plan-subtab-compare" class="plan-subtab" onclick="planSwitchSubtab('compare')"
-      style="background:none;border:none;border-bottom:3px solid transparent;color:#666;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📊 Comparar semanas</button>
+      style="background:none;border:none;border-bottom:3px solid transparent;color:#666;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📊 Comparativo semanal</button>
+    <button id="plan-subtab-micro" class="plan-subtab" onclick="planSwitchSubtab('micro')"
+      style="background:none;border:none;border-bottom:3px solid transparent;color:#666;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📡 Microciclo GPS</button>
   </div>
 
   <!-- TAB: Semanas guardadas -->
@@ -5541,6 +5542,11 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   <!-- TAB: Comparar semanas -->
   <div id="plan-tab-compare" style="display:none">
     <div id="plan-cmp-container"></div>
+  </div>
+
+  <!-- TAB: Microciclo GPS — acá se mueve todo el contenido de view-micro -->
+  <div id="plan-tab-micro" style="display:none">
+    <div id="plan-micro-slot"></div>
   </div>
 
 </div></div>
@@ -9265,9 +9271,22 @@ var PLAN_CMP_METRICS = [
   {k:'rhie',    lbl:'RHIE',           color:'#37474F'}
 ];
 
+// Variable de control: mueve el contenido de view-micro al slot Microciclo GPS la primera vez
+var _planMovedMicro = false;
+function _planMoveMicroToSlot(){
+  if(_planMovedMicro) return;
+  var slot = document.getElementById('plan-micro-slot');
+  var src  = document.getElementById('view-micro');
+  if(!slot || !src) return;
+  while(src.firstChild){
+    slot.appendChild(src.firstChild);
+  }
+  _planMovedMicro = true;
+}
+
 // Switch between plan sub-tabs
 function planSwitchSubtab(tab){
-  var subtabs = ['weeks','compare'];
+  var subtabs = ['weeks','compare','micro'];
   subtabs.forEach(function(t){
     var btn = document.getElementById('plan-subtab-'+t);
     var pane = document.getElementById('plan-tab-'+t);
@@ -9279,6 +9298,18 @@ function planSwitchSubtab(tab){
     if(pane) pane.style.display = isActive?'':'none';
   });
   if(tab==='compare') planCmpRender();
+  if(tab==='micro'){
+    // Mover el contenido de view-micro al slot la primera vez, después refrescar
+    _planMoveMicroToSlot();
+    try{
+      if(typeof mcRebuildWeekSel==='function') mcRebuildWeekSel();
+      if(typeof mcRebuildLoadMetricSelector==='function') mcRebuildLoadMetricSelector();
+      if(typeof mcRenderWeek==='function') mcRenderWeek();
+      if(typeof mcRenderLoad==='function') mcRenderLoad();
+      if(typeof mcRenderBandConfig==='function') mcRenderBandConfig();
+      if(typeof mcEstInit==='function') mcEstInit();
+    }catch(e){ console.warn('Microciclo render error:', e); }
+  }
 }
 window.planSwitchSubtab = planSwitchSubtab;
 
