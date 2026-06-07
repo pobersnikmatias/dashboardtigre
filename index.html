@@ -7128,6 +7128,28 @@ function matchExportPDF(){
     document.body.removeChild(offDiv);
 
     // Open print window
+    // Ajustar layout según cantidad de partidos:
+    // - Hasta 4 partidos: A4 vertical, fuente normal
+    // - 5-7 partidos: A4 horizontal, fuente reducida
+    // - 8+ partidos: A4 horizontal + fuente más chica + escalado adicional
+    var nMatches = selected.length;
+    var pageOrientation = (nMatches >= 5) ? 'landscape' : 'portrait';
+    var compactCSS = '';
+    if(nMatches >= 5 && nMatches < 8){
+      // Modo compacto medio: reducir padding y fuente de tablas
+      compactCSS =
+        '.pdf-page table{font-size:9.5px !important}'+
+        '.pdf-page table th,.pdf-page table td{padding:4px 6px !important}'+
+        '.pdf-page table th{font-size:9px !important}';
+    } else if(nMatches >= 8){
+      // Modo ultra-compacto: cortar más
+      compactCSS =
+        '.pdf-page table{font-size:8.5px !important;table-layout:fixed;word-wrap:break-word}'+
+        '.pdf-page table th,.pdf-page table td{padding:3px 4px !important;overflow:hidden;text-overflow:ellipsis}'+
+        '.pdf-page table th{font-size:8.5px !important}'+
+        '.pdf-page table td:first-child,.pdf-page table th:first-child{white-space:nowrap}';
+    }
+
     var printWin=window.open('','_blank','width=900,height=700');
     if(!printWin){alert('Permitir ventanas emergentes para exportar PDF.');return;}
     printWin.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">'+
@@ -7136,7 +7158,18 @@ function matchExportPDF(){
       '*{box-sizing:border-box;margin:0;padding:0}'+
       'body{font-family:system-ui,sans-serif;background:#fff;color:#1a1a1a}'+
       'table{border-collapse:collapse;width:100%}'+
-      '@media print{@page{margin:10mm;size:A4}body{margin:0}.pdf-page{page-break-after:always}.pdf-page:last-child{page-break-after:avoid}}'+
+      // Evitar que las tablas se corten entre páginas
+      'table,tr,td,th{page-break-inside:avoid;break-inside:avoid}'+
+      'thead{display:table-header-group}'+
+      'img{max-width:100%;height:auto}'+
+      // Reglas específicas según cantidad de partidos:
+      compactCSS+
+      '@media print{'+
+        '@page{margin:8mm;size:A4 '+pageOrientation+'}'+
+        'body{margin:0}'+
+        '.pdf-page{page-break-after:always}'+
+        '.pdf-page:last-child{page-break-after:avoid}'+
+      '}'+
       '</style></head><body>'+html+'</body></html>');
     printWin.document.close();
     printWin.onload=function(){printWin.focus();printWin.print();};
