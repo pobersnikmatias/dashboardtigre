@@ -2883,25 +2883,19 @@ function setMainView(v){
   if(v==='profiles'){if(typeof renderProfilesTable==='function')renderProfilesTable();}
   if(v==='players'){if(typeof plRebuild==='function')plRebuild();}
   if(v==='plan'){
-    if(typeof planRenderWeeksList==='function'){
-      planRenderWeeksList();
-      // Si NO se está editando ninguna semana, abrir el editor de la más reciente
-      if(typeof _planEditData==='undefined' || !_planEditData){
-        try{
-          if(typeof PLAN_WEEKS!=='undefined' && PLAN_WEEKS.length){
-            var lastIdx = 0, lastCreated = '';
-            PLAN_WEEKS.forEach(function(w, i){
-              if((w.created||'') > lastCreated){ lastCreated = w.created||''; lastIdx = i; }
-            });
-            if(typeof planEditWeek==='function') planEditWeek(lastIdx);
-          }
-        }catch(e){ console.warn('Auto-open last plan week:', e); }
-      } else if(_planEditData){
-        // Ya hay una en edición — solo refrescar el render
-        planRenderDays();
-        planRenderWeekSummary();
-      }
-    }
+    // La subpestaña por default es "Microciclo GPS" → inicializar ese contenido.
+    // El auto-abrir editor de Planificación semanal se hace dentro de planSwitchSubtab('weeks').
+    if(typeof planRenderWeeksList==='function') planRenderWeeksList();
+    // Mover view-micro al slot y renderizar todo Microciclo
+    try{
+      if(typeof _planMoveMicroToSlot==='function') _planMoveMicroToSlot();
+      if(typeof mcRebuildWeekSel==='function') mcRebuildWeekSel();
+      if(typeof mcRebuildLoadMetricSelector==='function') mcRebuildLoadMetricSelector();
+      if(typeof mcRenderWeek==='function') mcRenderWeek();
+      if(typeof mcRenderLoad==='function') mcRenderLoad();
+      if(typeof mcRenderBandConfig==='function') mcRenderBandConfig();
+      if(typeof mcEstInit==='function') mcEstInit();
+    }catch(e){ console.warn('Microciclo init on plan view:', e); }
   }
   if(v==='gym'){if(typeof gymRender==='function')gymRender();}
   if(v==='fixture'){if(typeof fixtureRender==='function')fixtureRender();}
@@ -5578,16 +5572,16 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
 
   <!-- Sub-tabs -->
   <div style="display:flex;gap:0;border-bottom:1px solid #ddd;margin-bottom:12px;flex-wrap:wrap">
+    <button id="plan-subtab-micro" class="plan-subtab" onclick="planSwitchSubtab('micro')"
+      style="background:none;border:none;border-bottom:3px solid #0D1B2A;color:#0D1B2A;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📡 Microciclo GPS</button>
     <button id="plan-subtab-weeks" class="plan-subtab" onclick="planSwitchSubtab('weeks')"
-      style="background:none;border:none;border-bottom:3px solid #0D1B2A;color:#0D1B2A;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📅 Planificación semanal</button>
+      style="background:none;border:none;border-bottom:3px solid transparent;color:#666;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📅 Planificación semanal</button>
     <button id="plan-subtab-compare" class="plan-subtab" onclick="planSwitchSubtab('compare')"
       style="background:none;border:none;border-bottom:3px solid transparent;color:#666;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📊 Comparativo semanal</button>
-    <button id="plan-subtab-micro" class="plan-subtab" onclick="planSwitchSubtab('micro')"
-      style="background:none;border:none;border-bottom:3px solid transparent;color:#666;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📡 Microciclo GPS</button>
   </div>
 
   <!-- TAB: Semanas guardadas -->
-  <div id="plan-tab-weeks">
+  <div id="plan-tab-weeks" style="display:none">
     <!-- Saved weeks list -->
     <div id="plan-weeks-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:14px"></div>
 
@@ -5641,7 +5635,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   </div>
 
   <!-- TAB: Microciclo GPS — acá se mueve todo el contenido de view-micro -->
-  <div id="plan-tab-micro" style="display:none">
+  <div id="plan-tab-micro">
     <div id="plan-micro-slot"></div>
   </div>
 
