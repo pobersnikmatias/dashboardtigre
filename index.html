@@ -13140,10 +13140,10 @@ document.addEventListener('DOMContentLoaded',function(){
 
 <!-- TABS internos -->
 <div style="display:flex;gap:6px;margin-bottom:10px;border-bottom:2px solid #f0f0f0;padding-bottom:0">
-  <button id="gym-tab-sessions" onclick="gymSetTab('sessions')" style="padding:6px 16px;border:none;border-bottom:2px solid #D85A30;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#D85A30;cursor:pointer">📋 Sesiones</button>
+  <button id="gym-tab-library"  onclick="gymSetTab('library')"  style="padding:6px 16px;border:none;border-bottom:2px solid #D85A30;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#D85A30;cursor:pointer">📚 Biblioteca</button>
+  <button id="gym-tab-sessions" onclick="gymSetTab('sessions')" style="padding:6px 16px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#aaa;cursor:pointer">📋 Sesiones</button>
   <button id="gym-tab-summary"  onclick="gymSetTab('summary')"  style="padding:6px 16px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#aaa;cursor:pointer">📊 Resumen semanal</button>
   <button id="gym-tab-evals"    onclick="gymSetTab('evals')"    style="padding:6px 16px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#aaa;cursor:pointer">📐 Evaluaciones</button>
-  <button id="gym-tab-library"  onclick="gymSetTab('library')"  style="padding:6px 16px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#aaa;cursor:pointer">📚 Biblioteca</button>
 </div>
 
 <!-- ── TAB: SESIONES ── -->
@@ -13952,7 +13952,7 @@ var GYM_EXERCISES_DEFAULT = [
   {id:20,name:'Romanian deadlift', cat:'Cadera bipodal', muscle:'Isquiotibiales, Glúteos', inttype:'kg', notes:''},
 ];
 
-var _gymTab = 'sessions';
+var _gymTab = 'library';
 var _gymLibCat = 'all';
 var _gymEditId = null;
 var _gymNewRows = [];   // filas de la nueva sesión
@@ -16435,23 +16435,23 @@ function evalSetView(v){
 }
 window.evalSetView=evalSetView;
 
-// Llena el selector de ejercicio con todos los ejercicios que tengan al menos
-// una evaluación cargada en cualquier jugador.
+// Llena el selector de ejercicio con SOLO los ejercicios que tengan al menos
+// una evaluación cargada en algún jugador. Si querés agregar uno nuevo, hacelo
+// primero desde "Por jugador" y después aparecerá acá.
 function evalRefreshExSelector(){
   var sel=document.getElementById('eval-ex-sel');
   if(!sel)return;
   var current=sel.value;
-  // Reunir todos los nombres de ejercicio existentes en GYM_EVALS
+  // Reunir solo los nombres de ejercicio que aparecen en GYM_EVALS
   var exSet={};
   Object.keys(GYM_EVALS).forEach(function(pk){
     (GYM_EVALS[pk]||[]).forEach(function(e){if(e.exercise)exSet[e.exercise]=true;});
   });
-  // Además, agregar todos los ejercicios de GYM_EXERCISES como opciones aunque
-  // no tengan evals, así se puede empezar de cero
-  if(typeof GYM_EXERCISES!=='undefined'){
-    GYM_EXERCISES.forEach(function(ex){if(ex&&ex.name)exSet[ex.name]=true;});
-  }
   var names=Object.keys(exSet).sort();
+  if(!names.length){
+    sel.innerHTML='<option value="">— Sin evaluaciones cargadas —</option>';
+    return;
+  }
   sel.innerHTML='<option value="">— elegir ejercicio —</option>'+
     names.map(function(n){return '<option value="'+n.replace(/"/g,'&quot;')+'"'+(n===current?' selected':'')+'>'+n+'</option>';}).join('');
 }
@@ -22019,15 +22019,15 @@ function cargaRenderPSE(){
     });
     return {sumUA:sumUA, n:n, avgUA:n>0?sumUA/n:0, missPse:missPse, avgPse:nPse>0?sumPse/nPse:null};
   });
-  html+='<tr style="background:#0C447C;color:#fff">'+
-    '<td style="padding:7px 10px;font-weight:800;font-size:11px;position:sticky;left:0;background:#0C447C;z-index:1">EQUIPO (promedio)</td>';
+  html+='<tr style="background:#3B4D88;color:#fff">'+
+    '<td style="padding:7px 10px;font-weight:800;font-size:11px;position:sticky;left:0;background:#3B4D88;z-index:1">🏆 EQUIPO (promedio)</td>';
   teamSums.forEach(function(t){
-    html+='<td style="padding:6px 4px;text-align:center;border-left:0.5px solid rgba(255,255,255,0.15)">'+
+    html+='<td style="padding:6px 4px;text-align:center;border-left:0.5px solid rgba(255,255,255,0.2)">'+
       (t.n>0
-        ? '<div style="font-weight:800;font-size:11px">'+Math.round(t.avgUA)+'<span style="font-size:9px;opacity:0.7"> UA</span></div>'+
-          (t.avgPse!=null?'<div style="font-size:9px;opacity:0.85">PSE '+t.avgPse.toFixed(1)+'</div>':'')+
-          (t.missPse>0?'<div style="font-size:9px;color:#FFD480">⚠ '+t.missPse+' s/PSE</div>':'')
-        : '<span style="opacity:0.4">—</span>')+
+        ? '<div style="font-weight:800;font-size:11px">'+Math.round(t.avgUA)+'<span style="font-size:9px;opacity:0.85"> UA</span></div>'+
+          (t.avgPse!=null?'<div style="font-size:9px;opacity:0.95">PSE '+t.avgPse.toFixed(1)+'</div>':'')+
+          (t.missPse>0?'<div style="font-size:9px;color:#FFE08A">⚠ '+t.missPse+' s/PSE</div>':'')
+        : '<span style="opacity:0.5">—</span>')+
     '</td>';
   });
   // Totales globales del equipo
@@ -22035,8 +22035,8 @@ function cargaRenderPSE(){
   var teamSumPse=0, teamNPse=0;
   data.players.forEach(function(p){if(p.avgPSE!=null){teamSumPse+=p.avgPSE;teamNPse++;}});
   var teamAvgPse=teamNPse>0?teamSumPse/teamNPse:null;
-  html+='<td style="padding:7px 8px;text-align:center;background:#082F58"><div style="font-weight:800;font-size:12px">'+Math.round(teamTotalUA)+'</div><div style="font-size:9px;opacity:0.7">UA prom.</div></td>'+
-        '<td style="padding:7px 8px;text-align:center;background:#082F58"><div style="font-weight:800;font-size:12px">'+(teamAvgPse!=null?teamAvgPse.toFixed(1):'—')+'</div><div style="font-size:9px;opacity:0.7">PSE eq.</div></td>'+
+  html+='<td style="padding:7px 8px;text-align:center;background:#2d3d70"><div style="font-weight:800;font-size:12px">'+Math.round(teamTotalUA)+'</div><div style="font-size:9px;opacity:0.9">UA prom.</div></td>'+
+        '<td style="padding:7px 8px;text-align:center;background:#2d3d70"><div style="font-weight:800;font-size:12px">'+(teamAvgPse!=null?teamAvgPse.toFixed(1):'—')+'</div><div style="font-size:9px;opacity:0.9">PSE eq.</div></td>'+
   '</tr>';
 
   html+='</tbody></table></div>';
@@ -25043,6 +25043,12 @@ function sbOnLoginSuccess(){
     if(typeof refresh === 'function') try{ refresh(); }catch(e){}
     if(typeof drawTable === 'function') try{ drawTable(); }catch(e){}
     if(typeof matchesRender === 'function') try{ matchesRender(); }catch(e){}
+    // Aplicar referencia de partido automáticamente para que REF use los partidos reales
+    // (de lo contrario el radar comparativo en Biblioteca de ejercicios usa defaults
+    // y los ejercicios aparecen siempre "en el centro" sin distinguirse del partido).
+    if(typeof applyMatchRef === 'function' && typeof MATCHES !== 'undefined' && MATCHES.length){
+      try{ applyMatchRef(); }catch(e){ console.warn('applyMatchRef on load:', e); }
+    }
     // Migrar nombres en planillas viejas a nombre completo (PLAYER_PROFILES ya está cargado)
     if(typeof fixMigratePlanillasToFullName === 'function') try{ fixMigratePlanillasToFullName(); }catch(e){}
     // Re-renderizar el fixture (vista por defecto) — si no, queda vacío hasta que el usuario navega
