@@ -3995,6 +3995,35 @@ function mcExtraCalcPlayer(playerKey,exercises){
     acc:Math.round(acc*10)/10,dcc:Math.round(dcc*10)/10,rhie:Math.round(rhie*10)/10,
     vmax:0,spr:0,accmax:0,dccmax:0,_estimated:true};
 }
+// ─────────────────────────────────────────────────────────────────────
+// Actualiza PLAYER_PROFILES con los máximos personales (Vmax, AccMáx, DccMáx)
+// a partir de una lista de jugadores de una sesión recién guardada.
+// Respeta los locks individuales: si el usuario bloqueó un campo desde el editor
+// de perfiles (🔒), no se sobreescribe automáticamente.
+// ─────────────────────────────────────────────────────────────────────
+function mcUpdatePlayerProfilesFromSession(playerList){
+  if(!playerList || !playerList.length) return 0;
+  if(typeof PLAYER_PROFILES === 'undefined') return 0;
+  var updates = 0;
+  playerList.forEach(function(p){
+    if(!p || !p.name || p.name.length < 2) return;
+    var key = p.name.trim().toLowerCase();
+    var ex = PLAYER_PROFILES[key] || {name: p.name.trim(), vmax: null, accmax: null, dccmax: null};
+    var locks = ex.locks || {};
+    var changed = false;
+    if(!locks.vmax   && p.vmax   && (!ex.vmax   || p.vmax   > ex.vmax  )){ ex.vmax   = p.vmax;   changed = true; }
+    if(!locks.accmax && p.accmax && (!ex.accmax || p.accmax > ex.accmax)){ ex.accmax = p.accmax; changed = true; }
+    if(!locks.dccmax && p.dccmax && (!ex.dccmax || p.dccmax > ex.dccmax)){ ex.dccmax = p.dccmax; changed = true; }
+    if(changed){ PLAYER_PROFILES[key] = ex; updates++; }
+  });
+  // Si la tabla de perfiles está visible, refrescarla para que se vea el cambio en pantalla
+  if(updates > 0 && typeof renderProfilesTable === 'function'){
+    try{ renderProfilesTable(); }catch(e){}
+  }
+  return updates;
+}
+window.mcUpdatePlayerProfilesFromSession = mcUpdatePlayerProfilesFromSession;
+
 function mcImport(){
   const txt=document.getElementById('mc-raw').value;const rows=mcParseCsv(txt);const msg=document.getElementById('mc-imp-msg');
   if(!rows.length){msg.style.color='#E24B4A';msg.textContent='Sin datos.';return;}
@@ -4043,6 +4072,8 @@ function mcImport(){
   const avgDur=filteredRows.length?filteredRows.reduce((a,r)=>a+(r.tot_dur||0),0)/filteredRows.length:0;
   const ua=pse&&avgDur?Math.round(avgDur*pse):null;
   MICROCICLO.push({week,day,fecha,ref,pse,ua,players:allPlayers,_hasExtra:extraPlayers.length>0});
+  // Actualizar PLAYER_PROFILES con nuevos máximos de Vmax/AccMáx/DccMáx
+  if(typeof mcUpdatePlayerProfilesFromSession==='function') mcUpdatePlayerProfilesFromSession(allPlayers);
   saveData();mcRebuildWeekSel();
   document.getElementById('mc-week-view').value=week;
   mcRenderWeek();mcRenderLoad();
@@ -4979,6 +5010,10 @@ function mcEstSave(){
   } else {
     MICROCICLO.push({week:week,day:day,fecha:fecha,ref:ref,pse:null,ua:null,players:allPlayers,_isEstimated:true});
   }
+
+  // Actualizar PLAYER_PROFILES con nuevos máximos (sesiones estimadas raramente
+  // tienen Vmax real, pero si alguna fuente lo trae, lo aplica)
+  if(typeof mcUpdatePlayerProfilesFromSession==='function') mcUpdatePlayerProfilesFromSession(allPlayers);
 
   saveData(); mcRebuildWeekSel();
   var weekSel=document.getElementById('mc-week-view');
