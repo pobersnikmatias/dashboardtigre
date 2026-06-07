@@ -13833,11 +13833,11 @@ document.addEventListener('DOMContentLoaded',function(){
     </select>
   </label>
 
-  <input type="hidden" id="carga-tab-mode" value="cuadrante">
+  <input type="hidden" id="carga-tab-mode" value="wellpse">
 
   <div style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto">
-    <button id="carga-view-cuadrante" onclick="cargaSetView('cuadrante')" style="padding:5px 14px;border:none;background:#3B4D88;color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid #3B4D88">📊 Cuadrante</button>
-    <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">💚 Wellness &amp; PSE</button>
+    <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:#3B4D88;color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid #3B4D88">💚 Wellness &amp; PSE</button>
+    <button id="carga-view-cuadrante" onclick="cargaSetView('cuadrante')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">📊 Cuadrante</button>
   </div>
 </div>
 
@@ -22142,7 +22142,10 @@ function cargaPseStartEdit(dataId, week){
       var i=PSE_DATA.indexOf(existing);
       if(i>=0)PSE_DATA.splice(i,1);
       saveData();
-      cargaRenderPSE();
+      // IMPORTANTE: cargaRender() respeta la vista combinada (Wellness+PSE+Dolores).
+      // Si llamáramos a cargaRenderPSE() directo, sobreescribiría #carga-main-content
+      // y rompería el layout.
+      cargaRender();
     }
     return;
   }
@@ -22157,7 +22160,7 @@ function cargaPseStartEdit(dataId, week){
     PSE_DATA.push({name:name, date:date||'', pse:v, week:week, day:day, fields:{}});
   }
   saveData();
-  cargaRenderPSE();
+  cargaRender();
 }
 window.cargaPseStartEdit=cargaPseStartEdit;
 
