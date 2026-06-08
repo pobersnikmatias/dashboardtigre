@@ -26817,8 +26817,9 @@ var RESI_TYPES = {
     desc: 'Buchheit, 2008. Carrera intermitente 30" trote / 15" pasiva, con incrementos de 0.5 km/h. Resultado: VIFT (km/h).',
     metricLabel: 'VIFT',
     metricUnit: 'km/h',
-    metric2Label: 'FC máx',
-    metric2Unit: 'bpm',
+    metric2Label: 'VIFT',
+    metric2Unit: 'm/s',
+    metric2Auto: true,  // se calcula automáticamente como VIFT/3.6
     color: '#3B4D88'
   },
   'yoyoir1': {
@@ -27075,21 +27076,27 @@ function resiBuildEditor(id){
 }
 
 function resiBuildPlayersTable(players, def){
+  var v2Auto = !!def.metric2Auto;
   var html = '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
     '<thead style="background:#f0f5ff;position:sticky;top:0;z-index:1"><tr>'+
       '<th style="padding:6px 8px;text-align:left;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;min-width:160px">Jugador</th>'+
       '<th style="padding:6px 8px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;min-width:100px">'+def.metricLabel+(def.metricUnit?' ('+def.metricUnit+')':'')+'</th>'+
-      '<th style="padding:6px 8px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;min-width:100px">'+(def.metric2Label||'-')+(def.metric2Unit?' ('+def.metric2Unit+')':'')+'</th>'+
+      '<th style="padding:6px 8px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;min-width:100px">'+(def.metric2Label||'-')+(def.metric2Unit?' ('+def.metric2Unit+')':'')+(v2Auto?' <span style="font-size:9px;color:#999;font-weight:400">(auto)</span>':'')+'</th>'+
       '<th style="padding:6px 8px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;width:50px"></th>'+
     '</tr></thead><tbody id="resi-players-tbody">';
   if(!players.length){
     html += '<tr><td colspan="4" style="padding:14px;text-align:center;color:#888;font-size:10px;font-style:italic">Sin jugadores. Importá un archivo o agregá a mano.</td></tr>';
   } else {
     players.forEach(function(p, i){
+      var v2Display = p.value2;
+      // Si es auto, asegurar coherencia visual: recalcular desde value
+      if(v2Auto && p.value!=null && !isNaN(p.value)){
+        v2Display = +(p.value/3.6).toFixed(3);
+      }
       html += '<tr>'+
         '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0"><input type="text" value="'+(p.name||'').replace(/"/g,'&quot;')+'" oninput="resiEditPlayer('+i+',\'name\',this.value)" list="fix-players-datalist" style="width:100%;padding:3px 5px;border:1px solid #eee;border-radius:3px;font-size:11px"></td>'+
         '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0"><input type="number" step="0.1" value="'+(p.value!=null?p.value:'')+'" oninput="resiEditPlayer('+i+',\'value\',this.value)" style="width:100%;padding:3px 5px;border:1px solid #eee;border-radius:3px;font-size:11px;text-align:center"></td>'+
-        '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0"><input type="number" step="0.1" value="'+(p.value2!=null?p.value2:'')+'" oninput="resiEditPlayer('+i+',\'value2\',this.value)" style="width:100%;padding:3px 5px;border:1px solid #eee;border-radius:3px;font-size:11px;text-align:center"></td>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0"><input type="number" step="0.01" value="'+(v2Display!=null?v2Display:'')+'" '+(v2Auto?'readonly title="Se calcula automáticamente desde la columna anterior" style="width:100%;padding:3px 5px;border:1px solid #eee;border-radius:3px;font-size:11px;text-align:center;background:#f5f5f5;color:#666"':'oninput="resiEditPlayer('+i+',\'value2\',this.value)" style="width:100%;padding:3px 5px;border:1px solid #eee;border-radius:3px;font-size:11px;text-align:center"')+'></td>'+
         '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:center"><button onclick="resiRemovePlayer('+i+')" title="Eliminar fila" style="background:none;border:none;color:#E24B4A;cursor:pointer;font-size:13px">🗑</button></td>'+
         '</tr>';
     });
@@ -27108,6 +27115,13 @@ function resiEditPlayer(idx, field, value){
   if(!window._resiEditingPlayers || !window._resiEditingPlayers[idx]) return;
   if(field==='value' || field==='value2'){
     window._resiEditingPlayers[idx][field] = value===''?null:parseFloat(value);
+    // Si es 30-15 y se editó value (VIFT km/h), recalcular value2 (m/s) automáticamente
+    var def = RESI_TYPES[_resiNewType] || RESI_TYPES.otro;
+    if(def.metric2Auto && field==='value'){
+      var v = window._resiEditingPlayers[idx].value;
+      window._resiEditingPlayers[idx].value2 = (v!=null && !isNaN(v)) ? +(v/3.6).toFixed(3) : null;
+      _resiRefreshPlayersTable();
+    }
   } else {
     window._resiEditingPlayers[idx][field] = value;
   }
@@ -27262,6 +27276,15 @@ function _resiProcessImportedRows(rows, msg){
   }
 
   window._resiEditingPlayers = imported;
+  // Si el test tiene metric2Auto (ej. 30-15), autocompletar value2 = value/3.6
+  var defAuto = RESI_TYPES[_resiNewType] || RESI_TYPES.otro;
+  if(defAuto.metric2Auto){
+    window._resiEditingPlayers.forEach(function(p){
+      if(p.value!=null && !isNaN(p.value)){
+        p.value2 = +(p.value/3.6).toFixed(3);
+      }
+    });
+  }
   _resiRefreshPlayersTable();
   if(msg){ msg.style.color='#1D9E75'; msg.textContent='✓ '+imported.length+' jugadores cargados.'; }
 }
@@ -27407,36 +27430,76 @@ function resi3015Update(){
   var vift_kmh = parseFloat(sel.value);
   if(isNaN(vift_kmh)){ out.innerHTML = ''; return; }
   var vift_ms = vift_kmh / 3.6;
-  // Tablas de Buchheit: a 90% VIFT, pasada de 30s → distancia X
-  // Fórmula: distancia = velocidad (m/s) * tiempo (s) * %
-  function calcDist(pct, segs){ return vift_ms * segs * (pct/100); }
-  function calcTime(pct, mts){ return mts / (vift_ms * (pct/100)); }
 
-  var html = '<div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px">';
-  // Tabla 1: en función de la distancia (90%)
-  html += '<div style="background:#fff;border:1px solid #ddd;border-radius:5px;overflow:hidden">'+
-    '<div style="background:#0C447C;color:#fff;padding:5px 10px;font-size:10px;font-weight:700">VIFT en función de la distancia</div>'+
-    '<table style="width:100%;font-size:10px;border-collapse:collapse">'+
-      '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px;color:#666">% pasada VIFT</td><td style="padding:4px 8px;text-align:right;font-weight:700">90%</td></tr>'+
-      '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px;color:#666">Distancia (m)</td><td style="padding:4px 8px;text-align:right;font-weight:700">100</td></tr>'+
-      '<tr><td style="padding:4px 8px;color:#666">Tiempo de pasada (s)</td><td style="padding:4px 8px;text-align:right;font-weight:700">'+calcTime(90, 100).toFixed(1)+'</td></tr>'+
-    '</table>'+
+  // Leer inputs si ya existen (para preservar valores al recalcular). Si no, defaults.
+  var oldPct1 = document.getElementById('resi-3015-pct1');
+  var oldDist = document.getElementById('resi-3015-dist');
+  var oldPct2 = document.getElementById('resi-3015-pct2');
+  var oldTime = document.getElementById('resi-3015-time');
+  var pct1 = oldPct1 ? parseFloat(oldPct1.value)||90 : 90;
+  var dist = oldDist ? parseFloat(oldDist.value)||100 : 100;
+  var pct2 = oldPct2 ? parseFloat(oldPct2.value)||90 : 90;
+  var time = oldTime ? parseFloat(oldTime.value)||15 : 15;
+
+  // Cálculos
+  // Por distancia: tiempo = distancia / (vift_ms * pct/100)
+  // Por tiempo: distancia = vift_ms * tiempo * pct/100
+  var tCalc = (pct1>0 && vift_ms>0) ? (dist / (vift_ms * (pct1/100))) : 0;
+  var dCalc = (vift_ms * time * (pct2/100));
+
+  var html = '<div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">';
+
+  // ─── Calculadora 1: por DISTANCIA ───
+  html += '<div style="background:#fff;border:1px solid #d0dff5;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.04)">'+
+    '<div style="background:#0C447C;color:#fff;padding:6px 12px;font-size:11px;font-weight:700">📏 Pasada por DISTANCIA</div>'+
+    '<div style="padding:10px 12px;font-size:11px">'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">'+
+        '<label style="flex:1;color:#555">% de la VIFT</label>'+
+        '<input type="number" id="resi-3015-pct1" value="'+pct1+'" min="50" max="120" step="1" oninput="resi3015Recalc()" style="width:65px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center;font-weight:700">'+
+        '<span style="color:#888">%</span>'+
+      '</div>'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">'+
+        '<label style="flex:1;color:#555">Distancia de la pasada</label>'+
+        '<input type="number" id="resi-3015-dist" value="'+dist+'" min="5" max="500" step="5" oninput="resi3015Recalc()" style="width:65px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center;font-weight:700">'+
+        '<span style="color:#888">m</span>'+
+      '</div>'+
+      '<div style="background:#f0fbf6;border-left:3px solid #1D9E75;padding:8px 10px;border-radius:4px">'+
+        '<div style="font-size:9px;color:#1D9E75;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Tiempo de la pasada</div>'+
+        '<div style="font-size:18px;font-weight:800;color:#0C447C;margin-top:2px">'+tCalc.toFixed(1)+'<span style="font-size:11px;color:#888;font-weight:400"> segundos</span></div>'+
+      '</div>'+
+    '</div>'+
     '</div>';
-  // Tabla 2: en función del tiempo (90%, 15s)
-  html += '<div style="background:#fff;border:1px solid #ddd;border-radius:5px;overflow:hidden">'+
-    '<div style="background:#0C447C;color:#fff;padding:5px 10px;font-size:10px;font-weight:700">VIFT en función del tiempo</div>'+
-    '<table style="width:100%;font-size:10px;border-collapse:collapse">'+
-      '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px;color:#666">% pasada VIFT</td><td style="padding:4px 8px;text-align:right;font-weight:700">90%</td></tr>'+
-      '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px;color:#666">Tiempo (s)</td><td style="padding:4px 8px;text-align:right;font-weight:700">15</td></tr>'+
-      '<tr><td style="padding:4px 8px;color:#666">Distancia (m)</td><td style="padding:4px 8px;text-align:right;font-weight:700">'+calcDist(90, 15).toFixed(1)+'</td></tr>'+
-    '</table>'+
+
+  // ─── Calculadora 2: por TIEMPO ───
+  html += '<div style="background:#fff;border:1px solid #d0dff5;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.04)">'+
+    '<div style="background:#0C447C;color:#fff;padding:6px 12px;font-size:11px;font-weight:700">⏱ Pasada por TIEMPO</div>'+
+    '<div style="padding:10px 12px;font-size:11px">'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">'+
+        '<label style="flex:1;color:#555">% de la VIFT</label>'+
+        '<input type="number" id="resi-3015-pct2" value="'+pct2+'" min="50" max="120" step="1" oninput="resi3015Recalc()" style="width:65px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center;font-weight:700">'+
+        '<span style="color:#888">%</span>'+
+      '</div>'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">'+
+        '<label style="flex:1;color:#555">Tiempo de la pasada</label>'+
+        '<input type="number" id="resi-3015-time" value="'+time+'" min="5" max="180" step="5" oninput="resi3015Recalc()" style="width:65px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center;font-weight:700">'+
+        '<span style="color:#888">s</span>'+
+      '</div>'+
+      '<div style="background:#fffaf2;border-left:3px solid #EF9F27;padding:8px 10px;border-radius:4px">'+
+        '<div style="font-size:9px;color:#9c5a00;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Distancia de la pasada</div>'+
+        '<div style="font-size:18px;font-weight:800;color:#0C447C;margin-top:2px">'+dCalc.toFixed(1)+'<span style="font-size:11px;color:#888;font-weight:400"> metros</span></div>'+
+      '</div>'+
+    '</div>'+
     '</div>';
+
   html += '</div>';
 
-  // Tabla de adaptación intermitente (Buchheit)
-  html += '<div style="margin-top:10px;background:#fffaf2;border:1px solid #EF9F2755;border-radius:5px;padding:10px;font-size:10px">'+
+  // Info de referencia
+  html += '<div style="margin-top:8px;font-size:10px;color:#888;text-align:center">VIFT: <strong>'+vift_kmh.toFixed(1)+' km/h</strong> ('+vift_ms.toFixed(2)+' m/s)</div>';
+
+  // Tabla de adaptación intermitente (Buchheit) — fija como referencia
+  html += '<div style="margin-top:14px;background:#fffaf2;border:1px solid #EF9F2755;border-radius:5px;padding:10px 12px;font-size:10px">'+
     '<div style="font-weight:700;color:#9c5a00;margin-bottom:6px">📚 Sugerencias de adaptación intermitente (Buchheit, 2003)</div>'+
-    '<div style="color:#555;line-height:1.5">'+
+    '<div style="color:#555;line-height:1.6">'+
       '<strong>Series tipo:</strong><br>'+
       '• 15"-15" @ 95-100% VIFT, recup. pasiva → 7-10 min/serie, 2 series, 3\' rec.<br>'+
       '• 30"-30" @ 90% VIFT (carrera) - 0.4 (recup), 12-15 min/serie, 2 series, 3\' rec.<br>'+
@@ -27448,6 +27511,37 @@ function resi3015Update(){
   out.innerHTML = html;
 }
 window.resi3015Update = resi3015Update;
+
+// Recalcular sin re-renderizar (solo actualiza los outputs)
+function resi3015Recalc(){
+  // Sólo actualizar los valores de salida sin re-renderear toda la sección,
+  // para no perder el foco mientras el usuario escribe.
+  var sel = document.getElementById('resi-3015-player-sel');
+  if(!sel || !sel.value) return;
+  var vift_kmh = parseFloat(sel.value);
+  if(isNaN(vift_kmh)) return;
+  var vift_ms = vift_kmh / 3.6;
+  var pct1 = parseFloat(document.getElementById('resi-3015-pct1').value)||90;
+  var dist = parseFloat(document.getElementById('resi-3015-dist').value)||100;
+  var pct2 = parseFloat(document.getElementById('resi-3015-pct2').value)||90;
+  var time = parseFloat(document.getElementById('resi-3015-time').value)||15;
+  var tCalc = (pct1>0 && vift_ms>0) ? (dist / (vift_ms * (pct1/100))) : 0;
+  var dCalc = (vift_ms * time * (pct2/100));
+  // Actualizar solo los nodos de salida
+  // Buscamos las divs de output por el texto que muestran — más simple: regenerar solo esa parte
+  var tOut = document.querySelector('#resi-3015-output [data-out="t"]');
+  var dOut = document.querySelector('#resi-3015-output [data-out="d"]');
+  // Como no tienen data-attr todavía, los buscamos por su texto:
+  var out = document.getElementById('resi-3015-output');
+  if(!out) return;
+  // Más simple: buscamos los dos divs con font-size:18px
+  var bigs = out.querySelectorAll('div[style*="font-size:18px"]');
+  if(bigs.length >= 2){
+    bigs[0].innerHTML = tCalc.toFixed(1)+'<span style="font-size:11px;color:#888;font-weight:400"> segundos</span>';
+    bigs[1].innerHTML = dCalc.toFixed(1)+'<span style="font-size:11px;color:#888;font-weight:400"> metros</span>';
+  }
+}
+window.resi3015Recalc = resi3015Recalc;
 
 function _resiBuild3015Groups(t){
   // Agrupar jugadores por VIFT (redondeado a múltiplos de 0.5)
