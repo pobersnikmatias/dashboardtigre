@@ -965,6 +965,9 @@ function buildRadar(id,s,label,color,old){
     dat=[s.mts||0,s.hsr||0,s.h2||0,s.h25||0,(s.acc||0)/2,(s.dcc||0)/2,(s.rhie||0)/1.3,s.pl||0];
     refDat=[1,1,1,1,1,1,1,1];
   }
+  // === LOG TEMPORAL PARA DIAGNÓSTICO ===
+  console.log('[RADAR DEBUG]', id, '| isVol:', s.isVol, '| s:', JSON.stringify(s), '| dat:', dat, '| REF:', REF);
+  // ==========================================
   // Escala adaptativa: si el ejercicio tiene todos los valores por debajo de 1 (es lo
   // típico — ejercicio menos exigente que partido), reducimos el max para que el
   // polígono se VEA en lugar de colapsar cerca del centro.
