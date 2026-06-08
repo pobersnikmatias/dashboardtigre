@@ -383,7 +383,7 @@ body.sb-show{visibility:visible}
   <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
   <button id="nav-carga" onclick="setMainView('carga')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📊 Carga interna</button>
   <button id="nav-profiles" onclick="setMainView('profiles')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👤 Perfiles</button>
-  <button id="nav-gym" onclick="setMainView('gym')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🏋️ Gimnasio</button>
+  <button id="nav-gym" onclick="setMainView('gym')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">💪 Prep. física</button>
   <button id="nav-train" onclick="setMainView('train')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📋 Biblioteca de ejercicios</button>
 </div>
 
@@ -2904,7 +2904,18 @@ function setMainView(v){
       if(typeof mcEstInit==='function') mcEstInit();
     }catch(e){ console.warn('Microciclo init on plan view:', e); }
   }
-  if(v==='gym'){if(typeof gymRender==='function')gymRender();}
+  if(v==='gym'){
+    // Prep. física tiene 2 subpestañas internas: Gimnasio (default) y Resistencia.
+    // Si no se inicializó, arrancar en Gimnasio. Si ya hay una activa, respetarla.
+    if(typeof _pfTab === 'undefined' || _pfTab === null){
+      _pfTab = 'gym';
+    }
+    if(typeof pfSetTab === 'function'){
+      pfSetTab(_pfTab);
+    } else if(typeof gymRender==='function'){
+      gymRender();
+    }
+  }
   if(v==='fixture'){if(typeof fixtureRender==='function')fixtureRender();}
   if(v==='carga'){if(typeof cargaRebuildWeekSel==='function')cargaRebuildWeekSel();if(typeof cargaRender==='function')cargaRender();}
 }
@@ -13180,6 +13191,17 @@ document.addEventListener('DOMContentLoaded',function(){
 ══════════════════════════════════════════════════════════════ -->
 <div id="view-gym" style="display:none">
 
+<!-- TABS Preparación física: Gimnasio | Resistencia -->
+<div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid #ddd;padding-bottom:0">
+  <button id="pf-tab-gym-btn" onclick="pfSetTab('gym')" style="padding:7px 18px;border:none;border-bottom:3px solid #0D1B2A;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#0D1B2A;cursor:pointer">🏋️ Gimnasio</button>
+  <button id="pf-tab-resistencia-btn" onclick="pfSetTab('resistencia')" style="padding:7px 18px;border:none;border-bottom:3px solid transparent;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#666;cursor:pointer">🏃 Resistencia</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- WRAPPER PESTAÑA GIMNASIO (todo el contenido viejo) -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="pf-tab-gym">
+
 <!-- TABS internos -->
 <div style="display:flex;gap:6px;margin-bottom:10px;border-bottom:2px solid #f0f0f0;padding-bottom:0">
   <button id="gym-tab-library"  onclick="gymSetTab('library')"  style="padding:6px 16px;border:none;border-bottom:2px solid #D85A30;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#D85A30;cursor:pointer">📚 Biblioteca</button>
@@ -13734,6 +13756,15 @@ document.addEventListener('DOMContentLoaded',function(){
       <span id="eval-import-msg" style="font-size:11px;color:#1D9E75"></span>
     </div>
   </div>
+</div>
+
+</div><!-- ═══════ FIN pf-tab-gym ═══════ -->
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- WRAPPER PESTAÑA RESISTENCIA -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="pf-tab-resistencia" style="display:none">
+  <div id="resi-container"></div>
 </div>
 
 </div><!-- end view-gym -->
@@ -26732,6 +26763,764 @@ setTimeout(function(){
     setupExclusivePanels();
   }
 })();
+
+// ════════════════════════════════════════════════════════════════════
+// PREPARACIÓN FÍSICA — Switching entre subpestañas Gimnasio / Resistencia
+// ════════════════════════════════════════════════════════════════════
+var _pfTab = 'gym';
+function pfSetTab(tab){
+  _pfTab = tab;
+  ['gym','resistencia'].forEach(function(t){
+    var btn = document.getElementById('pf-tab-'+t+'-btn');
+    var pane = document.getElementById('pf-tab-'+t);
+    var isActive = (t===tab);
+    if(btn){
+      btn.style.borderBottom = '3px solid '+(isActive?'#0D1B2A':'transparent');
+      btn.style.color = isActive?'#0D1B2A':'#666';
+    }
+    if(pane) pane.style.display = isActive?'':'none';
+  });
+  if(tab==='gym'){
+    // Re-render del gimnasio (puede haberse perdido el render mientras estaba oculto)
+    try{ if(typeof gymRender==='function') gymRender(); }catch(e){}
+  } else if(tab==='resistencia'){
+    try{ resiRender(); }catch(e){ console.warn('Resistencia render:', e); }
+  }
+}
+window.pfSetTab = pfSetTab;
+
+// ════════════════════════════════════════════════════════════════════
+// RESISTENCIA — Tests aeróbicos (30-15, Yo-yo IR1, etc.)
+// ════════════════════════════════════════════════════════════════════
+//
+// Estructura de datos:
+//   RESI_TESTS = [{ id, type, name, date, players: [{name, value, value2?}], notes }]
+// Donde:
+//   - type: '3015' | 'yoyoir1' | 'yoyoir2' | 'matsudo' | 'navette' | 'otro'
+//   - players: lista de jugadores con su resultado clave del test
+//     - Para 30-15: value = VIFT (km/h), value2 (opcional) = FC máxima
+//     - Para Yo-yo IR1/IR2: value = distancia (m), value2 = velocidad final (km/h)
+//     - Para Matsudo: value = VAM (km/h)
+//     - Para Navette: value = palier alcanzado, value2 = VAM estimada
+//   - notes: notas libres del evaluador
+//
+// Esta estructura es genérica — agregando nuevos tipos no se pisan los anteriores
+// porque cada test guarda su propio tipo y valores.
+
+var RESI_TESTS = JSON.parse(localStorage.getItem('RESI_TESTS')||'[]');
+
+// Definición de tipos de test disponibles
+var RESI_TYPES = {
+  '3015': {
+    name: '30-15 Intermittent Fitness Test',
+    short: '30-15 IFT',
+    desc: 'Buchheit, 2008. Carrera intermitente 30" trote / 15" pasiva, con incrementos de 0.5 km/h. Resultado: VIFT (km/h).',
+    metricLabel: 'VIFT',
+    metricUnit: 'km/h',
+    metric2Label: 'FC máx',
+    metric2Unit: 'bpm',
+    color: '#3B4D88'
+  },
+  'yoyoir1': {
+    name: 'Yo-Yo Intermittent Recovery Test (Nivel 1)',
+    short: 'Yo-Yo IR1',
+    desc: 'Bangsbo, 2008. Idas y vueltas 2×20m con 10" de pausa. Resultado: distancia total (m).',
+    metricLabel: 'Distancia',
+    metricUnit: 'm',
+    metric2Label: 'Vel. final',
+    metric2Unit: 'km/h',
+    color: '#1D9E75'
+  },
+  'yoyoir2': {
+    name: 'Yo-Yo Intermittent Recovery Test (Nivel 2)',
+    short: 'Yo-Yo IR2',
+    desc: 'Versión más intensa del Yo-Yo IR. Velocidades de partida más altas.',
+    metricLabel: 'Distancia',
+    metricUnit: 'm',
+    metric2Label: 'Vel. final',
+    metric2Unit: 'km/h',
+    color: '#0F9080'
+  },
+  'matsudo': {
+    name: 'Test de Matsudo (T1500 / 4×400 / T-CAR)',
+    short: 'Matsudo',
+    desc: 'Carrera continua para estimar VAM. Resultado: VAM (km/h).',
+    metricLabel: 'VAM',
+    metricUnit: 'km/h',
+    metric2Label: 'Tiempo',
+    metric2Unit: 'min',
+    color: '#EF9F27'
+  },
+  'navette': {
+    name: 'Course Navette / Léger (20m shuttle)',
+    short: 'Navette',
+    desc: 'Léger 1988. Idas y vueltas 20m con incrementos. Resultado: palier alcanzado + VAM estimada.',
+    metricLabel: 'Palier',
+    metricUnit: '',
+    metric2Label: 'VAM est.',
+    metric2Unit: 'km/h',
+    color: '#7F77DD'
+  },
+  'otro': {
+    name: 'Otro test (personalizado)',
+    short: 'Otro',
+    desc: 'Test no listado. Configurá vos los labels al crear.',
+    metricLabel: 'Resultado',
+    metricUnit: '',
+    metric2Label: 'Resultado 2',
+    metric2Unit: '',
+    color: '#888'
+  }
+};
+
+function resiSave(){
+  try{ localStorage.setItem('RESI_TESTS', JSON.stringify(RESI_TESTS)); }catch(e){}
+}
+
+// Estado: qué test está siendo editado (mostrar formulario) — null = mostrar lista
+var _resiEditingId = null;
+// Estado: tipo seleccionado en el formulario nuevo
+var _resiNewType = '3015';
+
+function resiRender(){
+  var cont = document.getElementById('resi-container');
+  if(!cont) return;
+  var html = '';
+
+  // Header
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap">'+
+    '<div>'+
+      '<div style="font-size:14px;font-weight:800;color:#0D1B2A">🏃 Tests de Resistencia</div>'+
+      '<div style="font-size:11px;color:#666;margin-top:2px">Registrá los resultados de los tests aeróbicos del plantel (30-15, Yo-Yo, Matsudo, etc.)</div>'+
+    '</div>'+
+    '<button onclick="resiStartNew()" style="background:#3B4D88;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer">➕ Nuevo test</button>'+
+    '</div>';
+
+  // Formulario de nuevo/edición si corresponde
+  if(_resiEditingId !== null){
+    html += resiBuildEditor(_resiEditingId);
+  }
+
+  // Lista de tests guardados
+  if(!RESI_TESTS.length){
+    html += '<div style="background:#fff;border:2px dashed #e0e0e0;border-radius:10px;padding:24px;text-align:center;color:#888;font-size:12px">'+
+      '<div style="font-size:24px;margin-bottom:6px">🏃</div>'+
+      'No hay tests cargados todavía. Tocá "Nuevo test" para empezar.'+
+      '</div>';
+  } else {
+    html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">';
+    // Ordenar: más reciente primero
+    var sorted = RESI_TESTS.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+    sorted.forEach(function(t){
+      var def = RESI_TYPES[t.type] || RESI_TYPES.otro;
+      var dateStr = t.date ? new Date(t.date+'T00:00:00').toLocaleDateString('es-AR') : '—';
+      html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+        '<div style="width:6px;height:30px;background:'+def.color+';border-radius:3px;flex-shrink:0"></div>'+
+        '<div style="flex:1;min-width:140px">'+
+          '<div style="font-size:12px;font-weight:700;color:#0D1B2A">'+(t.name||def.short)+'</div>'+
+          '<div style="font-size:10px;color:#888;margin-top:1px">'+def.short+' · '+dateStr+' · '+(t.players||[]).length+' jugador'+((t.players||[]).length!==1?'es':'')+'</div>'+
+        '</div>'+
+        '<button onclick="resiEditTest(\''+t.id+'\')" style="background:#f0f5ff;color:#3B4D88;border:1px solid #3B4D8855;border-radius:5px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer">✏️ Editar</button>'+
+        '<button onclick="resiViewTest(\''+t.id+'\')" style="background:#fff;color:#1D9E75;border:1px solid #1D9E7555;border-radius:5px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer">📊 Ver</button>'+
+        '<button onclick="resiDeleteTest(\''+t.id+'\')" title="Eliminar" style="background:#fafafa;color:#E24B4A;border:1px solid #E24B4A55;border-radius:5px;padding:4px 9px;font-size:13px;cursor:pointer">🗑</button>'+
+        '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Visualizador de un test específico (si hay alguno abierto en modo "ver")
+  if(_resiViewingId){
+    html += resiBuildViewer(_resiViewingId);
+  }
+
+  cont.innerHTML = html;
+}
+window.resiRender = resiRender;
+
+function resiStartNew(){
+  _resiEditingId = 'new';
+  _resiNewType = '3015';
+  resiRender();
+  // Scrollear al editor
+  setTimeout(function(){
+    var ed = document.getElementById('resi-editor');
+    if(ed) ed.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 50);
+}
+window.resiStartNew = resiStartNew;
+
+function resiEditTest(id){
+  _resiEditingId = id;
+  var t = RESI_TESTS.find(function(x){return x.id===id;});
+  if(t) _resiNewType = t.type;
+  _resiViewingId = null;
+  resiRender();
+  setTimeout(function(){
+    var ed = document.getElementById('resi-editor');
+    if(ed) ed.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 50);
+}
+window.resiEditTest = resiEditTest;
+
+function resiCancelEdit(){
+  _resiEditingId = null;
+  resiRender();
+}
+window.resiCancelEdit = resiCancelEdit;
+
+function resiDeleteTest(id){
+  var t = RESI_TESTS.find(function(x){return x.id===id;});
+  if(!t) return;
+  if(!confirm('¿Eliminar el test "'+(t.name||'sin nombre')+'"?')) return;
+  RESI_TESTS = RESI_TESTS.filter(function(x){return x.id!==id;});
+  resiSave();
+  if(_resiViewingId===id) _resiViewingId = null;
+  if(_resiEditingId===id) _resiEditingId = null;
+  resiRender();
+}
+window.resiDeleteTest = resiDeleteTest;
+
+// Cambio de tipo de test en el formulario
+function resiChangeType(){
+  var sel = document.getElementById('resi-type-sel');
+  if(!sel) return;
+  _resiNewType = sel.value;
+  // Re-rendear solo si estamos creando uno nuevo (no editando existente — ese mantiene su type)
+  if(_resiEditingId === 'new'){
+    // Mantener nombre y fecha que ya tipeé
+    var name = document.getElementById('resi-name')?document.getElementById('resi-name').value:'';
+    var date = document.getElementById('resi-date')?document.getElementById('resi-date').value:'';
+    var notes = document.getElementById('resi-notes')?document.getElementById('resi-notes').value:'';
+    resiRender();
+    if(name) document.getElementById('resi-name').value = name;
+    if(date) document.getElementById('resi-date').value = date;
+    if(notes) document.getElementById('resi-notes').value = notes;
+  }
+}
+window.resiChangeType = resiChangeType;
+
+function resiBuildEditor(id){
+  var isNew = (id === 'new');
+  var t;
+  if(isNew){
+    t = {id:null, type:_resiNewType, name:'', date:new Date().toISOString().slice(0,10), players:[], notes:''};
+  } else {
+    t = RESI_TESTS.find(function(x){return x.id===id;}) || {id:id, type:_resiNewType, name:'', date:'', players:[], notes:''};
+  }
+  var def = RESI_TYPES[t.type] || RESI_TYPES.otro;
+
+  var html = '<div id="resi-editor" style="background:#f7f9fc;border:1px solid #d0dff5;border-radius:10px;padding:14px 16px;margin-bottom:14px">';
+  // Header
+  html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+
+    '<div style="font-size:13px;font-weight:800;color:#0C447C">'+(isNew?'➕ Nuevo test':'✏️ Editar test')+'</div>'+
+    '<button onclick="resiCancelEdit()" style="margin-left:auto;background:none;border:1px solid #ccc;border-radius:5px;padding:4px 10px;font-size:11px;color:#666;cursor:pointer">✕ Cancelar</button>'+
+    '</div>';
+
+  // Form principal: tipo, nombre, fecha
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:10px">';
+  // Tipo (solo editable si es nuevo)
+  html += '<label style="display:flex;flex-direction:column;gap:3px"><span style="font-size:10px;font-weight:700;color:#555">Tipo de test</span>'+
+    '<select id="resi-type-sel" onchange="resiChangeType()" '+(isNew?'':'disabled')+' style="padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;background:'+(isNew?'#fff':'#f0f0f0')+'">';
+  Object.keys(RESI_TYPES).forEach(function(k){
+    html += '<option value="'+k+'"'+(k===t.type?' selected':'')+'>'+RESI_TYPES[k].short+' — '+RESI_TYPES[k].name+'</option>';
+  });
+  html += '</select></label>';
+  // Nombre
+  html += '<label style="display:flex;flex-direction:column;gap:3px"><span style="font-size:10px;font-weight:700;color:#555">Nombre del test</span>'+
+    '<input id="resi-name" type="text" value="'+(t.name||'').replace(/"/g,'&quot;')+'" placeholder="Ej: Test inicial Feb 2026" style="padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px"></label>';
+  // Fecha
+  html += '<label style="display:flex;flex-direction:column;gap:3px"><span style="font-size:10px;font-weight:700;color:#555">Fecha</span>'+
+    '<input id="resi-date" type="date" value="'+(t.date||'')+'" style="padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px"></label>';
+  html += '</div>';
+
+  // Descripción del test
+  html += '<div style="background:#fff;border-left:3px solid '+def.color+';padding:8px 12px;border-radius:4px;margin-bottom:10px;font-size:11px;color:#555">'+
+    '<strong>'+def.name+'</strong><br>'+def.desc+
+    '</div>';
+
+  // Importar Excel/CSV
+  html += '<div style="background:#fff;border:1px dashed #b3ccf5;border-radius:6px;padding:10px 12px;margin-bottom:10px">'+
+    '<div style="font-size:11px;font-weight:700;color:#0C447C;margin-bottom:6px">📥 Cargar resultados</div>'+
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+      '<label class="btn bb" style="font-size:10px;padding:4px 12px;cursor:pointer;margin:0">📂 Importar Excel/CSV<input type="file" accept=".xlsx,.csv,.txt,.tsv" onchange="resiImportFile(event)" style="display:none"></label>'+
+      '<button onclick="resiAddPlayerRow()" style="background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:4px 12px;font-size:10px;font-weight:700;cursor:pointer">➕ Agregar jugador a mano</button>'+
+      '<span id="resi-import-msg" style="font-size:10px"></span>'+
+    '</div>'+
+    '<div style="font-size:9px;color:#999;margin-top:6px">Formato esperado: 1ra columna = apellido/nombre, 2da columna = '+def.metricLabel+' ('+def.metricUnit+').'+
+      (def.metric2Label?' 3ra columna (opcional) = '+def.metric2Label+(def.metric2Unit?' ('+def.metric2Unit+')':'')+'.':'')+
+    '</div>'+
+    '</div>';
+
+  // Tabla de jugadores
+  html += '<div id="resi-players-tbl" style="background:#fff;border:1px solid #ddd;border-radius:6px;overflow:auto;max-height:400px;margin-bottom:10px">';
+  html += resiBuildPlayersTable(t.players, def);
+  html += '</div>';
+
+  // Notas
+  html += '<label style="display:flex;flex-direction:column;gap:3px;margin-bottom:10px">'+
+    '<span style="font-size:10px;font-weight:700;color:#555">📝 Notas (opcional)</span>'+
+    '<textarea id="resi-notes" rows="2" placeholder="Observaciones del evaluador..." style="padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;font-family:inherit;resize:vertical">'+(t.notes||'')+'</textarea>'+
+    '</label>';
+
+  // Botón guardar
+  html += '<div style="display:flex;justify-content:flex-end;gap:8px">'+
+    '<button onclick="resiSaveTest()" style="background:#1D9E75;color:#fff;border:none;border-radius:6px;padding:7px 18px;font-size:12px;font-weight:700;cursor:pointer">💾 Guardar test</button>'+
+    '</div>';
+
+  html += '</div>';
+
+  // Adjuntar players temporalmente al editor para que las funciones inline lean este state
+  window._resiEditingPlayers = (t.players||[]).slice();
+  return html;
+}
+
+function resiBuildPlayersTable(players, def){
+  var html = '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
+    '<thead style="background:#f0f5ff;position:sticky;top:0;z-index:1"><tr>'+
+      '<th style="padding:6px 8px;text-align:left;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;min-width:160px">Jugador</th>'+
+      '<th style="padding:6px 8px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;min-width:100px">'+def.metricLabel+(def.metricUnit?' ('+def.metricUnit+')':'')+'</th>'+
+      '<th style="padding:6px 8px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;min-width:100px">'+(def.metric2Label||'-')+(def.metric2Unit?' ('+def.metric2Unit+')':'')+'</th>'+
+      '<th style="padding:6px 8px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #d0dff5;width:50px"></th>'+
+    '</tr></thead><tbody id="resi-players-tbody">';
+  if(!players.length){
+    html += '<tr><td colspan="4" style="padding:14px;text-align:center;color:#888;font-size:10px;font-style:italic">Sin jugadores. Importá un archivo o agregá a mano.</td></tr>';
+  } else {
+    players.forEach(function(p, i){
+      html += '<tr>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0"><input type="text" value="'+(p.name||'').replace(/"/g,'&quot;')+'" oninput="resiEditPlayer('+i+',\'name\',this.value)" list="fix-players-datalist" style="width:100%;padding:3px 5px;border:1px solid #eee;border-radius:3px;font-size:11px"></td>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0"><input type="number" step="0.1" value="'+(p.value!=null?p.value:'')+'" oninput="resiEditPlayer('+i+',\'value\',this.value)" style="width:100%;padding:3px 5px;border:1px solid #eee;border-radius:3px;font-size:11px;text-align:center"></td>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0"><input type="number" step="0.1" value="'+(p.value2!=null?p.value2:'')+'" oninput="resiEditPlayer('+i+',\'value2\',this.value)" style="width:100%;padding:3px 5px;border:1px solid #eee;border-radius:3px;font-size:11px;text-align:center"></td>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:center"><button onclick="resiRemovePlayer('+i+')" title="Eliminar fila" style="background:none;border:none;color:#E24B4A;cursor:pointer;font-size:13px">🗑</button></td>'+
+        '</tr>';
+    });
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+function _resiRefreshPlayersTable(){
+  var def = RESI_TYPES[_resiNewType] || RESI_TYPES.otro;
+  var wrap = document.getElementById('resi-players-tbl');
+  if(wrap) wrap.innerHTML = resiBuildPlayersTable(window._resiEditingPlayers||[], def);
+}
+
+function resiEditPlayer(idx, field, value){
+  if(!window._resiEditingPlayers || !window._resiEditingPlayers[idx]) return;
+  if(field==='value' || field==='value2'){
+    window._resiEditingPlayers[idx][field] = value===''?null:parseFloat(value);
+  } else {
+    window._resiEditingPlayers[idx][field] = value;
+  }
+}
+window.resiEditPlayer = resiEditPlayer;
+
+function resiAddPlayerRow(){
+  if(!window._resiEditingPlayers) window._resiEditingPlayers = [];
+  window._resiEditingPlayers.push({name:'', value:null, value2:null});
+  _resiRefreshPlayersTable();
+}
+window.resiAddPlayerRow = resiAddPlayerRow;
+
+function resiRemovePlayer(idx){
+  if(!window._resiEditingPlayers) return;
+  window._resiEditingPlayers.splice(idx, 1);
+  _resiRefreshPlayersTable();
+}
+window.resiRemovePlayer = resiRemovePlayer;
+
+function resiSaveTest(){
+  var name = document.getElementById('resi-name')?document.getElementById('resi-name').value.trim():'';
+  var date = document.getElementById('resi-date')?document.getElementById('resi-date').value:'';
+  var notes = document.getElementById('resi-notes')?document.getElementById('resi-notes').value.trim():'';
+  var players = (window._resiEditingPlayers||[]).filter(function(p){return p.name && p.name.trim();});
+
+  if(!name){ alert('Poné un nombre al test.'); return; }
+  if(!players.length){ alert('Cargá al menos un jugador.'); return; }
+
+  if(_resiEditingId === 'new'){
+    // Crear
+    var newId = 'resi_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
+    RESI_TESTS.push({id:newId, type:_resiNewType, name:name, date:date, players:players, notes:notes, created:new Date().toISOString()});
+  } else {
+    // Actualizar
+    var existing = RESI_TESTS.find(function(x){return x.id===_resiEditingId;});
+    if(existing){
+      existing.name = name;
+      existing.date = date;
+      existing.players = players;
+      existing.notes = notes;
+    }
+  }
+  resiSave();
+  _resiEditingId = null;
+  window._resiEditingPlayers = null;
+  resiRender();
+}
+window.resiSaveTest = resiSaveTest;
+
+// ─── Importar Excel/CSV ──────────────────────────────────────────────
+function resiImportFile(ev){
+  var file = ev && ev.target && ev.target.files && ev.target.files[0];
+  if(!file) return;
+  var msg = document.getElementById('resi-import-msg');
+  if(msg){ msg.style.color = '#555'; msg.textContent = 'Leyendo archivo...'; }
+  var reader = new FileReader();
+
+  if(/\.xlsx$/i.test(file.name)){
+    // XLSX requiere SheetJS (xlsx). Verificar si está disponible.
+    if(typeof XLSX === 'undefined'){
+      if(msg){ msg.style.color='#E24B4A'; msg.textContent='Para importar .xlsx necesitamos cargar SheetJS. Probá exportando a CSV.'; }
+      return;
+    }
+    reader.onload = function(e){
+      try{
+        var data = new Uint8Array(e.target.result);
+        var wb = XLSX.read(data, {type:'array'});
+        var sheet = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null});
+        _resiProcessImportedRows(rows, msg);
+      }catch(err){
+        if(msg){ msg.style.color='#E24B4A'; msg.textContent='Error: '+err.message; }
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    // CSV/TSV
+    reader.onload = function(e){
+      try{
+        var txt = String(e.target.result || '').replace(/^\uFEFF/, '');
+        var lines = txt.trim().split(/\r?\n/).filter(function(l){return l.trim();});
+        var sep = lines[0].indexOf('\t')>=0 ? '\t' : (lines[0].indexOf(';')>=0 ? ';' : ',');
+        var rows = lines.map(function(l){
+          // Split respetando comillas
+          if(sep!==','){ return l.split(sep).map(function(c){return c.trim().replace(/^"|"$/g,'');}); }
+          var out=[], cur='', inQ=false;
+          for(var i=0;i<l.length;i++){
+            var ch=l[i];
+            if(ch==='"'){ inQ=!inQ; }
+            else if(ch===',' && !inQ){ out.push(cur.trim()); cur=''; }
+            else { cur+=ch; }
+          }
+          out.push(cur.trim());
+          return out;
+        });
+        _resiProcessImportedRows(rows, msg);
+      }catch(err){
+        if(msg){ msg.style.color='#E24B4A'; msg.textContent='Error: '+err.message; }
+      }
+    };
+    reader.readAsText(file);
+  }
+}
+window.resiImportFile = resiImportFile;
+
+function _resiProcessImportedRows(rows, msg){
+  if(!rows || !rows.length){
+    if(msg){ msg.style.color='#E24B4A'; msg.textContent='Archivo vacío.'; }
+    return;
+  }
+  // Detectar header: si la primera fila tiene texto en col 0 y NO es numérico en col 1, asumimos header
+  var startIdx = 0;
+  if(rows[0] && rows[0].length>=2){
+    var c1 = rows[0][1];
+    var num = c1!=null && !isNaN(parseFloat(String(c1).replace(',','.')));
+    if(!num) startIdx = 1;
+  }
+  // También, las planillas tipo 30-15 traen MUCHAS filas de tablas/comentarios arriba.
+  // Filtro: solo filas donde la columna 0 sea un nombre razonable (2+ caracteres, no número)
+  // y la columna 1 sea numérica.
+  function pn(x){
+    if(x==null || x==='') return null;
+    var s = String(x).trim().replace(',', '.');
+    var v = parseFloat(s);
+    return isNaN(v)?null:v;
+  }
+  function isReasonableName(x){
+    if(x==null) return false;
+    var s = String(x).trim();
+    if(s.length<2) return false;
+    if(/^[\d\.\,\s\-]+$/.test(s)) return false; // solo números
+    // Excluir headers comunes
+    if(/^(apellido|nombre|jugador|player|name|tabla|fecha|grupo|tigre|porcentaje|distancia|tiempo|recuerde|ingrese)/i.test(s)) return false;
+    return true;
+  }
+
+  var imported = [];
+  for(var i=startIdx; i<rows.length; i++){
+    var r = rows[i];
+    if(!r || r.length<2) continue;
+    var name = r[0];
+    var v = pn(r[1]);
+    if(!isReasonableName(name) || v==null) continue;
+    var v2 = r.length>=3 ? pn(r[2]) : null;
+    imported.push({name: String(name).trim(), value: v, value2: v2});
+  }
+
+  if(!imported.length){
+    if(msg){ msg.style.color='#E24B4A'; msg.textContent='No se encontraron filas válidas (jugador + valor numérico).'; }
+    return;
+  }
+
+  window._resiEditingPlayers = imported;
+  _resiRefreshPlayersTable();
+  if(msg){ msg.style.color='#1D9E75'; msg.textContent='✓ '+imported.length+' jugadores cargados.'; }
+}
+
+// ─── Visualizador de un test ya guardado ─────────────────────────────
+var _resiViewingId = null;
+function resiViewTest(id){
+  _resiViewingId = id;
+  _resiEditingId = null;
+  resiRender();
+  setTimeout(function(){
+    var v = document.getElementById('resi-viewer');
+    if(v) v.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 50);
+}
+window.resiViewTest = resiViewTest;
+
+function resiCloseView(){
+  _resiViewingId = null;
+  resiRender();
+}
+window.resiCloseView = resiCloseView;
+
+function resiBuildViewer(id){
+  var t = RESI_TESTS.find(function(x){return x.id===id;});
+  if(!t) return '';
+  var def = RESI_TYPES[t.type] || RESI_TYPES.otro;
+  var dateStr = t.date ? new Date(t.date+'T00:00:00').toLocaleDateString('es-AR') : '—';
+
+  // Estadísticas
+  var values = (t.players||[]).map(function(p){return p.value;}).filter(function(v){return v!=null && !isNaN(v);});
+  var avg = values.length ? values.reduce(function(a,b){return a+b;},0)/values.length : 0;
+  var max = values.length ? Math.max.apply(null, values) : 0;
+  var min = values.length ? Math.min.apply(null, values) : 0;
+
+  var html = '<div id="resi-viewer" style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;margin-top:14px">';
+  // Header
+  html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+
+    '<div style="width:6px;height:28px;background:'+def.color+';border-radius:3px"></div>'+
+    '<div style="flex:1;min-width:140px">'+
+      '<div style="font-size:13px;font-weight:800;color:#0D1B2A">'+t.name+'</div>'+
+      '<div style="font-size:10px;color:#888">'+def.name+' · '+dateStr+'</div>'+
+    '</div>'+
+    '<button onclick="resiExportPDF(\''+t.id+'\')" style="background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">🖨️ PDF</button>'+
+    '<button onclick="resiCloseView()" style="background:none;border:1px solid #ccc;border-radius:5px;padding:5px 12px;font-size:11px;color:#666;cursor:pointer">✕ Cerrar</button>'+
+    '</div>';
+
+  // Stats cards
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px">'+
+    '<div style="background:#f0f5ff;border:1px solid #d0dff5;border-radius:6px;padding:8px;text-align:center">'+
+      '<div style="font-size:16px;font-weight:800;color:'+def.color+'">'+avg.toFixed(1)+'</div>'+
+      '<div style="font-size:9px;color:#666">'+def.metricLabel+' promedio'+(def.metricUnit?' ('+def.metricUnit+')':'')+'</div>'+
+    '</div>'+
+    '<div style="background:#f0fbf6;border:1px solid #1D9E7533;border-radius:6px;padding:8px;text-align:center">'+
+      '<div style="font-size:16px;font-weight:800;color:#1D9E75">'+max.toFixed(1)+'</div>'+
+      '<div style="font-size:9px;color:#666">Máximo</div>'+
+    '</div>'+
+    '<div style="background:#fef5f5;border:1px solid #E24B4A33;border-radius:6px;padding:8px;text-align:center">'+
+      '<div style="font-size:16px;font-weight:800;color:#E24B4A">'+min.toFixed(1)+'</div>'+
+      '<div style="font-size:9px;color:#666">Mínimo</div>'+
+    '</div>'+
+    '<div style="background:#fffaf2;border:1px solid #EF9F2733;border-radius:6px;padding:8px;text-align:center">'+
+      '<div style="font-size:16px;font-weight:800;color:#EF9F27">'+values.length+'</div>'+
+      '<div style="font-size:9px;color:#666">Jugadores</div>'+
+    '</div>'+
+    '</div>';
+
+  // Tabla de resultados (sin edición)
+  // Ordenar por valor descendente
+  var sortedPlayers = (t.players||[]).slice().sort(function(a,b){
+    return (b.value||0) - (a.value||0);
+  });
+  html += '<div style="overflow:auto;border:1px solid #ddd;border-radius:6px;margin-bottom:10px">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
+    '<thead style="background:#f7f9fc"><tr>'+
+      '<th style="padding:7px 10px;text-align:left;font-weight:700;color:#0C447C;border-bottom:1px solid #ddd">#</th>'+
+      '<th style="padding:7px 10px;text-align:left;font-weight:700;color:#0C447C;border-bottom:1px solid #ddd">Jugador</th>'+
+      '<th style="padding:7px 10px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #ddd">'+def.metricLabel+(def.metricUnit?' ('+def.metricUnit+')':'')+'</th>'+
+      '<th style="padding:7px 10px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #ddd">'+(def.metric2Label||'-')+(def.metric2Unit?' ('+def.metric2Unit+')':'')+'</th>'+
+      '<th style="padding:7px 10px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #ddd">vs. promedio</th>'+
+    '</tr></thead><tbody>';
+  sortedPlayers.forEach(function(p, i){
+    var diff = (p.value!=null && avg) ? p.value - avg : null;
+    var diffPct = (p.value!=null && avg) ? ((p.value/avg-1)*100) : null;
+    var diffColor = diff>0 ? '#1D9E75' : (diff<0 ? '#E24B4A' : '#888');
+    var diffTxt = diff==null ? '—' : (diff>0?'+':'')+diff.toFixed(1)+' ('+(diffPct>0?'+':'')+diffPct.toFixed(0)+'%)';
+    html += '<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:5px 10px;color:#888;font-size:10px">'+(i+1)+'</td><td style="padding:5px 10px;font-weight:600">'+p.name+'</td>'+
+      '<td style="padding:5px 10px;text-align:center;font-weight:700">'+(p.value!=null?p.value.toFixed(1):'—')+'</td>'+
+      '<td style="padding:5px 10px;text-align:center">'+(p.value2!=null?p.value2.toFixed(1):'—')+'</td>'+
+      '<td style="padding:5px 10px;text-align:center;font-size:10px;color:'+diffColor+';font-weight:600">'+diffTxt+'</td>'+
+      '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // Tablas auxiliares específicas del 30-15
+  if(t.type === '3015'){
+    html += _resiBuild3015Helpers(t);
+  }
+
+  if(t.notes){
+    html += '<div style="background:#fffaf2;border-left:3px solid #EF9F27;padding:8px 12px;border-radius:4px;font-size:11px;color:#555;margin-top:10px">'+
+      '<strong>📝 Notas:</strong> '+t.notes+
+      '</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ─── Tablas específicas del 30-15 ─────────────────────────────────────
+// Estas tablas se ven SOLO cuando el test es 30-15. Si otro profe carga Yo-Yo
+// u otro test, NO se muestran porque no aplican.
+function _resiBuild3015Helpers(t){
+  var html = '';
+  html += '<div style="margin-top:14px;border-top:2px solid #f0f0f0;padding-top:12px">';
+  html += '<div style="font-size:12px;font-weight:800;color:#0C447C;margin-bottom:8px">📊 Herramientas 30-15 IFT (Buchheit)</div>';
+
+  // Selector individual de VIFT
+  html += '<div style="background:#f7f9fc;border:1px solid #d0dff5;border-radius:6px;padding:10px 12px;margin-bottom:10px">'+
+    '<div style="font-size:11px;color:#555;margin-bottom:6px">Calculadora individual: elegí un jugador para ver sus pasadas y prescripción.</div>'+
+    '<select id="resi-3015-player-sel" onchange="resi3015Update()" style="padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;min-width:200px">'+
+      '<option value="">— Elegí jugador —</option>'+
+      (t.players||[]).filter(function(p){return p.value!=null;}).map(function(p){
+        return '<option value="'+p.value+'" data-name="'+p.name.replace(/"/g,'&quot;')+'">'+p.name+' — VIFT '+p.value.toFixed(1)+' km/h</option>';
+      }).join('')+
+    '</select>'+
+    '<div id="resi-3015-output"></div>'+
+    '</div>';
+
+  // Tabla agrupada por VIFT (todos los jugadores)
+  html += '<div style="font-size:11px;font-weight:700;color:#0C447C;margin-top:14px;margin-bottom:6px">📋 Agrupación por VIFT (todos los jugadores)</div>';
+  html += _resiBuild3015Groups(t);
+
+  html += '</div>';
+  return html;
+}
+
+function resi3015Update(){
+  var sel = document.getElementById('resi-3015-player-sel');
+  var out = document.getElementById('resi-3015-output');
+  if(!sel || !out) return;
+  if(!sel.value){ out.innerHTML = ''; return; }
+  var vift_kmh = parseFloat(sel.value);
+  if(isNaN(vift_kmh)){ out.innerHTML = ''; return; }
+  var vift_ms = vift_kmh / 3.6;
+  // Tablas de Buchheit: a 90% VIFT, pasada de 30s → distancia X
+  // Fórmula: distancia = velocidad (m/s) * tiempo (s) * %
+  function calcDist(pct, segs){ return vift_ms * segs * (pct/100); }
+  function calcTime(pct, mts){ return mts / (vift_ms * (pct/100)); }
+
+  var html = '<div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px">';
+  // Tabla 1: en función de la distancia (90%)
+  html += '<div style="background:#fff;border:1px solid #ddd;border-radius:5px;overflow:hidden">'+
+    '<div style="background:#0C447C;color:#fff;padding:5px 10px;font-size:10px;font-weight:700">VIFT en función de la distancia</div>'+
+    '<table style="width:100%;font-size:10px;border-collapse:collapse">'+
+      '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px;color:#666">% pasada VIFT</td><td style="padding:4px 8px;text-align:right;font-weight:700">90%</td></tr>'+
+      '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px;color:#666">Distancia (m)</td><td style="padding:4px 8px;text-align:right;font-weight:700">100</td></tr>'+
+      '<tr><td style="padding:4px 8px;color:#666">Tiempo de pasada (s)</td><td style="padding:4px 8px;text-align:right;font-weight:700">'+calcTime(90, 100).toFixed(1)+'</td></tr>'+
+    '</table>'+
+    '</div>';
+  // Tabla 2: en función del tiempo (90%, 15s)
+  html += '<div style="background:#fff;border:1px solid #ddd;border-radius:5px;overflow:hidden">'+
+    '<div style="background:#0C447C;color:#fff;padding:5px 10px;font-size:10px;font-weight:700">VIFT en función del tiempo</div>'+
+    '<table style="width:100%;font-size:10px;border-collapse:collapse">'+
+      '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px;color:#666">% pasada VIFT</td><td style="padding:4px 8px;text-align:right;font-weight:700">90%</td></tr>'+
+      '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px;color:#666">Tiempo (s)</td><td style="padding:4px 8px;text-align:right;font-weight:700">15</td></tr>'+
+      '<tr><td style="padding:4px 8px;color:#666">Distancia (m)</td><td style="padding:4px 8px;text-align:right;font-weight:700">'+calcDist(90, 15).toFixed(1)+'</td></tr>'+
+    '</table>'+
+    '</div>';
+  html += '</div>';
+
+  // Tabla de adaptación intermitente (Buchheit)
+  html += '<div style="margin-top:10px;background:#fffaf2;border:1px solid #EF9F2755;border-radius:5px;padding:10px;font-size:10px">'+
+    '<div style="font-weight:700;color:#9c5a00;margin-bottom:6px">📚 Sugerencias de adaptación intermitente (Buchheit, 2003)</div>'+
+    '<div style="color:#555;line-height:1.5">'+
+      '<strong>Series tipo:</strong><br>'+
+      '• 15"-15" @ 95-100% VIFT, recup. pasiva → 7-10 min/serie, 2 series, 3\' rec.<br>'+
+      '• 30"-30" @ 90% VIFT (carrera) - 0.4 (recup), 12-15 min/serie, 2 series, 3\' rec.<br>'+
+      '• 10"-20" @ 90-100% VIFT, recup. pasiva → 6\' por serie, 2 series, 6-7\' rec activa.<br>'+
+      '• Modalidades: línea recta / ida-vuelta 40m / ida-vuelta 30m según preferencia.'+
+    '</div>'+
+    '</div>';
+
+  out.innerHTML = html;
+}
+window.resi3015Update = resi3015Update;
+
+function _resiBuild3015Groups(t){
+  // Agrupar jugadores por VIFT (redondeado a múltiplos de 0.5)
+  var groups = {};
+  (t.players||[]).forEach(function(p){
+    if(p.value==null) return;
+    var k = (Math.round(p.value*2)/2).toFixed(1); // redondea a .0 o .5
+    if(!groups[k]) groups[k] = [];
+    groups[k].push(p);
+  });
+  var keys = Object.keys(groups).sort(function(a,b){return parseFloat(a)-parseFloat(b);});
+  if(!keys.length) return '<div style="color:#888;font-size:10px;font-style:italic">Sin jugadores para agrupar.</div>';
+
+  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">';
+  keys.forEach(function(k, gi){
+    var grp = groups[k];
+    var color = ['#3B4D88','#1D9E75','#EF9F27','#D85A30','#7F77DD'][gi%5];
+    html += '<div style="background:#fff;border:1px solid #ddd;border-radius:6px;overflow:hidden">'+
+      '<div style="background:'+color+';color:#fff;padding:5px 10px;font-size:11px;font-weight:700">Grupo VIFT '+k+' ('+grp.length+')</div>'+
+      '<div style="padding:6px 10px;font-size:10px;line-height:1.7">'+
+        grp.map(function(p){return p.name;}).join('<br>')+
+      '</div>'+
+      '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+// ─── Exportar PDF ─────────────────────────────────────────────────────
+function resiExportPDF(id){
+  var t = RESI_TESTS.find(function(x){return x.id===id;});
+  if(!t){ alert('Test no encontrado.'); return; }
+  var def = RESI_TYPES[t.type] || RESI_TYPES.otro;
+  var dateStr = t.date ? new Date(t.date+'T00:00:00').toLocaleDateString('es-AR') : '—';
+  var values = (t.players||[]).map(function(p){return p.value;}).filter(function(v){return v!=null;});
+  var avg = values.length ? values.reduce(function(a,b){return a+b;},0)/values.length : 0;
+  var sortedPlayers = (t.players||[]).slice().sort(function(a,b){return (b.value||0)-(a.value||0);});
+
+  var w = window.open('','_blank','width=900,height=700');
+  if(!w){ alert('Permitir ventanas emergentes para exportar.'); return; }
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Test '+def.short+' — '+t.name+'</title>'+
+    '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;color:#1a1a1a;padding:18px}'+
+    'h1{font-size:18px;color:#0D1B2A;margin-bottom:4px}h2{font-size:13px;color:#666;margin-bottom:14px;font-weight:400}'+
+    'table{border-collapse:collapse;width:100%;margin:10px 0;font-size:11px}'+
+    'th{background:#f0f5ff;color:#0C447C;padding:7px 10px;text-align:left;border-bottom:1px solid #d0dff5}'+
+    'td{padding:5px 10px;border-bottom:1px solid #f0f0f0}'+
+    '.stat{display:inline-block;padding:6px 12px;background:#f7f9fc;border-radius:5px;margin-right:8px;font-size:11px}'+
+    '.stat strong{font-size:14px;color:'+def.color+';display:block}'+
+    '@media print{@page{margin:10mm;size:A4}body{padding:0}}</style></head><body>';
+  html += '<h1>'+t.name+'</h1>';
+  html += '<h2>'+def.name+' · '+dateStr+' · Club Atlético Tigre 5ta</h2>';
+  html += '<div style="margin-bottom:10px">'+
+    '<span class="stat"><strong>'+avg.toFixed(1)+'</strong>'+def.metricLabel+' prom.</span>'+
+    '<span class="stat"><strong>'+(values.length?Math.max.apply(null,values).toFixed(1):'—')+'</strong>Máx</span>'+
+    '<span class="stat"><strong>'+(values.length?Math.min.apply(null,values).toFixed(1):'—')+'</strong>Mín</span>'+
+    '<span class="stat"><strong>'+values.length+'</strong>Jugadores</span>'+
+    '</div>';
+  html += '<table><thead><tr><th>#</th><th>Jugador</th><th style="text-align:center">'+def.metricLabel+'</th><th style="text-align:center">'+(def.metric2Label||'-')+'</th><th style="text-align:center">vs prom.</th></tr></thead><tbody>';
+  sortedPlayers.forEach(function(p,i){
+    var diff = (p.value!=null && avg) ? p.value - avg : null;
+    var diffPct = (p.value!=null && avg) ? ((p.value/avg-1)*100) : null;
+    var diffTxt = diff==null?'—':(diff>0?'+':'')+diff.toFixed(1)+' ('+(diffPct>0?'+':'')+diffPct.toFixed(0)+'%)';
+    html += '<tr><td>'+(i+1)+'</td><td><strong>'+p.name+'</strong></td><td style="text-align:center;font-weight:700">'+(p.value!=null?p.value.toFixed(1):'—')+'</td><td style="text-align:center">'+(p.value2!=null?p.value2.toFixed(1):'—')+'</td><td style="text-align:center;color:'+(diff>0?'#1D9E75':(diff<0?'#E24B4A':'#888'))+'">'+diffTxt+'</td></tr>';
+  });
+  html += '</tbody></table>';
+  if(t.notes){ html += '<div style="background:#fffaf2;border-left:3px solid #EF9F27;padding:8px 12px;margin-top:12px;font-size:11px"><strong>Notas:</strong> '+t.notes+'</div>'; }
+  html += '</body></html>';
+  w.document.write(html);
+  w.document.close();
+  w.onload = function(){ w.focus(); w.print(); };
+}
+window.resiExportPDF = resiExportPDF;
+
 </script>
 
 </body>
