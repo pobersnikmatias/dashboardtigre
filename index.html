@@ -955,30 +955,35 @@ function buildCards(s,id){
 }
 
 function buildRadar(id,s,label,color,old){
+  // Detectar si tenemos datos de PL en el partido (REF.pl)
+  // Si no tenemos, omitimos PL del radar porque divisiones por 0 dan Infinity/NaN
+  // y rompen la escala del radar.
+  const hasPL = REF.pl > 0;
+  const labels = hasPL
+    ? ['Mts/min','18-21','21-25','+25','Acc+3','Dec+3','RHIE','PL']
+    : ['Mts/min','18-21','21-25','+25','Acc+3','Dec+3','RHIE'];
+
   let dat,refDat;
   if(s.isVol){
     // Normalize vol data: show as ratio vs partido 90min equivalent
     const ref90={mts:REF.mts*90,hsr:REF.hsr*90,h2:REF.h2*90,h25:REF.h25*90,acc:REF.acc*90,dcc:REF.dcc*90,rhie:REF.rhie*90,pl:REF.pl*90};
-    dat=[(s.mts||0)/ref90.mts,(s.hsr||0)/ref90.hsr,(s.h2||0)/ref90.h2,(s.h25||0)/ref90.h25,(s.acc||0)/(ref90.acc*2),(s.dcc||0)/(ref90.dcc*2),(s.rhie||0)/(ref90.rhie*1.3),(s.pl||0)/ref90.pl];
-    refDat=[1,1,1,1,1,1,1,1];
+    dat=[(s.mts||0)/ref90.mts,(s.hsr||0)/ref90.hsr,(s.h2||0)/ref90.h2,(s.h25||0)/ref90.h25,(s.acc||0)/(ref90.acc*2),(s.dcc||0)/(ref90.dcc*2),(s.rhie||0)/(ref90.rhie*1.3)];
+    if(hasPL) dat.push((s.pl||0)/ref90.pl);
   } else {
-    dat=[s.mts||0,s.hsr||0,s.h2||0,s.h25||0,(s.acc||0)/2,(s.dcc||0)/2,(s.rhie||0)/1.3,s.pl||0];
-    refDat=[1,1,1,1,1,1,1,1];
+    dat=[s.mts||0,s.hsr||0,s.h2||0,s.h25||0,(s.acc||0)/2,(s.dcc||0)/2,(s.rhie||0)/1.3];
+    if(hasPL) dat.push(s.pl||0);
   }
-  // === LOG TEMPORAL PARA DIAGNÓSTICO ===
-  console.log('[RADAR DEBUG]', id, '| isVol:', s.isVol, '| s:', JSON.stringify(s), '| dat:', dat, '| REF:', REF);
-  // ==========================================
+  // Saneo defensivo: reemplazar NaN/Infinity por 0 para evitar que Chart.js explote
+  dat = dat.map(function(v){ return (isFinite(v) ? v : 0); });
+  refDat = dat.map(function(){ return 1; });
   // Escala adaptativa: si el ejercicio tiene todos los valores por debajo de 1 (es lo
   // típico — ejercicio menos exigente que partido), reducimos el max para que el
   // polígono se VEA en lugar de colapsar cerca del centro.
   const dataMax = Math.max.apply(null, dat);
   let radarMax;
   if(dataMax < 1){
-    // El polígono del ejercicio está dentro del partido — mostrar el partido como
-    // el borde exterior con margen mínimo, así el ejercicio ocupa la mayor parte
     radarMax = 1.15;
   } else {
-    // El ejercicio supera al partido en al menos una métrica — ajustar al pico
     radarMax = dataMax * 1.1;
   }
   const refLabel=s.isVol?'Partido 90min':'Partido';
@@ -986,7 +991,7 @@ function buildRadar(id,s,label,color,old){
   return new Chart(document.getElementById(id),{
     type:'radar',
     data:{
-      labels:['Mts/min','18-21','21-25','+25','Acc+3','Dec+3','RHIE','PL'],
+      labels:labels,
       datasets:[
         {label:refLabel,data:refDat,borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,.05)',borderWidth:1.2,borderDash:[4,3],pointRadius:0},
         {label,data:dat,borderColor:color,backgroundColor:color+'33',borderWidth:2.5,pointBackgroundColor:color,pointRadius:4,pointHoverRadius:6}
@@ -998,7 +1003,6 @@ function buildRadar(id,s,label,color,old){
       plugins:{
         legend:{labels:{color:'#555',font:{size:10}}},
         tooltip:{callbacks:{label:function(ctx){
-          // Mostrar el porcentaje vs partido en el tooltip
           var v=ctx.parsed.r;
           var pct=(v*100).toFixed(0);
           return ctx.dataset.label+': '+v.toFixed(2)+(ctx.dataset.label!==refLabel?' ('+pct+'% del partido)':'');
@@ -18345,6 +18349,7 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 var _fixActive = null;
+window._fixActive = _fixActive;
 
 // ── Grid render ──
 function fixtureRender(){
@@ -18368,8 +18373,8 @@ function fixtureRender(){
       +'background:'+(isActive?'#0D1B2A':'#fff')+';border:1.5px solid '+(isActive?'#3B4D88':resBd)+';'
       +'border-radius:8px;padding:10px 11px;cursor:pointer;position:relative;transition:all .15s;'
       +'box-shadow:'+(isActive?'0 0 0 2px #3B4D8844':'none')+'" '
-      +'onmouseover="this.style.background=('+m.n+'===_fixActive)?\'#0D1B2A\':\'#f0f5ff\';this.style.borderColor=('+m.n+'===_fixActive)?\'#3B4D88\':\'#3B4D8855\'" '
-      +'onmouseout="this.style.background=('+m.n+'===_fixActive)?\'#0D1B2A\':\'#fff\';this.style.borderColor=('+m.n+'===_fixActive)?\'#3B4D88\':\''+resBd+'\'">'
+      +'onmouseover="this.style.background=('+m.n+'===window._fixActive)?\'#0D1B2A\':\'#f0f5ff\';this.style.borderColor=('+m.n+'===window._fixActive)?\'#3B4D88\':\'#3B4D8855\'" '
+      +'onmouseout="this.style.background=('+m.n+'===window._fixActive)?\'#0D1B2A\':\'#fff\';this.style.borderColor=('+m.n+'===window._fixActive)?\'#3B4D88\':\''+resBd+'\'">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
         +'<span style="font-size:9px;font-weight:700;color:'+(isActive?'#3B4D88':'#aaa')+';letter-spacing:.3px">F'+m.n+'</span>'
         +(hasData?'<span title="Con planilla" style="width:6px;height:6px;border-radius:50%;background:#3B4D88;display:inline-block"></span>':'')
@@ -18386,6 +18391,7 @@ window.fixtureRender = fixtureRender;
 // ── Open partido panel (view mode) ──
 function fixOpenPartido(n){
   _fixActive = n;
+  window._fixActive = n;
   fixtureRender();
   var fix = FIX_FIXTURE[n-1];
   var data = FIX_PLANILLAS[n];
@@ -18786,6 +18792,7 @@ window.fixSaveEdit = fixSaveEdit;
 function fixClosePanel(){
   document.getElementById('fix-panel').style.display='none';
   _fixActive=null;
+  window._fixActive=null;
   fixtureRender();
 }
 window.fixClosePanel = fixClosePanel;
