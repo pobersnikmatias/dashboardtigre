@@ -195,6 +195,21 @@ body.sb-show{visibility:visible}
   .top-panels-row > details.panel{flex:1 1 calc(50% - 6px);min-width:0}
 }
 </style>
+
+<!-- NAVEGACIÓN PRINCIPAL -->
+<div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0;flex-wrap:wrap">
+  <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid #3B4D88;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#3B4D88;cursor:pointer">&#9917; Equipo</button>
+  <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
+  <button id="nav-carga" onclick="setMainView('carga')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📊 Carga interna</button>
+  <button id="nav-profiles" onclick="setMainView('profiles')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👤 Perfiles</button>
+  <button id="nav-gym" onclick="setMainView('gym')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">💪 Prep. física</button>
+  <button id="nav-train" onclick="setMainView('train')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📋 Biblioteca de ejercicios</button>
+</div>
+
+<!-- VISTA ENTRENAMIENTOS -->
+<div id="view-train" style="display:none">
+
+<!-- ═══ PANELES SUPERIORES (movidos desde top-level) ═══ -->
 <div class="top-panels-row">
 <details id="form-det" class="panel">
 <summary>Diseñá tus ejercicios</summary>
@@ -377,18 +392,6 @@ body.sb-show{visibility:visible}
 </div><!-- /.top-panels-row -->
 <div id="top-panel-slot" class="top-panel-content"></div>
 
-<!-- NAVEGACIÓN PRINCIPAL -->
-<div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0;flex-wrap:wrap">
-  <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid #3B4D88;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#3B4D88;cursor:pointer">&#9917; Equipo</button>
-  <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
-  <button id="nav-carga" onclick="setMainView('carga')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📊 Carga interna</button>
-  <button id="nav-profiles" onclick="setMainView('profiles')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👤 Perfiles</button>
-  <button id="nav-gym" onclick="setMainView('gym')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">💪 Prep. física</button>
-  <button id="nav-train" onclick="setMainView('train')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📋 Biblioteca de ejercicios</button>
-</div>
-
-<!-- VISTA ENTRENAMIENTOS -->
-<div id="view-train" style="display:none">
 
 <!-- FILTROS -->
 <div class="cats" id="cf"></div>
