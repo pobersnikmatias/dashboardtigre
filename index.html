@@ -18247,6 +18247,11 @@ var FIX_PLANILLAS_DEFAULT = {
 // ── Mutable state (gets merged with localStorage) ──
 var FIX_FIXTURE = JSON.parse(JSON.stringify(FIX_FIXTURE_DEFAULT));
 var FIX_PLANILLAS = JSON.parse(JSON.stringify(FIX_PLANILLAS_DEFAULT));
+// Exponer explícitamente en window — Safari/iPad a veces no propaga `var` top-level
+// a window cuando el script es grande. Sin esto, _sbReadGlobal devuelve undefined
+// y los datos no se suben a Supabase.
+window.FIX_FIXTURE = FIX_FIXTURE;
+window.FIX_PLANILLAS = FIX_PLANILLAS;
 
 // ── Persistence ──
 function fixSave(){
@@ -18268,8 +18273,8 @@ function fixLoad(){
     var s = localStorage.getItem('FIX_DATA');
     if(!s) return;
     var p = JSON.parse(s);
-    if(p.fixture) FIX_FIXTURE = p.fixture;
-    if(p.planillas) FIX_PLANILLAS = p.planillas;
+    if(p.fixture){ FIX_FIXTURE = p.fixture; window.FIX_FIXTURE = FIX_FIXTURE; }
+    if(p.planillas){ FIX_PLANILLAS = p.planillas; window.FIX_PLANILLAS = FIX_PLANILLAS; }
   }catch(e){ console.warn('fixLoad error:', e); }
 }
 fixLoad();
@@ -26539,6 +26544,13 @@ function _sbSettingsToPayloads(){
   var out = [];
   SB_SETTINGS_KEYS.forEach(function(k){
     var v = _sbReadGlobal(k);
+    // DIAGNÓSTICO TEMPORAL: log de cada key
+    if(k === 'FIX_FIXTURE' || k === 'FIX_PLANILLAS'){
+      console.log('[Settings Payload] '+k+' →', v===undefined?'undefined':v===null?'null':(Array.isArray(v)?'array['+v.length+']':typeof v+' keys='+Object.keys(v||{}).length));
+      if(v && typeof v === 'object'){
+        console.log('  Contenido:', JSON.stringify(v).slice(0,200));
+      }
+    }
     if(v === undefined || v === null) return;
     // Skip vacíos puros (no vale la pena ocupar fila)
     if(Array.isArray(v) && v.length === 0) return;
@@ -26560,6 +26572,14 @@ function _sbSettingsToPayloads(){
 function _sbApplySettingRow(row){
   if(!row || !row.key) return;
   if(SB_SETTINGS_KEYS.indexOf(row.key) < 0) return;  // key no reconocida, ignorar
+  // DIAGNÓSTICO TEMPORAL
+  if(row.key === 'FIX_FIXTURE' || row.key === 'FIX_PLANILLAS'){
+    var inc = row.value;
+    console.log('[Settings Apply] '+row.key+' incoming →', inc===undefined?'undefined':inc===null?'null':(Array.isArray(inc)?'array['+inc.length+']':typeof inc+' keys='+Object.keys(inc||{}).length));
+    if(inc && typeof inc === 'object'){
+      console.log('  Contenido incoming:', JSON.stringify(inc).slice(0,200));
+    }
+  }
   var current = _sbReadGlobal(row.key);
   var incoming = row.value;
   // Si la variable no existía o era null, intentar asignar directo (funciona con var, no con let)
