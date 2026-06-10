@@ -18252,8 +18252,16 @@ var FIX_PLANILLAS = JSON.parse(JSON.stringify(FIX_PLANILLAS_DEFAULT));
 function fixSave(){
   try{ localStorage.setItem('FIX_DATA', JSON.stringify({fixture:FIX_FIXTURE,planillas:FIX_PLANILLAS})); }
   catch(e){ console.warn('fixSave error:', e); }
-  // Sincronizar con Supabase (debounced). Si no está listo, no pasa nada.
-  try{ if(typeof sbScheduleTanda3Sync === 'function') sbScheduleTanda3Sync(); }catch(e){}
+  // Sincronizar con Supabase INMEDIATO (sin debounce) porque guardar una planilla
+  // es una acción consciente y crítica. Si el usuario cierra la pestaña antes del
+  // debounce de 1.5s, el dato se pierde.
+  try{
+    if(typeof sbForceSyncSettings === 'function'){
+      sbForceSyncSettings();
+    } else if(typeof sbScheduleTanda3Sync === 'function'){
+      sbScheduleTanda3Sync();
+    }
+  }catch(e){ console.warn('fixSave sync error:', e); }
 }
 function fixLoad(){
   try{
@@ -26596,6 +26604,29 @@ function sbScheduleTanda3Sync(){
 }
 window.sbScheduleTanda3Sync = sbScheduleTanda3Sync;
 
+// Sync inmediato (sin debounce). Para usar cuando es CRÍTICO que se suba ya,
+// por ejemplo después de guardar una planilla del fixture: si el usuario cierra
+// la pestaña antes de que pasen 1.5s del debounce, el dato se pierde.
+function sbForceSyncSettings(){
+  if(!sbReady){
+    console.warn('[Supabase] sbForceSyncSettings: sbReady=false, no se puede sincronizar todavía');
+    return Promise.resolve();
+  }
+  // Cancelar debounce pendiente para evitar doble sync
+  if(_sbTanda3SyncTimer){ clearTimeout(_sbTanda3SyncTimer); _sbTanda3SyncTimer = null; }
+  var payloads = _sbSettingsToPayloads();
+  if(!payloads.length){
+    console.log('[Supabase] Force sync: nada para subir');
+    return Promise.resolve();
+  }
+  console.log('[Supabase] Force sync app_settings (' + payloads.length + ' keys)');
+  return sbClient.from('app_settings').upsert(payloads, { onConflict: 'key,categoria' }).then(function(res){
+    if(res.error) console.error('[Supabase] Force sync error:', res.error);
+    else console.log('[Supabase] Force sync OK');
+  });
+}
+window.sbForceSyncSettings = sbForceSyncSettings;
+
 // ── CARGA INICIAL EXTENDIDA: agregar Tanda 3 ──
 var _origLoadInitialData6 = sbLoadInitialData;
 sbLoadInitialData = function(){
@@ -26611,6 +26642,16 @@ sbLoadInitialData = function(){
       _sbApplySettingRow(row);
     });
     console.log('[Supabase] Cargadas ' + rows.length + ' configuraciones.');
+    // Re-render del fixture porque FIX_FIXTURE y FIX_PLANILLAS pueden haberse
+    // actualizado desde la nube. Sin este re-render el iPad/otro dispositivo
+    // mostraba el fixture vacío aunque los datos ya estaban en memoria.
+    try{ if(typeof fixtureRender === 'function') fixtureRender(); }catch(e){}
+    // También guardamos en localStorage para que cierres/abras la pestaña sin
+    // tener que re-bajar de Supabase
+    try{ if(typeof fixSave === 'function'){
+      // Llamar a fixSave SIN re-disparar el sync (porque vienen de Supabase)
+      localStorage.setItem('FIX_DATA', JSON.stringify({fixture:FIX_FIXTURE,planillas:FIX_PLANILLAS}));
+    }}catch(e){}
   });
 };
 
