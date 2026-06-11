@@ -28269,7 +28269,18 @@ function planPrintRefreshPreview(){
   var day = _planEditData.days[di];
   var weekName = _planEditData.name || '';
   var html = _planBuildPrintHTML(day, weekName, /*forScreen=*/true);
-  document.getElementById('plan-print-preview').innerHTML = html;
+  var container = document.getElementById('plan-print-preview');
+  container.innerHTML = html;
+  // Bind delegado: cada vez que se reinyecta el HTML hay que volver a conectar.
+  // Usamos data-plan-edit-ex en los botones para evitar onclick inline (que rompía
+  // ante caracteres raros en nombres de ejercicio).
+  var btns = container.querySelectorAll('button[data-plan-edit-ex]');
+  btns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var id = parseInt(btn.getAttribute('data-plan-edit-ex'), 10);
+      if(!isNaN(id)) planPrintEditEx(id);
+    });
+  });
 }
 window.planPrintRefreshPreview = planPrintRefreshPreview;
 
@@ -28407,8 +28418,10 @@ function _planBuildPrintHTML(day, weekName, forScreen){
       html += '<div class="pdf-ex-info">';
       html += '<div class="pdf-ex-name">'+_h(exName);
       // Botón editar (solo en preview, no en PDF)
+      // Usamos data-attr en lugar de onclick inline para evitar problemas
+      // con caracteres especiales en nombres/descripciones que rompen el HTML.
       if(forScreen && ex){
-        html += '<button class="pdf-screen-edit" onclick="planPrintEditEx('+ex.id+')">✏️ Editar info</button>';
+        html += '<button class="pdf-screen-edit" data-plan-edit-ex="'+ex.id+'">✏️ Editar info</button>';
       }
       html += '</div>';
       html += '<div class="pdf-ex-meta">';
