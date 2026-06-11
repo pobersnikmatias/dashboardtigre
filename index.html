@@ -20879,7 +20879,7 @@ function cargaRenderWellPse(){
   var bothPresent = nWell && nPse;
   html += '<div style="display:grid;grid-template-columns:'+(bothPresent?'repeat(auto-fit,minmax(380px,1fr))':'1fr')+';gap:12px;margin-bottom:14px">';
 
-  // Cuadro Wellness: header + Evolución arriba + separador + tabla abajo
+  // Cuadro Wellness: header + Evolución arriba + Dolores reportados abajo
   if(nWell){
     html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">';
     html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:10px;display:flex;align-items:center;gap:6px">'+
@@ -20889,6 +20889,15 @@ function cargaRenderWellPse(){
     // Evolución del grupo
     if(evoHtml){
       html += evoHtml;
+    }
+    // Dolores reportados (debajo de la evolución, dentro del mismo cuadro)
+    if(doloresHtml){
+      html += '<div style="border-top:1px dashed #e0e0e0;margin-top:14px;padding-top:12px">'+
+        '<div style="font-size:11px;font-weight:800;color:#0D1B2A;margin-bottom:8px;display:flex;align-items:center;gap:6px">'+
+          '<span>🩹 Dolores reportados</span>'+
+        '</div>'+
+        doloresHtml+
+      '</div>';
     }
     html += '</div>';
   }
@@ -20905,16 +20914,6 @@ function cargaRenderWellPse(){
   }
 
   html += '</div>';
-
-  // Sección 2: Dolores (todo el ancho, abajo) — solo si hay wellness
-  if(doloresHtml){
-    html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">';
-    html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:10px;display:flex;align-items:center;gap:6px">'+
-      '<span>🩹 Dolores reportados</span>'+
-      '</div>';
-    html += doloresHtml;
-    html += '</div>';
-  }
 
   out.innerHTML = switchHtml + html;
 }
@@ -21020,9 +21019,28 @@ function cargaRenderWellPseIndividual(playerName){
   }
   function wSeriePorDia(key){
     var wd = wData[_cargaWPIndWeek];
-    if(!wd) return [];
-    return wd.dayOrder.map(function(dl){
-      var v = wd.days[dl].fields[key];
+    // Usar los días MC de la semana para tener MD-5, MD-4, ..., MD siempre presentes
+    var sessionDays = [];
+    if(typeof MICROCICLO !== 'undefined' && _cargaWPIndWeek){
+      var sessOfWeek = MICROCICLO.filter(function(s){return s.week === _cargaWPIndWeek;});
+      sessOfWeek.sort(function(a, c){
+        var ia=DAY_ORDER.indexOf(a.day), ic=DAY_ORDER.indexOf(c.day);
+        if(ia>=0&&ic>=0) return ia-ic;
+        if(ia>=0) return -1;
+        if(ic>=0) return 1;
+        return 0;
+      });
+      sessionDays = sessOfWeek.map(function(s){return s.day;});
+    }
+    // Si el jugador reportó wellness en días NO presentes en sessionDays, agregarlos
+    if(wd){
+      wd.dayOrder.forEach(function(d){ if(sessionDays.indexOf(d) < 0) sessionDays.push(d); });
+    }
+    // Si no hay nada, fallback a los días del jugador
+    if(!sessionDays.length && wd) sessionDays = wd.dayOrder;
+    if(!sessionDays.length) return [];
+    return sessionDays.map(function(dl){
+      var v = wd && wd.days[dl] ? wd.days[dl].fields[key] : null;
       return {v: (v>0?v:null), label: dl};
     });
   }
@@ -21081,11 +21099,29 @@ function cargaRenderWellPseIndividual(playerName){
   }
   function pSeriePorDia(metric){
     var b = pByWeek[_cargaWPIndWeek];
-    if(!b) return [];
-    // Recorrer DAY_ORDER para tener todos los días en orden
-    return DAY_ORDER.filter(function(dl){return b.days[dl];}).map(function(dl){
-      var d = b.days[dl];
-      var v = (metric==='pse' ? d.pse : d.ua);
+    // Para los días eje X, usar los de la semana del MC (no solo donde el jugador tiene)
+    // Así MD-5, MD-4, MD-3, etc. siempre aparecen y se ve cuándo el jugador no entrenó/no reportó.
+    var sessionDays = [];
+    if(typeof MICROCICLO !== 'undefined' && _cargaWPIndWeek){
+      var sessOfWeek = MICROCICLO.filter(function(s){return s.week === _cargaWPIndWeek;});
+      // Ordenar por DAY_ORDER
+      sessOfWeek.sort(function(a, c){
+        var ia=DAY_ORDER.indexOf(a.day), ic=DAY_ORDER.indexOf(c.day);
+        if(ia>=0&&ic>=0) return ia-ic;
+        if(ia>=0) return -1;
+        if(ic>=0) return 1;
+        return 0;
+      });
+      sessionDays = sessOfWeek.map(function(s){return s.day;});
+    }
+    // Fallback: si no hay sesiones, usar los días del jugador en orden DAY_ORDER
+    if(!sessionDays.length && b){
+      sessionDays = DAY_ORDER.filter(function(dl){return b.days[dl];});
+    }
+    if(!sessionDays.length) return [];
+    return sessionDays.map(function(dl){
+      var d = b && b.days[dl];
+      var v = d ? (metric==='pse' ? d.pse : d.ua) : null;
       return {v: (v>0?v:null), label: dl};
     });
   }
@@ -21099,32 +21135,36 @@ function cargaRenderWellPseIndividual(playerName){
     '<div style="font-size:10px;color:#888">'+nWRecs+' reportes de wellness · '+pRecs.length+' reportes de PSE</div>'+
     '</div>';
 
-  // Switch día/semana — UNIFICADO (rige Wellness y PSE)
-  html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px;margin-bottom:14px">'+
-    '<div style="display:flex;gap:4px;border-bottom:1px solid #eee;margin-bottom:12px;flex-wrap:wrap;align-items:center">';
-  [{k:'dia',l:'Día a día — '+_cargaWPIndWeek},{k:'semana',l:'Por semana del microciclo'}].forEach(function(t){
+  // ─── Switch día/semana — UNIFICADO (rige Wellness y PSE) ───
+  html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:10px 14px;margin-bottom:14px">'+
+    '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">';
+  [{k:'dia',l:'Día a día — '+(_cargaWPIndWeek||'')},{k:'semana',l:'Por semana del microciclo'}].forEach(function(t){
     var active=_cargaWPIndView===t.k;
-    html+='<button onclick="cargaWPIndSetView(\''+t.k+'\')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:'+(active?'#0D1B2A':'#aaa')+';cursor:pointer;border-bottom:2px solid '+(active?'#3B4D88':'transparent')+';margin-bottom:-1px">'+t.l+'</button>';
+    html+='<button onclick="cargaWPIndSetView(\''+t.k+'\')" style="background:'+(active?'#3B4D88':'none')+';color:'+(active?'#fff':'#666')+';border:1px solid '+(active?'#3B4D88':'#ddd')+';border-radius:6px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer">'+t.l+'</button>';
   });
   // Selector de semana cuando estamos en día
   if(_cargaWPIndView==='dia'){
-    html += '<select onchange="cargaWPIndSetWeek(this.value)" style="margin-left:auto;border:1px solid #ddd;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;color:#0D1B2A;background:#fafafa;cursor:pointer">';
+    html += '<select onchange="cargaWPIndSetWeek(this.value)" style="margin-left:auto;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;color:#0D1B2A;background:#fafafa;cursor:pointer">';
     wkKeys.slice().reverse().forEach(function(w){
       html += '<option value="'+w+'"'+(w===_cargaWPIndWeek?' selected':'')+'>'+w+'</option>';
     });
     html += '</select>';
   }
-  html += '</div>';
+  html += '</div></div>';
 
-  // ─── Cuadro Wellness ─────────────────────────────────
+  // ─── Grid 2 columnas: Wellness | PSE/UA ───
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px">';
+
+  // ═══ Cuadro Wellness ═══
+  html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">';
   if(nWRecs){
     html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:8px">🧘 Wellness — evolución</div>';
     // Chips de métricas wellness
-    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">';
     allFields.forEach(function(f,fi){
       var col=COLORS[fi%COLORS.length];
       var active=_cargaWPIndWMetric===f.key;
-      html += '<button onclick="cargaWPIndSetWMetric(\''+f.key+'\')" style="background:'+(active?col:'#fafafa')+';color:'+(active?'#fff':'#555')+';border:1px solid '+(active?col:'#eee')+';border-radius:14px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">'+f.label+'</button>';
+      html += '<button onclick="cargaWPIndSetWMetric(\''+f.key+'\')" style="background:'+(active?col:'#fafafa')+';color:'+(active?'#fff':'#555')+';border:1px solid '+(active?col:'#eee')+';border-radius:12px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer">'+f.label+'</button>';
     });
     html += '</div>';
 
@@ -21139,45 +21179,47 @@ function cargaRenderWellPseIndividual(playerName){
       var lastV = lastIdx>=0?wSer[lastIdx].v:null;
       var prevV = prevIdx>=0?wSer[prevIdx].v:null;
       var delta = (lastV!=null && prevV!=null)?lastV-prevV:null;
-      html += '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">';
+      html += '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap">';
       if(lastV!=null){
-        html += '<span style="font-size:22px;font-weight:800;color:'+wCol+'">'+lastV.toFixed(1)+'</span>';
+        html += '<span style="font-size:20px;font-weight:800;color:'+wCol+'">'+lastV.toFixed(1)+'</span>';
         html += '<span style="font-size:10px;color:#888">'+wActive.label+' · '+(wSer[lastIdx].label||'')+'</span>';
         if(delta!=null){
           var deltaCol = delta>0?'#1D9E75':(delta<0?'#E24B4A':'#888');
-          html += '<span style="font-size:11px;font-weight:700;color:'+deltaCol+'">'+(delta>0?'▲':delta<0?'▼':'▬')+' '+Math.abs(delta).toFixed(1)+'</span>';
+          html += '<span style="font-size:10px;font-weight:700;color:'+deltaCol+'">'+(delta>0?'▲':delta<0?'▼':'▬')+' '+Math.abs(delta).toFixed(1)+'</span>';
         }
       } else {
         html += '<span style="font-size:11px;color:#aaa;font-style:italic">Sin datos</span>';
       }
       html += '</div>';
-      // SVG line
-      html += '<div style="background:#fafafa;border-radius:6px;padding:8px">'+
-        _miniLineSVG(wSer, wActive.max||5, wCol, {W:520, H:120, padL:30, padR:12, padT:18, padB:18})+
+      // SVG line — TODAS las etiquetas X visibles (MD-N o S1,S2,...)
+      html += '<div style="background:#fafafa;border-radius:6px;padding:6px">'+
+        _miniLineSVG(wSer, wActive.max||5, wCol, {W:360, H:130, padL:26, padR:10, padT:20, padB:20, allXLabels:true})+
         '</div>';
     } else {
       html += '<div style="padding:16px;text-align:center;color:#aaa;background:#fafafa;border-radius:6px;font-size:11px">Sin datos de wellness para '+(_cargaWPIndView==='dia'?'esta semana':'este jugador')+'.</div>';
     }
   } else {
-    html += '<div style="padding:16px;text-align:center;color:#aaa;background:#fafafa;border-radius:6px;font-size:11px;margin-bottom:8px">📭 Sin reportes de wellness para este jugador.</div>';
+    html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:8px">🧘 Wellness — evolución</div>';
+    html += '<div style="padding:16px;text-align:center;color:#aaa;background:#fafafa;border-radius:6px;font-size:11px">📭 Sin reportes de wellness para este jugador.</div>';
   }
   html += '</div>';
 
-  // ─── Cuadro PSE / UA ─────────────────────────────────
+  // ═══ Cuadro PSE / UA ═══
   html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">';
   html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:8px">🏃 PSE & Unidades Arbitrarias</div>';
 
   if(!pRecs.length){
     html += '<div style="padding:16px;text-align:center;color:#aaa;background:#fafafa;border-radius:6px;font-size:11px">📭 Sin reportes de PSE para este jugador.</div>';
     html += '</div>';
+    html += '</div>'; // cierre del grid
     return html;
   }
 
   // Chips PSE / UA
-  html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">';
-  [{k:'pse',l:'PSE promedio',col:'#EF9F27',max:10},{k:'ua',l:'UA (carga interna)',col:'#3B4D88',max:null}].forEach(function(m){
+  html += '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">';
+  [{k:'pse',l:'PSE promedio',col:'#EF9F27'},{k:'ua',l:'UA (carga interna)',col:'#3B4D88'}].forEach(function(m){
     var active=_cargaWPIndPMetric===m.k;
-    html += '<button onclick="cargaWPIndSetPMetric(\''+m.k+'\')" style="background:'+(active?m.col:'#fafafa')+';color:'+(active?'#fff':'#555')+';border:1px solid '+(active?m.col:'#eee')+';border-radius:14px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">'+m.l+'</button>';
+    html += '<button onclick="cargaWPIndSetPMetric(\''+m.k+'\')" style="background:'+(active?m.col:'#fafafa')+';color:'+(active?'#fff':'#555')+';border:1px solid '+(active?m.col:'#eee')+';border-radius:12px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer">'+m.l+'</button>';
   });
   html += '</div>';
 
@@ -21192,7 +21234,10 @@ function cargaRenderWellPseIndividual(playerName){
       pMax = 10;
     } else {
       var maxVal = pSer.reduce(function(a,p){return Math.max(a, p.v||0);}, 0);
-      pMax = Math.ceil(maxVal*1.1/100)*100 || 100;
+      // Redondear a múltiplo de 100 (o 1000 si es grande)
+      if(maxVal >= 5000) pMax = Math.ceil(maxVal*1.1/1000)*1000;
+      else if(maxVal >= 500) pMax = Math.ceil(maxVal*1.1/100)*100;
+      else pMax = Math.ceil(maxVal*1.1/10)*10 || 100;
     }
     // Stat
     var pLastIdx=-1, pPrevIdx=-1;
@@ -21200,24 +21245,31 @@ function cargaRenderWellPseIndividual(playerName){
     var pLastV = pLastIdx>=0?pSer[pLastIdx].v:null;
     var pPrevV = pPrevIdx>=0?pSer[pPrevIdx].v:null;
     var pDelta = (pLastV!=null && pPrevV!=null)?pLastV-pPrevV:null;
-    html += '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">';
+    html += '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap">';
     if(pLastV!=null){
       var pLastFmt = _cargaWPIndPMetric==='pse' ? pLastV.toFixed(1) : Math.round(pLastV);
-      html += '<span style="font-size:22px;font-weight:800;color:'+pCol+'">'+pLastFmt+'</span>';
+      html += '<span style="font-size:20px;font-weight:800;color:'+pCol+'">'+pLastFmt+'</span>';
       html += '<span style="font-size:10px;color:#888">'+pLabel+' · '+(pSer[pLastIdx].label||'')+'</span>';
       if(pDelta!=null){
         var pDeltaCol = pDelta>0?'#1D9E75':(pDelta<0?'#E24B4A':'#888');
         var pDeltaFmt = _cargaWPIndPMetric==='pse' ? Math.abs(pDelta).toFixed(1) : Math.round(Math.abs(pDelta));
-        html += '<span style="font-size:11px;font-weight:700;color:'+pDeltaCol+'">'+(pDelta>0?'▲':pDelta<0?'▼':'▬')+' '+pDeltaFmt+'</span>';
+        html += '<span style="font-size:10px;font-weight:700;color:'+pDeltaCol+'">'+(pDelta>0?'▲':pDelta<0?'▼':'▬')+' '+pDeltaFmt+'</span>';
       }
     } else {
       html += '<span style="font-size:11px;color:#aaa;font-style:italic">Sin datos</span>';
     }
     html += '</div>';
-    // SVG line
-    html += '<div style="background:#fafafa;border-radius:6px;padding:8px">'+
-      _miniLineSVG(pSer, pMax, pCol, {W:520, H:120, padL:36, padR:12, padT:18, padB:18})+
-      '</div>';
+
+    // Gráfico: si modo SEMANA y métrica UA → BARRAS (como Microciclo GPS); resto → líneas
+    var useBars = (_cargaWPIndView==='semana' && _cargaWPIndPMetric==='ua');
+    html += '<div style="background:#fafafa;border-radius:6px;padding:6px">';
+    if(useBars){
+      html += _miniBarSVG(pSer, pMax, pCol, {W:360, H:130, padL:32, padR:10, padT:20, padB:20});
+    } else {
+      html += _miniLineSVG(pSer, pMax, pCol, {W:360, H:130, padL:32, padR:10, padT:20, padB:20, allXLabels:true});
+    }
+    html += '</div>';
+
     // Resumen del jugador
     var totalPSEs = pSer.filter(function(p){return p.v!=null;}).map(function(p){return p.v;});
     if(totalPSEs.length){
@@ -21228,7 +21280,9 @@ function cargaRenderWellPseIndividual(playerName){
   } else {
     html += '<div style="padding:16px;text-align:center;color:#aaa;background:#fafafa;border-radius:6px;font-size:11px">Sin datos para mostrar.</div>';
   }
-  html += '</div>';
+  html += '</div>'; // cierre cuadro PSE
+
+  html += '</div>'; // cierre grid
 
   return html;
 }
@@ -21628,8 +21682,14 @@ var _cargaEvoWeek=null;
 // IMPORTANTE: estas funciones llaman a cargaRender() (el dispatcher), NO a cargaRenderTendencia()
 // directamente. Si llamaran a cargaRenderTendencia() romperían la vista combinada Wellness+PSE+Dolores,
 // porque esa función escribe directo en #carga-main-content sobreescribiendo todo.
-function cargaEvoSetWeek(w){_cargaEvoWeek=w;cargaRender();}
-window.cargaEvoSetWeek=cargaEvoSetWeek;
+function cargaEvoSetWeek(w){
+  _cargaEvoWeek = w;
+  // Sincronizar con selector superior
+  var topSel = document.getElementById('carga-week-sel');
+  if(topSel && topSel.value !== w){ topSel.value = w; }
+  cargaRender();
+}
+window.cargaEvoSetWeek = cargaEvoSetWeek;
 // Estado: vista activa del gráfico interactivo del grupo ('dia' por defecto)
 var _cargaEvoView='dia';
 function cargaEvoSetView(v){_cargaEvoView=v;cargaRender();}
@@ -21864,6 +21924,48 @@ function _miniLineSVG(values,yMax,color,opts){
   return s;
 }
 
+// Mini-gráfica de barras (estilo Microciclo GPS) — para PSE/UA por semana
+function _miniBarSVG(values, yMax, color, opts){
+  opts = opts || {};
+  var W = opts.W || 240, H = opts.H || 100;
+  var padL = opts.padL || 26, padR = opts.padR || 10, padT = opts.padT || 16, padB = opts.padB || 18;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+  var n = values.length;
+  if(!n) return '<svg viewBox="0 0 '+W+' '+H+'"></svg>';
+  var slot = plotW / n;
+  var bw = Math.max(6, Math.min(40, slot * 0.65));
+  function xAt(i){ return padL + slot*i + slot/2; }
+  function yAt(v){ return padT + plotH - (v/yMax)*plotH; }
+  var s = '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block">';
+  // Grid horizontal: 0, 50%, 100%
+  [0, yMax/2, yMax].forEach(function(g){
+    var y = yAt(g);
+    s += '<line x1="'+padL+'" y1="'+y.toFixed(1)+'" x2="'+(W-padR)+'" y2="'+y.toFixed(1)+'" stroke="#eee" stroke-width="1"/>';
+  });
+  s += '<text x="'+(padL-4)+'" y="'+(yAt(yMax)+3).toFixed(1)+'" text-anchor="end" font-size="7" fill="#bbb">'+(yMax>=1000?Math.round(yMax/100)/10+'k':Math.round(yMax))+'</text>';
+  s += '<text x="'+(padL-4)+'" y="'+(yAt(0)+3).toFixed(1)+'" text-anchor="end" font-size="7" fill="#bbb">0</text>';
+  // Barras
+  var baseY = yAt(0);
+  values.forEach(function(d, i){
+    if(d.v == null || !(d.v > 0)) return;
+    var x = xAt(i) - bw/2;
+    var y = yAt(d.v);
+    var isLast = (i === n-1);
+    // Última barra más sólida, resto más clarita (como Microciclo GPS)
+    var fillOpacity = isLast ? '0.85' : '0.35';
+    s += '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+(baseY-y).toFixed(1)+'" fill="'+color+'" fill-opacity="'+fillOpacity+'" stroke="'+color+'" stroke-width="1" rx="2"/>';
+    // Valor encima de la barra
+    var valStr = d.v >= 1000 ? Math.round(d.v/100)/10+'k' : Math.round(d.v).toString();
+    s += '<text x="'+xAt(i).toFixed(1)+'" y="'+(y-3).toFixed(1)+'" text-anchor="middle" font-size="7.5" font-weight="700" fill="'+color+'">'+valStr+'</text>';
+  });
+  // Etiquetas X (siempre todas)
+  values.forEach(function(d, i){
+    s += '<text x="'+xAt(i).toFixed(1)+'" y="'+(H-3)+'" text-anchor="middle" font-size="7" fill="#aaa" font-weight="700">'+d.label+'</text>';
+  });
+  s += '</svg>';
+  return s;
+}
+
 // ── BLOQUE 1: Evolución del GRUPO ──
 function cargaRenderEvolucion(layout){
   var built=cargaBuildByMicroWeek(layout);
@@ -21875,6 +21977,10 @@ function cargaRenderEvolucion(layout){
   var maxPossible=fields.reduce(function(a,f){return a+(f.max||5);},0);
   var allFields=fields.concat([{key:'__readiness',label:'Readiness total',max:maxPossible}]);
   var wkKeys=weeks.map(function(w){return w.week;});
+  // Si el selector superior tiene una semana activa, usarla (unifica la pestaña)
+  var topWeekSel = document.getElementById('carga-week-sel');
+  var topWeek = topWeekSel ? (topWeekSel.value||'') : '';
+  if(topWeek && wkKeys.indexOf(topWeek)>=0) _cargaEvoWeek = topWeek;
   if(!_cargaEvoWeek||wkKeys.indexOf(_cargaEvoWeek)<0)_cargaEvoWeek=wkKeys[wkKeys.length-1];
 
   // Estado: vista activa ('dia' o 'semana') y métrica activa
