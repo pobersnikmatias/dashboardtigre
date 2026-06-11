@@ -28443,17 +28443,40 @@ function _h(s){
 
 // Editar info de un ejercicio desde el preview — usa el modal existente exi-modal.
 // Cuando se cierre, refrescar el preview.
+// Detecta cierre del modal exi-modal y refresca el preview.
+// Usa MutationObserver porque setInterval era propenso a quedar colgado entre
+// aperturas/cierres consecutivos, dejando los botones "Editar info" sin responder.
+var _planPrintExiObserver = null;
+
 function planPrintEditEx(exId){
   if(typeof exEditInfo !== 'function'){ alert('Función no disponible.'); return; }
-  exEditInfo(exId);
-  // Después de guardar, monitorear el cierre del modal para refrescar
-  var checkInterval = setInterval(function(){
-    var modal = document.getElementById('exi-modal');
-    if(!modal || modal.style.display === 'none'){
-      clearInterval(checkInterval);
-      planPrintRefreshPreview();
+  var modal = document.getElementById('exi-modal');
+  if(!modal){ alert('Modal de edición no encontrado.'); return; }
+
+  // Desconectar observer previo si existía (por las dudas)
+  if(_planPrintExiObserver){
+    try{ _planPrintExiObserver.disconnect(); }catch(e){}
+    _planPrintExiObserver = null;
+  }
+
+  // Crear nuevo observer que mira cambios en style.display del modal
+  _planPrintExiObserver = new MutationObserver(function(){
+    // Si el modal está oculto Y el modal de PDF sigue abierto, refrescar preview
+    if(modal.style.display === 'none'){
+      try{ _planPrintExiObserver.disconnect(); }catch(e){}
+      _planPrintExiObserver = null;
+      // Pequeño delay para que la edición termine de propagar a D
+      setTimeout(function(){
+        if(document.getElementById('plan-print-modal').style.display !== 'none'){
+          planPrintRefreshPreview();
+        }
+      }, 100);
     }
-  }, 500);
+  });
+  _planPrintExiObserver.observe(modal, {attributes:true, attributeFilter:['style']});
+
+  // Abrir el editor
+  exEditInfo(exId);
 }
 window.planPrintEditEx = planPrintEditEx;
 
