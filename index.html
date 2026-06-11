@@ -5707,6 +5707,64 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
 </div>
 
 <!-- EXERCISE PICKER MODAL -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- MODAL: Preview & imprimir un día de planificación -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div id="plan-print-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2100;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:10px;width:min(95vw,820px);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,0.3)">
+    <!-- Header -->
+    <div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <div>
+        <div style="font-size:14px;font-weight:800;color:#0D1B2A">🖨 Vista previa para imprimir / PDF</div>
+        <div style="font-size:10px;color:#888;margin-top:2px">Compartí esta sesión con jugadores y cuerpo técnico</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="planPrintDoNow()" style="background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:7px 16px;font-size:11px;font-weight:700;cursor:pointer">🖨 Imprimir / PDF</button>
+        <button onclick="planPrintClose()" style="background:none;border:1px solid #ccc;border-radius:5px;padding:7px 14px;font-size:11px;color:#555;cursor:pointer">✕ Cerrar</button>
+      </div>
+    </div>
+    <!-- Body -->
+    <div id="plan-print-preview" style="overflow-y:auto;flex:1;padding:18px;background:#f5f5f7"></div>
+  </div>
+</div>
+
+<!-- Modal: Crear ejercicio nuevo desde planificación -->
+<div id="plan-new-ex-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2200;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:10px;padding:18px;width:min(96vw,500px);max-height:92vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:13px;font-weight:800;color:#0D1B2A">➕ Crear nueva tarea</div>
+      <button onclick="planNewExClose()" style="border:none;background:none;font-size:18px;cursor:pointer;color:#aaa">✕</button>
+    </div>
+    <div style="font-size:11px;color:#666;line-height:1.5">Esta tarea se guarda en la Biblioteca de ejercicios y queda disponible para futuras planificaciones.</div>
+    <div>
+      <label style="font-size:10px;color:#555;font-weight:600;display:block;margin-bottom:3px">Nombre del ejercicio *</label>
+      <input id="plan-new-ex-name" type="text" placeholder="Ej: Rondo 5v2 con orientación" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;box-sizing:border-box">
+    </div>
+    <div>
+      <label style="font-size:10px;color:#555;font-weight:600;display:block;margin-bottom:3px">Categoría</label>
+      <select id="plan-new-ex-cat" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;background:#fff"></select>
+    </div>
+    <div>
+      <label style="font-size:10px;color:#555;font-weight:600;display:block;margin-bottom:3px">Descripción</label>
+      <textarea id="plan-new-ex-desc" rows="3" placeholder="Consigna, variantes, objetivos…" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>
+    </div>
+    <div>
+      <label style="font-size:10px;color:#555;font-weight:600;display:block;margin-bottom:5px">Imagen (opcional)</label>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+        <label class="btn bb" style="font-size:10px;padding:4px 12px;cursor:pointer;margin:0">📷 Elegir imagen<input type="file" id="plan-new-ex-img-input" accept="image/*" onchange="planNewExImgUpload(event)" style="display:none"></label>
+        <button onclick="planNewExImgClear()" class="btn bc" style="padding:3px 10px;font-size:10px">🗑 Quitar</button>
+      </div>
+      <div id="plan-new-ex-img-prev" style="display:none">
+        <img id="plan-new-ex-img-thumb" style="max-width:100%;max-height:180px;border-radius:6px;border:1px solid #ddd;display:block;object-fit:contain">
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px;border-top:1px solid #eee">
+      <button onclick="planNewExClose()" style="background:none;border:1px solid #ccc;border-radius:5px;padding:6px 14px;font-size:11px;color:#555;cursor:pointer">Cancelar</button>
+      <button onclick="planNewExSave()" style="background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:6px 16px;font-size:11px;font-weight:700;cursor:pointer">💾 Guardar y agregar</button>
+    </div>
+  </div>
+</div>
+
 <div id="plan-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:10px;padding:16px;width:min(95vw,540px);height:min(92vh,600px);display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">
@@ -5718,6 +5776,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       <select id="plan-modal-cat" onchange="planModalFilter()" style="font-size:11px;padding:4px 7px;border:1px solid #ccc;border-radius:5px;background:#fff">
         <option value="">Todas las categorías</option>
       </select>
+      <button onclick="planNewExOpen()" style="background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer">➕ Nueva</button>
     </div>
     <div id="plan-modal-list" style="overflow-y:auto;flex:1;border:1px solid #eee;border-radius:6px;margin-bottom:10px;min-height:0"></div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;border-top:1px solid #f0f0f0;padding-top:10px">
@@ -11361,6 +11420,8 @@ function planRenderDays(){
           'style="width:54px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;font-size:10px;font-weight:700;color:#3B4D88;text-align:center;background:#f0f5ff" '+
           'onchange="planSetMdLabel('+di+',this.value)" title="Etiqueta MD">'+
         '<span style="font-size:10px;font-weight:600;color:#555;flex:1">'+day.label+'</span>'+
+        '<button onclick="planPrintDay('+di+')" title="Imprimir / PDF del día" '+
+          'style="border:none;background:#0C447C;color:#fff;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;cursor:pointer;line-height:1">🖨</button>'+
         '<span style="font-size:9px;color:'+col+';font-weight:700;cursor:help" title="'+pctBreakdown.replace(/"/g,'&quot;')+'">'+pctMts+'%</span>'+
       '</div>'+
       '<div style="background:#f0f2f5;border-radius:3px;height:5px;overflow:hidden">'+
@@ -28170,6 +28231,383 @@ function resiExportPDF(id){
   w.onload = function(){ w.focus(); w.print(); };
 }
 window.resiExportPDF = resiExportPDF;
+
+// ════════════════════════════════════════════════════════════════════
+// PLANIFICACIÓN: Imprimir / PDF de un día — preview en modal + impresión
+// ════════════════════════════════════════════════════════════════════
+//
+// Flujo:
+//   1) Usuario toca 🖨 en el header del día → planPrintDay(di)
+//   2) Se arma un preview con los ejercicios del día (incluyendo imágenes
+//      y descripciones de la biblioteca D, si existen)
+//   3) Si algún ejercicio NO tiene imagen/descripción, aparece un botón ✏️
+//      para editarlo en el momento (abre el modal exi-modal existente)
+//   4) Usuario toca 🖨 Imprimir → se abre una nueva ventana con HTML
+//      profesional y se dispara window.print()
+
+var _planPrintCurrentDay = null;  // di del día que se está previsualizando
+
+function planPrintDay(di){
+  if(!_planEditData || !_planEditData.days[di]){ alert('No hay día para imprimir.'); return; }
+  _planPrintCurrentDay = di;
+  planPrintRefreshPreview();
+  document.getElementById('plan-print-modal').style.display = 'flex';
+}
+window.planPrintDay = planPrintDay;
+
+function planPrintClose(){
+  document.getElementById('plan-print-modal').style.display = 'none';
+  _planPrintCurrentDay = null;
+}
+window.planPrintClose = planPrintClose;
+
+// Re-renderiza el preview (útil después de editar info de un ejercicio)
+function planPrintRefreshPreview(){
+  if(_planPrintCurrentDay === null) return;
+  var di = _planPrintCurrentDay;
+  var day = _planEditData.days[di];
+  var weekName = _planEditData.name || '';
+  var html = _planBuildPrintHTML(day, weekName, /*forScreen=*/true);
+  document.getElementById('plan-print-preview').innerHTML = html;
+}
+window.planPrintRefreshPreview = planPrintRefreshPreview;
+
+// Helper: construye el HTML del día. forScreen=true para preview con botones
+// editables; forScreen=false para la versión limpia que va al PDF.
+function _planBuildPrintHTML(day, weekName, forScreen){
+  // Header con info del día
+  var clubName = 'Club Atlético Tigre — 5ta División';
+  var dayLabel = day.mdLabel || day.label || 'Día';
+  var dayName = day.label || '';
+  var todayStr = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'long',year:'numeric'});
+
+  // Sumario del día
+  var sum = planSumDay(day);
+  var totalMins = sum.totalMins||0;
+  var totalMts = Math.round(sum.mts||0);
+  var totalHsr = Math.round((sum.hsr||0)+(sum.h2||0)+(sum.h25||0));
+
+  // Estilo
+  var styles = '<style>'+
+    '*{box-sizing:border-box;margin:0;padding:0}'+
+    'body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a;line-height:1.5;background:#fff}'+
+    '.pdf-wrap{max-width:760px;margin:0 auto;padding:24px}'+
+    '.pdf-header{border-bottom:3px solid #0C447C;padding-bottom:14px;margin-bottom:18px;display:flex;align-items:flex-start;gap:14px}'+
+    '.pdf-header-info{flex:1}'+
+    '.pdf-day-badge{display:inline-block;background:#0C447C;color:#fff;padding:5px 14px;border-radius:6px;font-size:14px;font-weight:800;letter-spacing:0.5px;margin-bottom:6px}'+
+    '.pdf-club{font-size:16px;font-weight:800;color:#0C447C;margin-bottom:3px}'+
+    '.pdf-meta{font-size:11px;color:#666}'+
+    '.pdf-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;padding:10px 14px;background:#f7f9fc;border-radius:8px;border-left:4px solid #0C447C}'+
+    '.pdf-stat{font-size:11px;color:#555}'+
+    '.pdf-stat strong{display:block;font-size:18px;color:#0C447C;font-weight:800;line-height:1.2;margin-bottom:1px}'+
+    '.pdf-block{margin-bottom:18px;page-break-inside:avoid}'+
+    '.pdf-block-header{display:flex;align-items:center;gap:8px;background:#0C447C;color:#fff;padding:6px 12px;border-radius:6px 6px 0 0;font-size:12px;font-weight:700}'+
+    '.pdf-block-body{border:1px solid #ddd;border-top:none;border-radius:0 0 6px 6px;padding:10px;background:#fff}'+
+    '.pdf-exercise{display:flex;gap:14px;padding:12px;border-radius:6px;background:#fafafa;margin-bottom:10px;border:1px solid #eee;page-break-inside:avoid}'+
+    '.pdf-exercise:last-child{margin-bottom:0}'+
+    '.pdf-ex-img{flex-shrink:0;width:200px;height:140px;border-radius:6px;background:#f0f0f0;overflow:hidden;display:flex;align-items:center;justify-content:center}'+
+    '.pdf-ex-img img{width:100%;height:100%;object-fit:cover}'+
+    '.pdf-ex-img-empty{color:#bbb;font-size:11px;text-align:center;padding:8px}'+
+    '.pdf-ex-info{flex:1;min-width:0}'+
+    '.pdf-ex-name{font-size:14px;font-weight:700;color:#0D1B2A;margin-bottom:4px;display:flex;align-items:center;gap:8px}'+
+    '.pdf-ex-meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}'+
+    '.pdf-ex-tag{font-size:10px;background:#fff;border:1px solid #ddd;padding:2px 8px;border-radius:10px;color:#555;font-weight:600}'+
+    '.pdf-ex-tag-time{background:#fff8e1;border-color:#f0d090;color:#795300}'+
+    '.pdf-ex-tag-group{background:#e8f0fe;border-color:#0C447C44;color:#0C447C}'+
+    '.pdf-ex-tag-cat{background:#f0fbf6;border-color:#1D9E7544;color:#1D9E75}'+
+    '.pdf-ex-desc{font-size:11.5px;color:#444;line-height:1.5;white-space:pre-wrap}'+
+    '.pdf-ex-desc-empty{font-size:10.5px;color:#aaa;font-style:italic}'+
+    '.pdf-screen-edit{margin-left:auto;background:#3B4D88;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:10px;font-weight:700;cursor:pointer}'+
+    '.pdf-screen-edit:hover{background:#0C447C}'+
+    '.pdf-footer{margin-top:20px;padding-top:10px;border-top:1px solid #ddd;font-size:9.5px;color:#999;text-align:center}'+
+    '.pdf-parallel-banner{font-size:10px;color:#9c5a00;background:#fffaf2;border:1px dashed #EF9F27;border-radius:4px;padding:4px 8px;margin-bottom:8px;text-align:center}'+
+    '@media print{'+
+      '@page{margin:12mm;size:A4}'+
+      'body{padding:0}'+
+      '.pdf-wrap{padding:0;max-width:none}'+
+      '.pdf-screen-edit{display:none!important}'+
+      '.pdf-no-print{display:none!important}'+
+    '}'+
+    '</style>';
+
+  var html = '';
+  if(!forScreen){
+    html += '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+_h(weekName+' — '+dayLabel)+'</title>'+styles+'</head><body>';
+  } else {
+    html += styles;  // Inline para preview
+  }
+
+  html += '<div class="pdf-wrap">';
+
+  // Header
+  html += '<div class="pdf-header">'+
+    '<div class="pdf-header-info">'+
+      '<div class="pdf-day-badge">'+_h(dayLabel)+(dayName&&dayName!==dayLabel?' · '+_h(dayName):'')+'</div>'+
+      '<div class="pdf-club">'+_h(clubName)+'</div>'+
+      '<div class="pdf-meta">Semana: <strong>'+_h(weekName)+'</strong> · Generado el '+todayStr+'</div>'+
+    '</div>'+
+  '</div>';
+
+  // Resumen
+  html += '<div class="pdf-summary">'+
+    '<div class="pdf-stat"><strong>'+totalMins+"'</strong>Duración</div>"+
+    '<div class="pdf-stat"><strong>'+totalMts.toLocaleString('es-AR')+' m</strong>Distancia</div>'+
+    '<div class="pdf-stat"><strong>'+totalHsr+' m</strong>Alta intensidad (+18 km/h)</div>'+
+    (sum.mts_min_avg?'<div class="pdf-stat"><strong>'+sum.mts_min_avg.toFixed(1)+'</strong>m/min</div>':'')+
+  '</div>';
+
+  // Si no hay bloques
+  if(!day.blocks || !day.blocks.length){
+    html += '<div style="padding:30px;text-align:center;color:#aaa;font-style:italic">Sin ejercicios planificados.</div>';
+    html += '</div>';
+    if(!forScreen) html += '</body></html>';
+    return html;
+  }
+
+  // Bloques
+  day.blocks.forEach(function(block, bi){
+    var blockNum = bi+1;
+    var blockTitle = block.parallel ? ('Bloque '+blockNum+' — En paralelo') : ('Bloque '+blockNum);
+    html += '<div class="pdf-block">';
+    html += '<div class="pdf-block-header">'+
+      '<span>🔹</span><span>'+blockTitle+'</span>'+
+    '</div>';
+    html += '<div class="pdf-block-body">';
+
+    if(block.parallel){
+      html += '<div class="pdf-parallel-banner">⚡ Estos ejercicios se realizan al mismo tiempo (en paralelo) por distintos grupos</div>';
+    }
+
+    (block.exercises||[]).forEach(function(item, ei){
+      var ex = planResolveEx(item);
+      var exName = ex ? ex.n : '(ejercicio eliminado)';
+      var exImg = ex && ex.img ? ex.img : null;
+      var exDesc = ex && ex.desc ? ex.desc : null;
+      var exCat = ex ? (ex.cat||'') : '';
+      var mins = item.mins || 0;
+      var group = item.group || 'Todos';
+
+      // Construir badge de tiempo (si tiene series, mostrar series x duración)
+      var timeBadge = mins + "'";
+      if(item.series && item.serieTime){
+        timeBadge = item.series + 'x' + item.serieTime + (item.pauseTime?' (rec '+item.pauseTime+')':'');
+      }
+
+      // Construir badge de dimensiones (jugadores, área)
+      var dimBadge = '';
+      if(item.customJug!=null) dimBadge += item.customJug+' jug';
+      else if(ex && ex.jug) dimBadge += ex.jug+' jug';
+      var L = item.customL!=null ? item.customL : (ex&&ex.L?ex.L:null);
+      var A = item.customA!=null ? item.customA : (ex&&ex.A?ex.A:null);
+      if(L && A) dimBadge += (dimBadge?' · ':'')+L+'×'+A+'m';
+
+      html += '<div class="pdf-exercise">';
+      // Imagen
+      html += '<div class="pdf-ex-img">';
+      if(exImg){
+        html += '<img src="'+exImg+'" alt="'+_h(exName)+'">';
+      } else {
+        html += '<div class="pdf-ex-img-empty">Sin imagen</div>';
+      }
+      html += '</div>';
+      // Info
+      html += '<div class="pdf-ex-info">';
+      html += '<div class="pdf-ex-name">'+_h(exName);
+      // Botón editar (solo en preview, no en PDF)
+      if(forScreen && ex){
+        html += '<button class="pdf-screen-edit" onclick="planPrintEditEx('+ex.id+')">✏️ Editar info</button>';
+      }
+      html += '</div>';
+      html += '<div class="pdf-ex-meta">';
+      html += '<span class="pdf-ex-tag pdf-ex-tag-time">⏱ '+timeBadge+'</span>';
+      if(exCat) html += '<span class="pdf-ex-tag pdf-ex-tag-cat">'+_h(exCat)+'</span>';
+      html += '<span class="pdf-ex-tag pdf-ex-tag-group">👥 '+_h(group)+'</span>';
+      if(dimBadge) html += '<span class="pdf-ex-tag">📐 '+_h(dimBadge)+'</span>';
+      html += '</div>';
+      // Descripción
+      if(exDesc){
+        html += '<div class="pdf-ex-desc">'+_h(exDesc)+'</div>';
+      } else {
+        html += '<div class="pdf-ex-desc-empty">Sin descripción.'+(forScreen&&ex?' Tocá ✏️ Editar info para agregarla.':'')+'</div>';
+      }
+      html += '</div>';
+      html += '</div>';
+    });
+
+    html += '</div></div>';
+  });
+
+  // Footer
+  html += '<div class="pdf-footer">'+
+    'Generado desde Dashboard GPS — '+todayStr+
+  '</div>';
+
+  html += '</div>'; // pdf-wrap
+  if(!forScreen) html += '</body></html>';
+  return html;
+}
+
+// HTML-escape
+function _h(s){
+  if(s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Editar info de un ejercicio desde el preview — usa el modal existente exi-modal.
+// Cuando se cierre, refrescar el preview.
+function planPrintEditEx(exId){
+  if(typeof exEditInfo !== 'function'){ alert('Función no disponible.'); return; }
+  exEditInfo(exId);
+  // Después de guardar, monitorear el cierre del modal para refrescar
+  var checkInterval = setInterval(function(){
+    var modal = document.getElementById('exi-modal');
+    if(!modal || modal.style.display === 'none'){
+      clearInterval(checkInterval);
+      planPrintRefreshPreview();
+    }
+  }, 500);
+}
+window.planPrintEditEx = planPrintEditEx;
+
+// Imprimir: abre nueva ventana con el HTML limpio y dispara print
+function planPrintDoNow(){
+  if(_planPrintCurrentDay === null){ alert('No hay día seleccionado.'); return; }
+  var di = _planPrintCurrentDay;
+  var day = _planEditData.days[di];
+  var weekName = _planEditData.name || '';
+  var html = _planBuildPrintHTML(day, weekName, /*forScreen=*/false);
+
+  var w = window.open('', '_blank', 'width=900,height=700');
+  if(!w){ alert('Permitir ventanas emergentes para imprimir.'); return; }
+  w.document.write(html);
+  w.document.close();
+  w.onload = function(){
+    // Pequeño delay para que las imágenes terminen de cargar
+    setTimeout(function(){ w.focus(); w.print(); }, 300);
+  };
+}
+window.planPrintDoNow = planPrintDoNow;
+
+// ════════════════════════════════════════════════════════════════════
+// PLANIFICACIÓN: Crear nueva tarea desde el modal de selección
+// Guarda en la Biblioteca de ejercicios (D) y permite usarla de inmediato.
+// ════════════════════════════════════════════════════════════════════
+
+var _planNewExImg = null;  // dataURL temporal de la imagen al crear
+
+function planNewExOpen(){
+  // Llenar selector de categorías con las existentes
+  var catSel = document.getElementById('plan-new-ex-cat');
+  if(catSel){
+    var cats = {};
+    (typeof D !== 'undefined' ? D : []).forEach(function(r){ if(r && r.cat) cats[r.cat] = true; });
+    var catList = Object.keys(cats).sort();
+    catSel.innerHTML = catList.map(function(c){return '<option value="'+_h(c)+'">'+_h(c)+'</option>';}).join('') +
+      '<option value="__new__">+ Nueva categoría…</option>';
+    if(!catList.length) catSel.innerHTML = '<option value="Otros">Otros</option>' + catSel.innerHTML;
+  }
+  document.getElementById('plan-new-ex-name').value = '';
+  document.getElementById('plan-new-ex-desc').value = '';
+  _planNewExImg = null;
+  document.getElementById('plan-new-ex-img-prev').style.display = 'none';
+  document.getElementById('plan-new-ex-modal').style.display = 'flex';
+}
+window.planNewExOpen = planNewExOpen;
+
+function planNewExClose(){
+  document.getElementById('plan-new-ex-modal').style.display = 'none';
+  _planNewExImg = null;
+}
+window.planNewExClose = planNewExClose;
+
+function planNewExImgUpload(ev){
+  var file = ev.target.files[0]; if(!file) return; ev.target.value = '';
+  var rd = new FileReader();
+  rd.onload = function(e){
+    var img = new Image();
+    img.onload = function(){
+      var sc = Math.min(1, 640/img.width, 480/img.height);
+      var cw = Math.round(img.width*sc), ch = Math.round(img.height*sc);
+      var cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+      cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+      var url = cv.toDataURL('image/jpeg', 0.72);
+      if(url.length > 280000) url = cv.toDataURL('image/jpeg', 0.50);
+      _planNewExImg = url;
+      document.getElementById('plan-new-ex-img-thumb').src = url;
+      document.getElementById('plan-new-ex-img-prev').style.display = '';
+    };
+    img.src = e.target.result;
+  };
+  rd.readAsDataURL(file);
+}
+window.planNewExImgUpload = planNewExImgUpload;
+
+function planNewExImgClear(){
+  _planNewExImg = null;
+  document.getElementById('plan-new-ex-img-prev').style.display = 'none';
+  document.getElementById('plan-new-ex-img-input').value = '';
+}
+window.planNewExImgClear = planNewExImgClear;
+
+function planNewExSave(){
+  var name = (document.getElementById('plan-new-ex-name').value||'').trim();
+  if(!name){ alert('Ingresá un nombre para la tarea.'); return; }
+  var catSel = document.getElementById('plan-new-ex-cat');
+  var cat = catSel ? catSel.value : 'Otros';
+  if(cat === '__new__'){
+    cat = (prompt('Nombre de la nueva categoría:', '')||'').trim();
+    if(!cat) cat = 'Otros';
+  }
+  var desc = (document.getElementById('plan-new-ex-desc').value||'').trim();
+
+  // Crear ejercicio en la biblioteca D
+  // Como es un ejercicio sin datos GPS, raw queda en null y todas las métricas en 0.
+  var newId = D.length ? Math.max.apply(null, D.map(function(r){return r.id;}))+1 : 0;
+  var newRow = {
+    id: newId,
+    n: name,
+    cat: cat,
+    min: 10,  // duración por defecto, editable luego
+    raw: null,
+    vmax: 0, spr: 0,
+    jug: null, L: null, A: null,
+    desc: desc || null,
+    img: _planNewExImg || null,
+    date: new Date().toISOString().slice(0,10),
+    _manuallyCreated: true
+  };
+  // Calcular ratios para que entre al sistema (todos en 0)
+  if(typeof computeRatios === 'function') computeRatios(newRow);
+  D.push(newRow);
+  // Agregar la categoría al array global CATS si no existe (para que aparezca en filtros)
+  if(typeof CATS !== 'undefined' && CATS.indexOf(cat) < 0){
+    CATS.push(cat);
+  }
+  if(typeof saveData === 'function') saveData();
+  if(typeof rebuildCatBtns === 'function') rebuildCatBtns();
+
+  // Cerrar modal de creación
+  planNewExClose();
+
+  // Actualizar el selector de categorías del plan-modal por si tiene una nueva
+  var catSel = document.getElementById('plan-modal-cat');
+  if(catSel && typeof CATS !== 'undefined'){
+    var current = catSel.value;
+    catSel.innerHTML = '<option value="">Todas las categorías</option>'+
+      CATS.filter(function(c){return c!=='all';}).map(function(c){return '<option value="'+_h(c)+'">'+_h(c)+'</option>';}).join('');
+    catSel.value = current;
+  }
+
+  // Agregar el ejercicio al día/bloque que tenía abierto el modal
+  // planModalSelect(id) marca el ejercicio como seleccionado; el usuario luego ajusta
+  // tiempo/grupo y toca "✓ Agregar".
+  if(typeof planModalSelect === 'function'){
+    planModalSelect(newId);
+  }
+  // Refrescar la lista del modal de selección por si el usuario vuelve a buscar
+  if(typeof planModalFilter === 'function') planModalFilter();
+}
+window.planNewExSave = planNewExSave;
 
 </script>
 
