@@ -11421,7 +11421,8 @@ function planRenderDays(){
           'onchange="planSetMdLabel('+di+',this.value)" title="Etiqueta MD">'+
         '<span style="font-size:10px;font-weight:600;color:#555;flex:1">'+day.label+'</span>'+
         '<button onclick="planPrintDay('+di+')" title="Imprimir / PDF del día" '+
-          'style="border:none;background:#0C447C;color:#fff;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;cursor:pointer;line-height:1">🖨</button>'+
+          'style="border:none;background:#0C447C;color:#fff;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px"'+
+          'onmouseover="this.style.background=\'#1A5BA0\'" onmouseout="this.style.background=\'#0C447C\'">🖨 PDF</button>'+
         '<span style="font-size:9px;color:'+col+';font-weight:700;cursor:help" title="'+pctBreakdown.replace(/"/g,'&quot;')+'">'+pctMts+'%</span>'+
       '</div>'+
       '<div style="background:#f0f2f5;border-radius:3px;height:5px;overflow:hidden">'+
@@ -13123,7 +13124,7 @@ document.addEventListener('DOMContentLoaded',function(){
 </script>
 
 <!-- ── MODAL: Descripción, imagen y diagrama del ejercicio ────────────────── -->
-<div id="exi-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center">
+<div id="exi-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2300;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:10px;padding:18px;width:min(96vw,500px);max-height:92vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.25);display:flex;flex-direction:column;gap:12px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div style="flex:1;min-width:0;margin-right:10px">
@@ -28279,13 +28280,6 @@ function _planBuildPrintHTML(day, weekName, forScreen){
   var clubName = 'Club Atlético Tigre — 5ta División';
   var dayLabel = day.mdLabel || day.label || 'Día';
   var dayName = day.label || '';
-  var todayStr = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'long',year:'numeric'});
-
-  // Sumario del día
-  var sum = planSumDay(day);
-  var totalMins = sum.totalMins||0;
-  var totalMts = Math.round(sum.mts||0);
-  var totalHsr = Math.round((sum.hsr||0)+(sum.h2||0)+(sum.h25||0));
 
   // Estilo
   var styles = '<style>'+
@@ -28294,6 +28288,7 @@ function _planBuildPrintHTML(day, weekName, forScreen){
     '.pdf-wrap{max-width:760px;margin:0 auto;padding:24px}'+
     '.pdf-header{border-bottom:3px solid #0C447C;padding-bottom:14px;margin-bottom:18px;display:flex;align-items:flex-start;gap:14px}'+
     '.pdf-header-info{flex:1}'+
+    '.pdf-header-logo{flex-shrink:0}'+
     '.pdf-day-badge{display:inline-block;background:#0C447C;color:#fff;padding:5px 14px;border-radius:6px;font-size:14px;font-weight:800;letter-spacing:0.5px;margin-bottom:6px}'+
     '.pdf-club{font-size:16px;font-weight:800;color:#0C447C;margin-bottom:3px}'+
     '.pdf-meta{font-size:11px;color:#666}'+
@@ -28344,16 +28339,14 @@ function _planBuildPrintHTML(day, weekName, forScreen){
     '<div class="pdf-header-info">'+
       '<div class="pdf-day-badge">'+_h(dayLabel)+(dayName&&dayName!==dayLabel?' · '+_h(dayName):'')+'</div>'+
       '<div class="pdf-club">'+_h(clubName)+'</div>'+
-      '<div class="pdf-meta">Semana: <strong>'+_h(weekName)+'</strong> · Generado el '+todayStr+'</div>'+
+      '<div class="pdf-meta">Semana: <strong>'+_h(weekName)+'</strong></div>'+
     '</div>'+
-  '</div>';
-
-  // Resumen
-  html += '<div class="pdf-summary">'+
-    '<div class="pdf-stat"><strong>'+totalMins+"'</strong>Duración</div>"+
-    '<div class="pdf-stat"><strong>'+totalMts.toLocaleString('es-AR')+' m</strong>Distancia</div>'+
-    '<div class="pdf-stat"><strong>'+totalHsr+' m</strong>Alta intensidad (+18 km/h)</div>'+
-    (sum.mts_min_avg?'<div class="pdf-stat"><strong>'+sum.mts_min_avg.toFixed(1)+'</strong>m/min</div>':'')+
+    '<div class="pdf-header-logo">'+
+      // Escudo del club Atlético Tigre — usar TIGRE_LOGO_DEFAULT que ya está cargado.
+      (typeof TIGRE_LOGO_DEFAULT !== 'undefined' ?
+        '<img src="'+TIGRE_LOGO_DEFAULT+'" alt="Escudo Tigre" style="width:80px;height:80px;object-fit:contain">' :
+        '')+
+    '</div>'+
   '</div>';
 
   // Si no hay bloques
@@ -28436,11 +28429,6 @@ function _planBuildPrintHTML(day, weekName, forScreen){
 
     html += '</div></div>';
   });
-
-  // Footer
-  html += '<div class="pdf-footer">'+
-    'Generado desde Dashboard GPS — '+todayStr+
-  '</div>';
 
   html += '</div>'; // pdf-wrap
   if(!forScreen) html += '</body></html>';
