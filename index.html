@@ -28264,23 +28264,41 @@ window.planPrintClose = planPrintClose;
 
 // Re-renderiza el preview (útil después de editar info de un ejercicio)
 function planPrintRefreshPreview(){
+  console.log('[PrintRefresh] called, day=', _planPrintCurrentDay);
   if(_planPrintCurrentDay === null) return;
   var di = _planPrintCurrentDay;
   var day = _planEditData.days[di];
   var weekName = _planEditData.name || '';
-  var html = _planBuildPrintHTML(day, weekName, /*forScreen=*/true);
+  var html;
+  try{
+    html = _planBuildPrintHTML(day, weekName, /*forScreen=*/true);
+  }catch(e){
+    console.error('[PrintRefresh] error build:', e);
+    return;
+  }
   var container = document.getElementById('plan-print-preview');
+  if(!container){ console.error('[PrintRefresh] container no encontrado'); return; }
   container.innerHTML = html;
-  // Bind delegado: cada vez que se reinyecta el HTML hay que volver a conectar.
-  // Usamos data-plan-edit-ex en los botones para evitar onclick inline (que rompía
-  // ante caracteres raros en nombres de ejercicio).
-  var btns = container.querySelectorAll('button[data-plan-edit-ex]');
-  btns.forEach(function(btn){
-    btn.addEventListener('click', function(){
+  console.log('[PrintRefresh] HTML inyectado, longitud=', html.length);
+
+  // EVENT DELEGATION: en lugar de listeners por botón, ponemos uno solo en el
+  // contenedor. Esto sobrevive a cambios del innerHTML porque el contenedor
+  // sigue siendo el mismo. Lo seteamos UNA SOLA VEZ con un flag.
+  if(!container._planPrintBound){
+    container.addEventListener('click', function(ev){
+      console.log('[PrintContainer click] target=', ev.target.tagName, ev.target.className);
+      var btn = ev.target.closest && ev.target.closest('button[data-plan-edit-ex]');
+      if(!btn){
+        console.log('[PrintContainer click] no era botón editar');
+        return;
+      }
       var id = parseInt(btn.getAttribute('data-plan-edit-ex'), 10);
+      console.log('[PrintContainer click] botón Editar info, id=', id);
       if(!isNaN(id)) planPrintEditEx(id);
     });
-  });
+    container._planPrintBound = true;
+    console.log('[PrintRefresh] event delegation bound');
+  }
 }
 window.planPrintRefreshPreview = planPrintRefreshPreview;
 
@@ -28511,10 +28529,14 @@ function _planPrintWrapExi(){
 }
 
 function planPrintEditEx(exId){
-  if(typeof exEditInfo !== 'function'){ alert('Función no disponible.'); return; }
+  console.log('[planPrintEditEx] start, exId=', exId);
+  if(typeof exEditInfo !== 'function'){ alert('Función no disponible.'); console.error('exEditInfo no existe'); return; }
+  console.log('[planPrintEditEx] wrappers...');
   _planPrintWrapExi();
   _planPrintExiActive = true;
+  console.log('[planPrintEditEx] llamando exEditInfo('+exId+')');
   exEditInfo(exId);
+  console.log('[planPrintEditEx] exEditInfo terminó');
 }
 window.planPrintEditEx = planPrintEditEx;
 
