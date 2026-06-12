@@ -11422,7 +11422,7 @@ function planRenderDays(){
         '<span style="font-size:10px;font-weight:600;color:#555;flex:1">'+day.label+'</span>'+
         '<button onclick="planPrintDay('+di+')" title="Imprimir / PDF del día" '+
           'style="border:none;background:#0C447C;color:#fff;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px"'+
-          'onmouseover="this.style.background=\'#1A5BA0\'" onmouseout="this.style.background=\'#0C447C\'">🖨 PDF</button>'+
+          'onmouseover="this.style.background=\'#1A5BA0\'" onmouseout="this.style.background=\'#0C447C\'">🖨 PDF v2</button>'+
         '<span style="font-size:9px;color:'+col+';font-weight:700;cursor:help" title="'+pctBreakdown.replace(/"/g,'&quot;')+'">'+pctMts+'%</span>'+
       '</div>'+
       '<div style="background:#f0f2f5;border-radius:3px;height:5px;overflow:hidden">'+
@@ -28249,6 +28249,7 @@ window.resiExportPDF = resiExportPDF;
 var _planPrintCurrentDay = null;  // di del día que se está previsualizando
 
 function planPrintDay(di){
+  console.log('[DASHBOARD v2] planPrintDay llamado, di=', di);
   if(!_planEditData || !_planEditData.days[di]){ alert('No hay día para imprimir.'); return; }
   _planPrintCurrentDay = di;
   planPrintRefreshPreview();
