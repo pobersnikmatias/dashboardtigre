@@ -11422,7 +11422,7 @@ function planRenderDays(){
         '<span style="font-size:10px;font-weight:600;color:#555;flex:1">'+day.label+'</span>'+
         '<button onclick="planPrintDay('+di+')" title="Imprimir / PDF del día" '+
           'style="border:none;background:#0C447C;color:#fff;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px"'+
-          'onmouseover="this.style.background=\'#1A5BA0\'" onmouseout="this.style.background=\'#0C447C\'">🖨 PDF v2</button>'+
+          'onmouseover="this.style.background=\'#1A5BA0\'" onmouseout="this.style.background=\'#0C447C\'">🖨 PDF</button>'+
         '<span style="font-size:9px;color:'+col+';font-weight:700;cursor:help" title="'+pctBreakdown.replace(/"/g,'&quot;')+'">'+pctMts+'%</span>'+
       '</div>'+
       '<div style="background:#f0f2f5;border-radius:3px;height:5px;overflow:hidden">'+
@@ -28249,7 +28249,6 @@ window.resiExportPDF = resiExportPDF;
 var _planPrintCurrentDay = null;  // di del día que se está previsualizando
 
 function planPrintDay(di){
-  console.log('[DASHBOARD v2] planPrintDay llamado, di=', di);
   if(!_planEditData || !_planEditData.days[di]){ alert('No hay día para imprimir.'); return; }
   _planPrintCurrentDay = di;
   planPrintRefreshPreview();
@@ -28265,7 +28264,6 @@ window.planPrintClose = planPrintClose;
 
 // Re-renderiza el preview (útil después de editar info de un ejercicio)
 function planPrintRefreshPreview(){
-  console.log('[PrintRefresh] called, day=', _planPrintCurrentDay);
   if(_planPrintCurrentDay === null) return;
   var di = _planPrintCurrentDay;
   var day = _planEditData.days[di];
@@ -28274,31 +28272,26 @@ function planPrintRefreshPreview(){
   try{
     html = _planBuildPrintHTML(day, weekName, /*forScreen=*/true);
   }catch(e){
-    console.error('[PrintRefresh] error build:', e);
+    console.error('Error armando preview:', e);
     return;
   }
   var container = document.getElementById('plan-print-preview');
-  if(!container){ console.error('[PrintRefresh] container no encontrado'); return; }
+  if(!container) return;
   container.innerHTML = html;
-  console.log('[PrintRefresh] HTML inyectado, longitud=', html.length);
 
   // EVENT DELEGATION: en lugar de listeners por botón, ponemos uno solo en el
   // contenedor. Esto sobrevive a cambios del innerHTML porque el contenedor
   // sigue siendo el mismo. Lo seteamos UNA SOLA VEZ con un flag.
   if(!container._planPrintBound){
     container.addEventListener('click', function(ev){
-      console.log('[PrintContainer click] target=', ev.target.tagName, ev.target.className);
-      var btn = ev.target.closest && ev.target.closest('button[data-plan-edit-ex]');
-      if(!btn){
-        console.log('[PrintContainer click] no era botón editar');
-        return;
-      }
-      var id = parseInt(btn.getAttribute('data-plan-edit-ex'), 10);
-      console.log('[PrintContainer click] botón Editar info, id=', id);
-      if(!isNaN(id)) planPrintEditEx(id);
+      var btn = ev.target.closest && ev.target.closest('button[data-plan-edit-di]');
+      if(!btn) return;
+      var di = parseInt(btn.getAttribute('data-plan-edit-di'), 10);
+      var bi = parseInt(btn.getAttribute('data-plan-edit-bi'), 10);
+      var ei = parseInt(btn.getAttribute('data-plan-edit-ei'), 10);
+      if(!isNaN(di) && !isNaN(bi) && !isNaN(ei)) planPrintEditItem(di, bi, ei);
     });
     container._planPrintBound = true;
-    console.log('[PrintRefresh] event delegation bound');
   }
 }
 window.planPrintRefreshPreview = planPrintRefreshPreview;
@@ -28443,11 +28436,11 @@ function _planBuildPrintHTML(day, weekName, forScreen){
       // Info
       html += '<div class="pdf-ex-info">';
       html += '<div class="pdf-ex-name">'+_h(exName);
-      // Botón editar (solo en preview, no en PDF)
-      // Usamos data-attr en lugar de onclick inline para evitar problemas
-      // con caracteres especiales en nombres/descripciones que rompen el HTML.
+      // Botón editar (solo en preview, no en PDF).
+      // Guardamos di/bi/ei (índices del item en _planEditData) para identificarlo
+      // sin importar si es csv inline o ejercicio de D.
       if(forScreen && ex){
-        html += '<button class="pdf-screen-edit" data-plan-edit-ex="'+ex.id+'">✏️ Editar info</button>';
+        html += '<button class="pdf-screen-edit" data-plan-edit-di="'+di+'" data-plan-edit-bi="'+bi+'" data-plan-edit-ei="'+ei+'">✏️ Editar info</button>';
       }
       html += '</div>';
       html += '<div class="pdf-ex-meta">';
@@ -28529,17 +28522,62 @@ function _planPrintWrapExi(){
   _planPrintExiWrapped = true;
 }
 
-function planPrintEditEx(exId){
-  console.log('[planPrintEditEx] start, exId=', exId);
-  if(typeof exEditInfo !== 'function'){ alert('Función no disponible.'); console.error('exEditInfo no existe'); return; }
-  console.log('[planPrintEditEx] wrappers...');
+// Edita un item del día. Si el ejercicio está en la biblioteca D, abre el
+// editor estándar. Si es un csv inline (no está en D), lo migra primero a D
+// y queda guardado para futuras planificaciones.
+function planPrintEditItem(di, bi, ei){
+  var day = _planEditData && _planEditData.days[di];
+  var block = day && day.blocks && day.blocks[bi];
+  var item = block && block.exercises && block.exercises[ei];
+  if(!item){ alert('Ejercicio no encontrado.'); return; }
+  if(typeof exEditInfo !== 'function'){ alert('Función de edición no disponible.'); return; }
+
+  // Si tiene exId (ejercicio de la biblioteca D), usar ese
+  var targetId = null;
+  if(item.exId != null && typeof D !== 'undefined'){
+    var existing = D.find(function(r){ return r.id === item.exId; });
+    if(existing) targetId = item.exId;
+  }
+
+  // Si es csv inline o no se encontró: migrarlo a D primero
+  if(targetId === null){
+    var c = item.csvEx || {};
+    var newId = D.length ? Math.max.apply(null, D.map(function(r){return r.id;}))+1 : 0;
+    var newRow = {
+      id: newId,
+      n: c.n || item.name || 'Tarea sin nombre',
+      cat: c.cat || 'Otros',
+      min: c.min || item.mins || 10,
+      raw: c.raw || null,
+      vmax: c.vmax || 0, spr: c.spr || 0,
+      jug: c.jug || null, L: c.L || null, A: c.A || null,
+      desc: null, img: null,
+      date: new Date().toISOString().slice(0,10),
+      _migratedFromCsv: true
+    };
+    if(typeof computeRatios === 'function') computeRatios(newRow);
+    D.push(newRow);
+
+    // Agregar la categoría a CATS si no existe
+    if(typeof CATS !== 'undefined' && CATS.indexOf(newRow.cat) < 0){
+      CATS.push(newRow.cat);
+    }
+
+    // Cambiar el item del día: ahora referencia a D en lugar de inline csv
+    item.exId = newId;
+    delete item.csvEx;
+
+    if(typeof saveData === 'function') saveData();
+    if(typeof rebuildCatBtns === 'function') rebuildCatBtns();
+
+    targetId = newId;
+  }
+
   _planPrintWrapExi();
   _planPrintExiActive = true;
-  console.log('[planPrintEditEx] llamando exEditInfo('+exId+')');
-  exEditInfo(exId);
-  console.log('[planPrintEditEx] exEditInfo terminó');
+  exEditInfo(targetId);
 }
-window.planPrintEditEx = planPrintEditEx;
+window.planPrintEditItem = planPrintEditItem;
 
 // Imprimir: abre nueva ventana con el HTML limpio y dispara print
 function planPrintDoNow(){
