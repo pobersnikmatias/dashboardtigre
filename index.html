@@ -28270,7 +28270,7 @@ function planPrintRefreshPreview(){
   var weekName = _planEditData.name || '';
   var html;
   try{
-    html = _planBuildPrintHTML(day, weekName, /*forScreen=*/true);
+    html = _planBuildPrintHTML(day, weekName, /*forScreen=*/true, di);
   }catch(e){
     console.error('Error armando preview:', e);
     return;
@@ -28298,7 +28298,7 @@ window.planPrintRefreshPreview = planPrintRefreshPreview;
 
 // Helper: construye el HTML del día. forScreen=true para preview con botones
 // editables; forScreen=false para la versión limpia que va al PDF.
-function _planBuildPrintHTML(day, weekName, forScreen){
+function _planBuildPrintHTML(day, weekName, forScreen, di){
   // Header con info del día
   var clubName = 'Club Atlético Tigre — 5ta División';
   var dayLabel = day.mdLabel || day.label || 'Día';
@@ -28585,7 +28585,7 @@ function planPrintDoNow(){
   var di = _planPrintCurrentDay;
   var day = _planEditData.days[di];
   var weekName = _planEditData.name || '';
-  var html = _planBuildPrintHTML(day, weekName, /*forScreen=*/false);
+  var html = _planBuildPrintHTML(day, weekName, /*forScreen=*/false, di);
 
   var w = window.open('', '_blank', 'width=900,height=700');
   if(!w){ alert('Permitir ventanas emergentes para imprimir.'); return; }
