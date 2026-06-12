@@ -28292,8 +28292,8 @@ function _planBuildPrintHTML(day, weekName, forScreen){
   var dayLabel = day.mdLabel || day.label || 'Día';
   var dayName = day.label || '';
 
-  // Estilo
-  var styles = '<style>'+
+  // Estilo común (sin reglas de print)
+  var stylesBase = '<style>'+
     '*{box-sizing:border-box;margin:0;padding:0}'+
     'body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a;line-height:1.5;background:#fff}'+
     '.pdf-wrap{max-width:760px;margin:0 auto;padding:24px}'+
@@ -28327,6 +28327,10 @@ function _planBuildPrintHTML(day, weekName, forScreen){
     '.pdf-screen-edit:hover{background:#0C447C}'+
     '.pdf-footer{margin-top:20px;padding-top:10px;border-top:1px solid #ddd;font-size:9.5px;color:#999;text-align:center}'+
     '.pdf-parallel-banner{font-size:10px;color:#9c5a00;background:#fffaf2;border:1px dashed #EF9F27;border-radius:4px;padding:4px 8px;margin-bottom:8px;text-align:center}'+
+    '</style>';
+
+  // Reglas de impresión: solo en el PDF (ventana nueva), no en el preview
+  var stylesPrint = '<style>'+
     '@media print{'+
       '@page{margin:12mm;size:A4}'+
       'body{padding:0}'+
@@ -28338,9 +28342,12 @@ function _planBuildPrintHTML(day, weekName, forScreen){
 
   var html = '';
   if(!forScreen){
-    html += '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+_h(weekName+' — '+dayLabel)+'</title>'+styles+'</head><body>';
+    // PDF: estilos en <head>
+    html += '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+_h(weekName+' — '+dayLabel)+'</title>'+stylesBase+stylesPrint+'</head><body>';
   } else {
-    html += styles;  // Inline para preview
+    // Preview en pantalla: solo estilos base (sin @page/@media print, que pueden
+    // confundir al parser cuando se inyectan via innerHTML en medio del DOM)
+    html += stylesBase;
   }
 
   html += '<div class="pdf-wrap">';
@@ -28456,39 +28463,57 @@ function _h(s){
 
 // Editar info de un ejercicio desde el preview — usa el modal existente exi-modal.
 // Cuando se cierre, refrescar el preview.
-// Detecta cierre del modal exi-modal y refresca el preview.
-// Usa MutationObserver porque setInterval era propenso a quedar colgado entre
-// aperturas/cierres consecutivos, dejando los botones "Editar info" sin responder.
-var _planPrintExiObserver = null;
+// Detecta cierre del modal exi-modal interceptando las funciones exiClose y exiSave.
+// Es más confiable que MutationObserver/setInterval para casos donde se abre y
+// cierra varias veces en sucesión rápida.
+var _planPrintExiWrapped = false;
+var _planPrintExiActive = false;  // true cuando abrimos exi-modal DESDE el preview
+
+function _planPrintWrapExi(){
+  if(_planPrintExiWrapped) return;
+  if(typeof window.exiClose !== 'function' || typeof window.exiSave !== 'function') return;
+
+  var origClose = window.exiClose;
+  var origSave = window.exiSave;
+
+  window.exiClose = function(){
+    var wasActive = _planPrintExiActive;
+    _planPrintExiActive = false;
+    var result = origClose.apply(this, arguments);
+    if(wasActive){
+      setTimeout(function(){
+        var modal = document.getElementById('plan-print-modal');
+        if(modal && modal.style.display !== 'none'){
+          planPrintRefreshPreview();
+        }
+      }, 50);
+    }
+    return result;
+  };
+
+  window.exiSave = function(){
+    var wasActive = _planPrintExiActive;
+    var result = origSave.apply(this, arguments);
+    // exiSave tiene un setTimeout interno de 700ms antes de cerrar
+    if(wasActive){
+      setTimeout(function(){
+        _planPrintExiActive = false;
+        var modal = document.getElementById('plan-print-modal');
+        if(modal && modal.style.display !== 'none'){
+          planPrintRefreshPreview();
+        }
+      }, 800);
+    }
+    return result;
+  };
+
+  _planPrintExiWrapped = true;
+}
 
 function planPrintEditEx(exId){
   if(typeof exEditInfo !== 'function'){ alert('Función no disponible.'); return; }
-  var modal = document.getElementById('exi-modal');
-  if(!modal){ alert('Modal de edición no encontrado.'); return; }
-
-  // Desconectar observer previo si existía (por las dudas)
-  if(_planPrintExiObserver){
-    try{ _planPrintExiObserver.disconnect(); }catch(e){}
-    _planPrintExiObserver = null;
-  }
-
-  // Crear nuevo observer que mira cambios en style.display del modal
-  _planPrintExiObserver = new MutationObserver(function(){
-    // Si el modal está oculto Y el modal de PDF sigue abierto, refrescar preview
-    if(modal.style.display === 'none'){
-      try{ _planPrintExiObserver.disconnect(); }catch(e){}
-      _planPrintExiObserver = null;
-      // Pequeño delay para que la edición termine de propagar a D
-      setTimeout(function(){
-        if(document.getElementById('plan-print-modal').style.display !== 'none'){
-          planPrintRefreshPreview();
-        }
-      }, 100);
-    }
-  });
-  _planPrintExiObserver.observe(modal, {attributes:true, attributeFilter:['style']});
-
-  // Abrir el editor
+  _planPrintWrapExi();
+  _planPrintExiActive = true;
   exEditInfo(exId);
 }
 window.planPrintEditEx = planPrintEditEx;
