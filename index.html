@@ -154,8 +154,46 @@ body.sb-show{visibility:visible}
 </div>
 </div></div></div>
 
-<!-- ── PANELES SUPERIORES: 4 botones-tab fijos arriba, contenido debajo, uno a la vez ── -->
 <style>
+/* ════════════════════════════════════════════════════════════ */
+/* RESPONSIVE / MÓVIL — Etapa 1: drawer lateral + header sticky */
+/* ════════════════════════════════════════════════════════════ */
+.mobile-only{display:none}
+.desktop-only{display:flex}
+
+/* Items del drawer móvil */
+.mobile-nav-item{
+  display:flex;align-items:center;gap:14px;width:100%;padding:13px 18px;
+  border:none;background:none;cursor:pointer;text-align:left;
+  font-size:14px;font-weight:600;color:#1a1a1a;
+  border-left:4px solid transparent;transition:background 0.15s;
+}
+.mobile-nav-item:active,.mobile-nav-item:hover{background:#f5f8ff}
+.mobile-nav-item.active{
+  background:#e8f0fe;border-left-color:#0C447C;color:#0C447C;font-weight:800;
+}
+.mobile-nav-item .mn-icon{font-size:20px;width:24px;text-align:center;flex-shrink:0}
+.mobile-nav-item .mn-label{flex:1}
+
+@media (max-width: 768px){
+  .mobile-only{display:flex!important}
+  .desktop-only{display:none!important}
+  body{padding:10px!important}
+
+  /* Cuando el drawer está abierto, posición lo movemos */
+  #mobile-drawer.open{transform:translateX(0)!important}
+  #mobile-drawer-overlay.open{display:block!important;opacity:1!important}
+
+  /* Header sticky un poco más alto en el flujo */
+  #mobile-header{margin-top:-10px}
+}
+
+/* En desktop, ocultar elementos mobile */
+@media (min-width: 769px){
+  #mobile-header,#mobile-drawer,#mobile-drawer-overlay{display:none!important}
+}
+
+/* ── PANELES SUPERIORES: 4 botones-tab fijos arriba, contenido debajo, uno a la vez ── */
 /* Fila de tabs (siempre visible, no cambia de posición) */
 .top-panels-row{
   display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:stretch;
@@ -196,8 +234,49 @@ body.sb-show{visibility:visible}
 }
 </style>
 
-<!-- NAVEGACIÓN PRINCIPAL -->
-<div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0;flex-wrap:wrap">
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- NAVEGACIÓN MÓVIL: Header sticky + Drawer lateral + Overlay -->
+<!-- Se muestran solo en pantallas chicas (≤768px). En desktop -->
+<!-- queda oculto vía CSS y se ve la nav horizontal normal.  -->
+<!-- ════════════════════════════════════════════════════════════ -->
+
+<!-- Header sticky móvil con botón hamburguesa y título de la pestaña -->
+<div id="mobile-header" class="mobile-only" style="position:sticky;top:0;left:0;right:0;z-index:1500;background:#0C447C;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 6px rgba(0,0,0,0.12);margin:-10px -10px 12px -10px">
+  <button onclick="mobileToggleDrawer()" aria-label="Abrir menú" style="border:none;background:rgba(255,255,255,0.15);color:#fff;border-radius:6px;width:36px;height:36px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0">☰</button>
+  <div style="flex:1;min-width:0">
+    <div id="mobile-header-title" style="font-size:14px;font-weight:800;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">⚽ Equipo</div>
+    <div id="mobile-header-sub" style="font-size:10px;opacity:0.8;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Club Atlético Tigre — 5ta</div>
+  </div>
+</div>
+
+<!-- Overlay oscuro que se muestra junto al drawer -->
+<div id="mobile-drawer-overlay" onclick="mobileCloseDrawer()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1800;opacity:0;transition:opacity 0.25s"></div>
+
+<!-- Drawer lateral con opciones de navegación -->
+<div id="mobile-drawer" style="position:fixed;top:0;left:0;bottom:0;width:min(85vw,300px);background:#fff;z-index:1900;transform:translateX(-100%);transition:transform 0.28s ease-out;box-shadow:2px 0 16px rgba(0,0,0,0.18);display:flex;flex-direction:column">
+  <!-- Header del drawer -->
+  <div style="padding:18px 16px;background:linear-gradient(135deg,#0C447C,#1A5BA0);color:#fff">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+      <div style="width:40px;height:40px;background:rgba(255,255,255,0.18);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🐯</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:800;line-height:1.2">Club Atlético Tigre</div>
+        <div style="font-size:11px;opacity:0.85">5ta División · AFA 2025</div>
+      </div>
+    </div>
+  </div>
+  <!-- Lista de opciones -->
+  <div style="flex:1;overflow-y:auto;padding:6px 0">
+    <button class="mobile-nav-item" onclick="setMainView('fixture')" data-view="fixture"><span class="mn-icon">⚽</span><span class="mn-label">Equipo</span></button>
+    <button class="mobile-nav-item" onclick="setMainView('plan')" data-view="plan"><span class="mn-icon">🗓️</span><span class="mn-label">Planificación</span></button>
+    <button class="mobile-nav-item" onclick="setMainView('carga')" data-view="carga"><span class="mn-icon">📊</span><span class="mn-label">Carga interna</span></button>
+    <button class="mobile-nav-item" onclick="setMainView('profiles')" data-view="profiles"><span class="mn-icon">👤</span><span class="mn-label">Perfiles</span></button>
+    <button class="mobile-nav-item" onclick="setMainView('gym')" data-view="gym"><span class="mn-icon">💪</span><span class="mn-label">Prep. física</span></button>
+    <button class="mobile-nav-item" onclick="setMainView('train')" data-view="train"><span class="mn-icon">📋</span><span class="mn-label">Biblioteca de ejercicios</span></button>
+  </div>
+</div>
+
+<!-- NAVEGACIÓN PRINCIPAL (desktop) -->
+<div id="main-nav-desktop" class="desktop-only" style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0;flex-wrap:wrap">
   <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid #3B4D88;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#3B4D88;cursor:pointer">&#9917; Equipo</button>
   <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
   <button id="nav-carga" onclick="setMainView('carga')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📊 Carga interna</button>
@@ -28314,6 +28393,96 @@ function resiExportPDF(id){
   w.onload = function(){ w.focus(); w.print(); };
 }
 window.resiExportPDF = resiExportPDF;
+
+// ════════════════════════════════════════════════════════════════════
+// MOBILE NAV: drawer lateral + sincronización con setMainView
+// ════════════════════════════════════════════════════════════════════
+function mobileToggleDrawer(){
+  var d = document.getElementById('mobile-drawer');
+  var o = document.getElementById('mobile-drawer-overlay');
+  if(!d || !o) return;
+  if(d.classList.contains('open')){
+    mobileCloseDrawer();
+  } else {
+    mobileOpenDrawer();
+  }
+}
+window.mobileToggleDrawer = mobileToggleDrawer;
+
+function mobileOpenDrawer(){
+  var d = document.getElementById('mobile-drawer');
+  var o = document.getElementById('mobile-drawer-overlay');
+  if(!d || !o) return;
+  o.style.display = 'block';
+  // Force reflow para que la transición de opacidad funcione
+  void o.offsetWidth;
+  d.classList.add('open');
+  o.classList.add('open');
+}
+window.mobileOpenDrawer = mobileOpenDrawer;
+
+function mobileCloseDrawer(){
+  var d = document.getElementById('mobile-drawer');
+  var o = document.getElementById('mobile-drawer-overlay');
+  if(!d || !o) return;
+  d.classList.remove('open');
+  o.classList.remove('open');
+  // Esperar al final de la transición para ocultar overlay
+  setTimeout(function(){ if(!o.classList.contains('open')) o.style.display = 'none'; }, 280);
+}
+window.mobileCloseDrawer = mobileCloseDrawer;
+
+// Mapa de vistas → títulos para el header móvil
+var _mobileViewTitles = {
+  fixture: '⚽ Equipo',
+  plan: '🗓️ Planificación',
+  carga: '📊 Carga interna',
+  profiles: '👤 Perfiles',
+  gym: '💪 Prep. física',
+  train: '📋 Biblioteca de ejercicios'
+};
+
+// Envolver setMainView para:
+//  1) cerrar el drawer al elegir una opción
+//  2) actualizar el título del header móvil
+//  3) marcar el item activo en el drawer
+if(typeof window.setMainView === 'function'){
+  var _origSetMainView = window.setMainView;
+  window.setMainView = function(v){
+    var result = _origSetMainView.apply(this, arguments);
+    try{
+      // Actualizar título móvil
+      var titleEl = document.getElementById('mobile-header-title');
+      if(titleEl && _mobileViewTitles[v]) titleEl.textContent = _mobileViewTitles[v];
+      // Marcar item activo en el drawer
+      document.querySelectorAll('.mobile-nav-item').forEach(function(btn){
+        if(btn.getAttribute('data-view') === v) btn.classList.add('active');
+        else btn.classList.remove('active');
+      });
+      // Cerrar drawer si está abierto
+      mobileCloseDrawer();
+      // Scroll arriba para que el usuario vea el inicio de la vista nueva
+      try{ window.scrollTo({top:0, behavior:'smooth'}); }catch(e){ window.scrollTo(0,0); }
+    }catch(e){ console.warn('mobile nav hook error:', e); }
+    return result;
+  };
+}
+
+// Al cargar, marcar el item inicial (Equipo) como activo en el drawer
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    var firstItem = document.querySelector('.mobile-nav-item[data-view="fixture"]');
+    if(firstItem) firstItem.classList.add('active');
+  }catch(e){}
+});
+
+// Cerrar drawer al apretar ESC
+document.addEventListener('keydown', function(ev){
+  if(ev.key === 'Escape'){
+    var d = document.getElementById('mobile-drawer');
+    if(d && d.classList.contains('open')) mobileCloseDrawer();
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════
 // PLANIFICACIÓN: Imprimir / PDF de un día — preview en modal + impresión
