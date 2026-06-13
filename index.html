@@ -921,7 +921,18 @@ function stats(rows){
 }
 
 let af='all',sk='date',tab=2,sel=new Set(),rc1=null,rc2=null,viewMode='min';
-const gf=()=>{let r=af==='all'?D:D.filter(x=>x.cat===af);if(document.getElementById('fe').checked)r=r.filter(x=>calcEII(x)!==null);return r;};
+const gf=()=>{
+  let r;
+  if(af==='__starred'){
+    r = D.filter(x=>x.starred);
+  } else if(af==='all'){
+    r = D;
+  } else {
+    r = D.filter(x=>x.cat===af);
+  }
+  if(document.getElementById('fe').checked) r = r.filter(x=>calcEII(x)!==null);
+  return r;
+};
 
 function setMode(m){
   viewMode=m;
@@ -1175,6 +1186,48 @@ function updateSel(){
 
 function tSel(id){if(sel.has(id))sel.delete(id);else sel.add(id);document.querySelectorAll(`input[data-s="${id}"]`).forEach(c=>c.checked=sel.has(id));if(tab===2)updateSel();document.getElementById('sc2').textContent=sel.size?`${sel.size} seleccionados`:'';if(typeof updateMergeBtn==='function')updateMergeBtn();}
 window.tSel=tSel;
+
+// Marcar/desmarcar ejercicio como destacado (estrella). Los destacados aparecen
+// como una "categoría virtual" en los filtros (Biblioteca + Planificación).
+function toggleStarred(id){
+  var r = D.find(function(x){return x.id===id;});
+  if(!r) return;
+  r.starred = !r.starred;
+  if(typeof saveData === 'function') saveData();
+  // Refrescar tabla
+  if(typeof drawTable === 'function' && typeof gf === 'function') drawTable(gf());
+}
+window.toggleStarred = toggleStarred;
+
+// Versión para el modal de planificación: actualiza la lista del modal y el selector
+function toggleStarredFromModal(id){
+  var r = D.find(function(x){return x.id===id;});
+  if(!r) return;
+  r.starred = !r.starred;
+  if(typeof saveData === 'function') saveData();
+  // Actualizar selector de cats (puede cambiar el contador de ⭐)
+  var catSel = document.getElementById('plan-modal-cat');
+  if(catSel){
+    var currentVal = catSel.value;
+    var nStarred = D.filter(function(x){return x.starred;}).length;
+    var starOpt = nStarred>0 ? '<option value="__starred">⭐ Destacados ('+nStarred+')</option>' : '';
+    // Reconstruir el selector preservando el valor
+    var catList = (typeof CATS !== 'undefined' ? CATS : []).filter(function(c){return c!=='all';}).slice();
+    catList.sort(function(a,b){
+      var aSin=(a==='Sin categoría'), bSin=(b==='Sin categoría');
+      if(aSin && !bSin) return 1;
+      if(bSin && !aSin) return -1;
+      return String(a).localeCompare(String(b),'es',{sensitivity:'base'});
+    });
+    catSel.innerHTML='<option value="">Todas las categorías</option>'+ starOpt +
+      catList.map(function(c){return'<option value="'+c+'">'+c+'</option>';}).join('');
+    catSel.value = currentVal;
+    // Si la opción ⭐ se eliminó por quedar 0 destacados, fallback
+    if(catSel.value !== currentVal) catSel.value = '';
+  }
+  if(typeof planModalFilter === 'function') planModalFilter();
+}
+window.toggleStarredFromModal = toggleStarredFromModal;
 function sTab(t){tab=2;document.getElementById('p1').style.display='none';document.getElementById('p2').style.display='';updateSel();}
 window.sTab=sTab;
 function setCat(c){af=c;document.querySelectorAll('.cb').forEach(b=>{const on=b.dataset.cat===c;b.classList.toggle('on',on);b.style.background=on?(BC[c]||'#3B4D88'):'transparent';b.style.borderColor=on?(BC[c]||'#3B4D88'):'#ccc';b.style.color=on?'#fff':'#555';});refresh();}
@@ -1197,6 +1250,21 @@ function rebuildCatBtns(){
     return String(na).localeCompare(String(nb),'es',{sensitivity:'base'});
   });
   const cf=document.getElementById('cf');cf.innerHTML='';
+  // Botón especial ⭐ Destacados (categoría virtual) al inicio
+  var nStarred = D.filter(function(x){return x.starred;}).length;
+  if(nStarred > 0){
+    var sb = document.createElement('button');
+    sb.className = 'cb' + (af==='__starred' ? ' on' : '');
+    sb.textContent = '⭐ Destacados ('+nStarred+')';
+    sb.dataset.cat = '__starred';
+    if(af==='__starred'){
+      sb.style.background = '#FFD700';
+      sb.style.borderColor = '#E8B800';
+      sb.style.color = '#5a3500';
+    }
+    sb.onclick = function(){ setCat('__starred'); };
+    cf.appendChild(sb);
+  }
   idxs.forEach(function(i){
     var c=CATS[i];
     const b=document.createElement('button');
@@ -1428,7 +1496,7 @@ function drawTable(rows){
     };
     const dateStr=r.date?`<td style="display:${showDates?'':'none'};color:#aaa;font-size:10px;white-space:nowrap">${r.date}</td>`:`<td style="display:${showDates?'':'none'};color:#ddd;font-size:10px">—</td>`;
     tb.innerHTML+=`<tr>
-      <td><input type="checkbox" data-s="${r.id}" ${sel.has(r.id)?'checked':''} style="cursor:pointer;accent-color:#3B4D88" onchange="tSel(${r.id})"></td>
+      <td><div style="display:flex;align-items:center;gap:3px"><input type="checkbox" data-s="${r.id}" ${sel.has(r.id)?'checked':''} style="cursor:pointer;accent-color:#3B4D88" onchange="tSel(${r.id})"><span onclick="toggleStarred(${r.id})" style="cursor:pointer;font-size:13px;color:${r.starred?'#FFD700':'#ddd'};line-height:1" title="${r.starred?'Quitar de destacados':'Marcar como destacado'}">★</span></div></td>
       <td style="font-weight:600;max-width:145px;white-space:normal;overflow:hidden;color:#1a1a1a" title="${r.n}">${r.n}${r.raw?'<span style="color:#1D9E75;font-size:8px;margin-left:2px">●</span>':''}${(function(){var o=typeof gpsExerciseOrientation==='function'?gpsExerciseOrientation(r):null;if(!o)return'<span style="display:block"><select onchange="setOrientOverride('+r.id+',this.value)" style="font-size:9px;padding:1px 3px;border:1px solid #eee;border-radius:3px;color:#aaa;background:#fafafa;max-width:130px"><option value="">▸ sin datos</option><option value="Resistencia">▸ Resistencia</option><option value="Velocidad">▸ Velocidad</option><option value="Fuerza">▸ Fuerza</option><option value="Sin orientación">▸ Sin orientación</option></select></span>';return'<span style="display:flex;align-items:center;gap:3px;margin-top:1px"><span style="font-size:9px;font-weight:700;color:'+o.color+'">▸ '+o.label+'</span><select onchange="setOrientOverride('+r.id+',this.value)" style="font-size:9px;padding:0 2px;border:none;background:transparent;color:#ccc;cursor:pointer" title="Cambiar orientación"><option value="">✎</option><option value="Resistencia">Resistencia</option><option value="Velocidad">Velocidad</option><option value="Fuerza">Fuerza</option><option value="Sin orientación">Sin orientación</option><option value="">Auto</option></select></span>';}())}</td>
       <td><select class="cat-inline" style="color:${c}" data-id="${r.id}" onchange="changeCat(this)">${CATS.filter(x=>x!=='all').map(x=>`<option value="${x}" ${x===r.cat?'selected':''} style="color:${BC[x]||'#888'}">${x}</option>`).join('')}</select></td>
       <td><input class="fi-tm" data-id="${r.id}" data-f="blocks" type="number" min="0" step="1" value="${r.blocks||''}" style="width:32px;font-size:10px;padding:1px 3px;border:1px solid #ddd;border-radius:3px;text-align:center" placeholder="·"></td>
@@ -12183,10 +12251,19 @@ function planOpenModal(di, bi){
   var ntEl=document.getElementById('plan-modal-nettime'); if(ntEl) ntEl.textContent='';
   planRebuildGroupSelect();
   var gSel=document.getElementById('plan-modal-group'); if(gSel) gSel.value='Todos';
-  // Populate cat selector
+  // Populate cat selector — ordenadas alfabéticamente + opción ⭐ Destacados al inicio
   var catSel=document.getElementById('plan-modal-cat');
-  catSel.innerHTML='<option value="">Todas las categorías</option>'+
-    CATS.filter(function(c){return c!=='all';}).map(function(c){return'<option value="'+c+'">'+c+'</option>';}).join('');
+  var catList = CATS.filter(function(c){return c!=='all';}).slice();
+  catList.sort(function(a,b){
+    var aSin=(a==='Sin categoría'), bSin=(b==='Sin categoría');
+    if(aSin && !bSin) return 1;
+    if(bSin && !aSin) return -1;
+    return String(a).localeCompare(String(b),'es',{sensitivity:'base'});
+  });
+  var nStarredOpt = D.filter(function(x){return x.starred;}).length;
+  var starOpt = nStarredOpt>0 ? '<option value="__starred">⭐ Destacados ('+nStarredOpt+')</option>' : '';
+  catSel.innerHTML='<option value="">Todas las categorías</option>'+ starOpt +
+    catList.map(function(c){return'<option value="'+c+'">'+c+'</option>';}).join('');
   planModalFilter();
   var modal=document.getElementById('plan-modal');
   modal.style.display='flex';
@@ -12203,6 +12280,7 @@ function planModalFilter(){
   var q=(document.getElementById('plan-modal-search').value||'').toLowerCase();
   var cat=document.getElementById('plan-modal-cat').value;
   var rows=D.filter(function(r){
+    if(cat==='__starred') return r.starred && (!q||r.n.toLowerCase().includes(q));
     return(!cat||r.cat===cat)&&(!q||r.n.toLowerCase().includes(q));
   }).sort(function(a,b){return a.n.localeCompare(b.n);});
 
@@ -12213,8 +12291,12 @@ function planModalFilter(){
     var sel=_planModalSelected&&_planModalSelected.id===r.id;
     var orient=typeof gpsExerciseOrientation==='function'?gpsExerciseOrientation(r):null;
     var orientBadge=orient?'<span style="font-size:9px;font-weight:700;color:'+orient.color+';background:'+orient.color+'18;border-radius:3px;padding:1px 5px;white-space:nowrap">▸ '+orient.label+'</span>':'';
+    // Estrella clickeable (event.stopPropagation para que no seleccione la fila)
+    var starCol = r.starred ? '#FFD700' : '#ddd';
+    var starHtml = '<span onclick="event.stopPropagation();toggleStarredFromModal('+r.id+')" style="cursor:pointer;font-size:14px;color:'+starCol+';line-height:1;flex-shrink:0" title="'+(r.starred?'Quitar de destacados':'Marcar como destacado')+'">★</span>';
     return '<div onclick="planModalSelect('+r.id+')" style="display:flex;align-items:center;gap:7px;padding:7px 10px;cursor:pointer;border-bottom:0.5px solid #f0f0f0;background:'+(sel?'#e8f0fe':'#fff')+'" '+
       'onmouseover="if(!this.dataset.sel)this.style.background=\'#f5f8ff\'" onmouseout="if(!this.dataset.sel)this.style.background=\''+(sel?'#e8f0fe':'#fff')+'\';" data-sel="'+(sel?'1':'')+'">' +
+      starHtml +
       '<span style="width:8px;height:8px;border-radius:50%;background:'+c+';flex-shrink:0"></span>'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:11px;font-weight:'+(sel?700:500)+';color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.n+'</div>'+
@@ -28344,9 +28426,29 @@ function _planBuildPrintHTML(day, weekName, forScreen, di){
   // Reglas de impresión: solo en el PDF (ventana nueva), no en el preview
   var stylesPrint = '<style>'+
     '@media print{'+
-      '@page{margin:12mm;size:A4}'+
+      '@page{margin:8mm;size:A4}'+
       'body{padding:0}'+
       '.pdf-wrap{padding:0;max-width:none}'+
+      // Header compacto en print
+      '.pdf-header{padding-bottom:8px;margin-bottom:10px;border-bottom-width:2px}'+
+      '.pdf-day-badge{padding:3px 10px;font-size:12px;margin-bottom:3px}'+
+      '.pdf-club{font-size:13px;margin-bottom:2px}'+
+      '.pdf-meta{font-size:10px}'+
+      '.pdf-header-logo img{width:56px!important;height:56px!important}'+
+      // Mantener header + primer bloque juntos (no permite que el primer bloque salte)
+      '.pdf-header{page-break-after:avoid;break-after:avoid}'+
+      // Bloques compactos
+      '.pdf-block{margin-bottom:10px}'+
+      '.pdf-block-header{padding:4px 10px;font-size:11px}'+
+      '.pdf-block-body{padding:7px}'+
+      // Ejercicios compactos
+      '.pdf-exercise{gap:10px;padding:7px;margin-bottom:6px;page-break-inside:avoid;break-inside:avoid}'+
+      '.pdf-ex-img{width:140px;height:100px}'+
+      '.pdf-ex-name{font-size:12px;margin-bottom:3px}'+
+      '.pdf-ex-meta{margin-bottom:5px;gap:4px}'+
+      '.pdf-ex-tag{font-size:9px;padding:1px 6px}'+
+      '.pdf-ex-desc{font-size:10.5px;line-height:1.4}'+
+      '.pdf-ex-desc-empty{display:none}'+  // no mostrar "Sin descripción" en el PDF
       '.pdf-screen-edit{display:none!important}'+
       '.pdf-no-print{display:none!important}'+
     '}'+
