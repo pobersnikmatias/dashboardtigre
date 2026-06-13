@@ -193,6 +193,36 @@ body.sb-show{visibility:visible}
   #mobile-header,#mobile-drawer,#mobile-drawer-overlay{display:none!important}
 }
 
+/* ════════════════════════════════════════════════════════════ */
+/* SUBTABS RESPONSIVE — barras de subpestañas internas         */
+/* En móvil: scroll horizontal cómodo (sin scrollbar visible)  */
+/* botones más altos y con padding generoso                    */
+/* ════════════════════════════════════════════════════════════ */
+.subtabs-bar{
+  /* Override del flex-wrap heredado — en móvil queremos UNA sola línea scrolleable */
+}
+@media (max-width: 768px){
+  .subtabs-bar{
+    flex-wrap:nowrap!important;
+    overflow-x:auto;
+    overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;   /* Firefox */
+    scroll-behavior:smooth;
+    /* Sombras laterales sugiriendo que hay más para scrollear */
+    mask-image:linear-gradient(to right,transparent 0,#000 14px,#000 calc(100% - 14px),transparent 100%);
+    -webkit-mask-image:linear-gradient(to right,transparent 0,#000 14px,#000 calc(100% - 14px),transparent 100%);
+  }
+  .subtabs-bar::-webkit-scrollbar{display:none}  /* Chrome/Safari */
+  .subtabs-bar > button{
+    flex-shrink:0!important;
+    padding:10px 14px!important;
+    font-size:12px!important;
+    min-height:42px;
+    white-space:nowrap;
+  }
+}
+
 /* ── PANELES SUPERIORES: 4 botones-tab fijos arriba, contenido debajo, uno a la vez ── */
 /* Fila de tabs (siempre visible, no cambia de posición) */
 .top-panels-row{
@@ -5738,7 +5768,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   </div>
 
   <!-- Sub-tabs -->
-  <div style="display:flex;gap:0;border-bottom:1px solid #ddd;margin-bottom:12px;flex-wrap:wrap">
+  <div class="subtabs-bar" style="display:flex;gap:0;border-bottom:1px solid #ddd;margin-bottom:12px;flex-wrap:wrap">
     <button id="plan-subtab-micro" class="plan-subtab" onclick="planSwitchSubtab('micro')"
       style="background:none;border:none;border-bottom:3px solid #0D1B2A;color:#0D1B2A;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📡 Microciclo GPS</button>
     <button id="plan-subtab-weeks" class="plan-subtab" onclick="planSwitchSubtab('weeks')"
@@ -13418,7 +13448,7 @@ document.addEventListener('DOMContentLoaded',function(){
 <div id="view-gym" style="display:none">
 
 <!-- TABS Preparación física: Gimnasio | Resistencia -->
-<div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid #ddd;padding-bottom:0">
+<div class="subtabs-bar" style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid #ddd;padding-bottom:0">
   <button id="pf-tab-gym-btn" onclick="pfSetTab('gym')" style="padding:7px 18px;border:none;border-bottom:3px solid #0D1B2A;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#0D1B2A;cursor:pointer">🏋️ Gimnasio</button>
   <button id="pf-tab-resistencia-btn" onclick="pfSetTab('resistencia')" style="padding:7px 18px;border:none;border-bottom:3px solid transparent;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#666;cursor:pointer">🏃 Resistencia</button>
 </div>
@@ -13429,7 +13459,7 @@ document.addEventListener('DOMContentLoaded',function(){
 <div id="pf-tab-gym">
 
 <!-- TABS internos -->
-<div style="display:flex;gap:6px;margin-bottom:10px;border-bottom:2px solid #f0f0f0;padding-bottom:0">
+<div class="subtabs-bar" style="display:flex;gap:6px;margin-bottom:10px;border-bottom:2px solid #f0f0f0;padding-bottom:0">
   <button id="gym-tab-library"  onclick="gymSetTab('library')"  style="padding:6px 16px;border:none;border-bottom:2px solid #D85A30;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#D85A30;cursor:pointer">📚 Biblioteca</button>
   <button id="gym-tab-sessions" onclick="gymSetTab('sessions')" style="padding:6px 16px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#aaa;cursor:pointer">📋 Sesiones</button>
   <button id="gym-tab-summary"  onclick="gymSetTab('summary')"  style="padding:6px 16px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:11px;font-weight:700;color:#aaa;cursor:pointer">📊 Resumen semanal</button>
@@ -14017,7 +14047,7 @@ document.addEventListener('DOMContentLoaded',function(){
 <div style="margin-top:18px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">
 
   <!-- Sub-nav -->
-  <div style="display:flex;background:#f5f7fa;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">
+  <div class="subtabs-bar" style="display:flex;background:#f5f7fa;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">
     <button id="fix-tab-fixture" onclick="fixSubTab('fixture')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#3B4D88;border-bottom:2px solid #3B4D88;cursor:pointer">📋 Fixture</button>
     <button id="fix-tab-equipo" onclick="fixSubTab('equipo')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#aaa;border-bottom:2px solid transparent;cursor:pointer">📊 Estadísticas</button>
     <button id="fix-tab-jugadores" onclick="fixSubTab('jugadores')" style="padding:8px 18px;border:none;background:none;font-size:11px;font-weight:700;color:#aaa;border-bottom:2px solid transparent;cursor:pointer">👤 Jugadores</button>
@@ -28483,6 +28513,51 @@ document.addEventListener('keydown', function(ev){
     if(d && d.classList.contains('open')) mobileCloseDrawer();
   }
 });
+
+// ════════════════════════════════════════════════════════════════════
+// SUBTABS UX: cuando una subtab se activa (cambia color/border), scroll
+// para mostrarla centrada en su barra. Usa MutationObserver para detectar
+// los cambios sin tener que hookear cada función de tab del dashboard.
+// ════════════════════════════════════════════════════════════════════
+function _scrollSubtabIntoView(btn){
+  try{
+    var bar = btn.closest && btn.closest('.subtabs-bar');
+    if(!bar) return;
+    // Solo si la barra es scrolleable (móvil)
+    if(bar.scrollWidth <= bar.clientWidth) return;
+    var barRect = bar.getBoundingClientRect();
+    var btnRect = btn.getBoundingClientRect();
+    // Si el botón ya está totalmente visible, no hacer nada
+    if(btnRect.left >= barRect.left + 10 && btnRect.right <= barRect.right - 10) return;
+    // Calcular el scrollLeft que dejaría el botón centrado
+    var btnCenterRelative = (btn.offsetLeft) + (btn.offsetWidth/2);
+    var newScroll = btnCenterRelative - (bar.clientWidth/2);
+    bar.scrollTo({left:Math.max(0,newScroll), behavior:'smooth'});
+  }catch(e){}
+}
+
+// Detectar cambios en los botones de subtabs (style attr cambia al activar)
+// y scrollear el botón activo.
+(function(){
+  if(typeof MutationObserver === 'undefined') return;
+  var bars = document.querySelectorAll('.subtabs-bar');
+  bars.forEach(function(bar){
+    // Observer en cada botón hijo
+    Array.prototype.forEach.call(bar.children, function(btn){
+      if(btn.tagName !== 'BUTTON') return;
+      var obs = new MutationObserver(function(){
+        // Si el botón parece "activo" (tiene color con # diferente a aaa/666), scrollear
+        var style = btn.getAttribute('style') || '';
+        if(/border-bottom\s*:\s*[123]px\s+solid\s+#[0-9a-fA-F]+/.test(style) &&
+           !/border-bottom\s*:\s*[123]px\s+solid\s+transparent/.test(style) &&
+           !/border-bottom\s*:\s*[123]px\s+solid\s+#(eee|ddd|ccc)/.test(style)){
+          _scrollSubtabIntoView(btn);
+        }
+      });
+      obs.observe(btn, {attributes:true, attributeFilter:['style','class']});
+    });
+  });
+})();
 
 // ════════════════════════════════════════════════════════════════════
 // PLANIFICACIÓN: Imprimir / PDF de un día — preview en modal + impresión
