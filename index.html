@@ -234,6 +234,47 @@ body.sb-show{visibility:visible}
   div[style*="overflow-x:auto"] table td[style*="sticky"] > div{
     white-space:normal;
   }
+
+  /* ─── Biblioteca de ejercicios: ocultar columnas no críticas en móvil ─── */
+  /* Mostramos solo: checkbox/estrella(1), Ejercicio(2), Cat(3), Min(7), EII(12),
+     Mts(13), Vmax(19), Acciones (última). Las demás se ocultan. */
+  .library-table table th:nth-child(4),    /* Bloq */
+  .library-table table th:nth-child(5),    /* Trab */
+  .library-table table th:nth-child(6),    /* Pau */
+  .library-table table th:nth-child(8),    /* Jug */
+  .library-table table th:nth-child(9),    /* Largo */
+  .library-table table th:nth-child(10),   /* Ancho */
+  .library-table table th:nth-child(14),   /* 18-21 */
+  .library-table table th:nth-child(15),   /* 21-25 */
+  .library-table table th:nth-child(16),   /* +25 */
+  .library-table table th:nth-child(17),   /* Acc */
+  .library-table table th:nth-child(18),   /* Dec */
+  .library-table table th:nth-child(19),   /* RHIE */
+  .library-table table th:nth-child(21),   /* Spr */
+  .library-table table th:nth-child(22),   /* PL/m */
+  .library-table table td:nth-child(4),
+  .library-table table td:nth-child(5),
+  .library-table table td:nth-child(6),
+  .library-table table td:nth-child(8),
+  .library-table table td:nth-child(9),
+  .library-table table td:nth-child(10),
+  .library-table table td:nth-child(14),
+  .library-table table td:nth-child(15),
+  .library-table table td:nth-child(16),
+  .library-table table td:nth-child(17),
+  .library-table table td:nth-child(18),
+  .library-table table td:nth-child(19),
+  .library-table table td:nth-child(21),
+  .library-table table td:nth-child(22){
+    display:none!important;
+  }
+  /* Ejercicio: dejar que se vea más ancho y wrap */
+  .library-table table th:nth-child(2),
+  .library-table table td:nth-child(2){
+    min-width:140px!important;
+    max-width:none;
+    white-space:normal;
+  }
 }
 
 /* ════════════════════════════════════════════════════════════ */
@@ -619,7 +660,7 @@ body.sb-show{visibility:visible}
   </span>
 </div>
 
-<div class="tbl-wrap">
+<div class="tbl-wrap library-table">
 <table><thead><tr>
   <th style="width:14px"></th>
   <th style="min-width:145px">Ejercicio</th><th>Cat.</th>
