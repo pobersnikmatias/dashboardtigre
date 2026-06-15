@@ -194,6 +194,49 @@ body.sb-show{visibility:visible}
 }
 
 /* ════════════════════════════════════════════════════════════ */
+/* TABLAS GRANDES EN MÓVIL — Etapa 3                            */
+/* Para tablas grandes (PSE, Perfiles, Biblioteca, etc.) que    */
+/* tienen scroll horizontal: mejor UX en pantallas chicas.      */
+/* ════════════════════════════════════════════════════════════ */
+@media (max-width: 768px){
+  /* Tablas con overflow-x:auto: agregar sombra a la derecha para indicar
+     que hay más contenido scrolleando, y hacer scrollbar más sutil */
+  div[style*="overflow-x:auto"]{
+    position:relative;
+    -webkit-overflow-scrolling:touch;
+    /* Sombras sutiles en los bordes que sugieren scroll */
+    background-attachment:local,local,scroll,scroll;
+  }
+  /* En tablas: achicar fuente general y padding para que entre más info */
+  div[style*="overflow-x:auto"] table{
+    font-size:10.5px!important;
+  }
+  div[style*="overflow-x:auto"] table th{
+    padding:5px 6px!important;
+    font-size:9.5px!important;
+  }
+  div[style*="overflow-x:auto"] table td{
+    padding:5px 6px!important;
+  }
+  /* Para celdas sticky (primera columna fija) que en móvil sea más angosta */
+  div[style*="overflow-x:auto"] table th[style*="sticky"],
+  div[style*="overflow-x:auto"] table td[style*="sticky"]{
+    min-width:90px!important;
+    max-width:120px;
+  }
+  /* Cuando el contenido de una celda es muy largo, truncar con ellipsis */
+  div[style*="overflow-x:auto"] table td[style*="sticky"]{
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  /* Permitir que celdas sticky muestren más de una línea si tienen <div> */
+  div[style*="overflow-x:auto"] table td[style*="sticky"] > div{
+    white-space:normal;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════ */
 /* SUBTABS RESPONSIVE — barras de subpestañas internas         */
 /* En móvil: scroll horizontal cómodo (sin scrollbar visible)  */
 /* botones más altos y con padding generoso                    */
@@ -6482,6 +6525,62 @@ function renderProfilesTable(){
   if(!keys.length){wrap.innerHTML='<div style="color:#aaa;font-size:11px;text-align:center;padding:20px">Sin perfiles cargados.</div>';return;}
   var mxV=getMatchMaxVmax(), mxA=getMatchMaxAccmax(), mxD=getMatchMaxDccmax();
   var badge=(v,ref,col)=>{if(!v)return'<span style="color:#ccc">—</span>';var pct=ref?'<span style="font-size:9px;color:'+col+';margin-left:3px">('+Math.round(v/ref*100)+'%)</span>':'';return'<span style="font-weight:700;color:'+col+'">'+v.toFixed(1)+'</span>'+pct;};
+
+  var isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+
+  if(isMobile){
+    // ═══ VISTA MÓVIL: cards ═══
+    wrap.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px">'+
+      keys.sort().map(k=>{
+        var p=PLAYER_PROFILES[k];
+        var lesion=p.estado==='lesion';
+        var reserva=p.estado==='reserva';
+        var primera=p.estado==='primera';
+        var rowBg=lesion?'#fff8f8':reserva?'#f0f4ff':primera?'#fffdf0':'#fff';
+        var borderCol=lesion?'#E24B4A55':reserva?'#3B4D8855':primera?'#EF9F2755':'#e0e0e0';
+        var nameColor=lesion?'#E24B4A':reserva?'#3B4D88':primera?'#EF9F27':'#1a1a1a';
+        var estadoInfo=(function(){
+          if(lesion)   return{label:'🚑 Lesión',    bg:'#fff0f0',color:'#E24B4A',border:'#E24B4A55'};
+          if(reserva)  return{label:'🔵 Reserva',   bg:'#eef4ff',color:'#3B4D88',border:'#3B4D8855'};
+          if(primera)  return{label:'🟡 Primera',   bg:'#fffbee',color:'#EF9F27',border:'#EF9F2755'};
+          return                {label:'✅ Disponible',bg:'#f0fff4',color:'#1D9E75',border:'#1D9E7555'};
+        })();
+
+        return '<div style="background:'+rowBg+';border:1px solid '+borderCol+';border-radius:10px;padding:10px 12px">'+
+          // Header: nombre + pos + estado
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">'+
+            '<div style="font-size:14px;font-weight:800;color:'+nameColor+';flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(p.name||k)+'</div>'+
+            (p.pos?'<span style="font-size:10px;font-weight:700;background:#f0f2f5;color:#555;border-radius:4px;padding:2px 7px;flex-shrink:0">'+p.pos+'</span>':'')+
+            '<button onclick="toggleProfileEstado(\''+k+'\')" style="border:1px solid '+estadoInfo.border+';cursor:pointer;border-radius:12px;padding:3px 10px;font-size:10px;font-weight:700;background:'+estadoInfo.bg+';color:'+estadoInfo.color+';flex-shrink:0" title="Cambiar estado">'+estadoInfo.label+'</button>'+
+          '</div>'+
+          // Métricas en grilla
+          '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px">'+
+            '<div style="background:#fff;border:1px solid #f0d5d5;border-radius:6px;padding:6px 8px;text-align:center">'+
+              '<div style="font-size:9px;color:#E24B4A;font-weight:700;margin-bottom:2px">VMAX'+((p.locks&&p.locks.vmax)?' 🔒':'')+'</div>'+
+              '<div>'+badge(p.vmax,mxV,'#E24B4A')+'</div>'+
+            '</div>'+
+            '<div style="background:#fff;border:1px solid #f0dfd0;border-radius:6px;padding:6px 8px;text-align:center">'+
+              '<div style="font-size:9px;color:#D85A30;font-weight:700;margin-bottom:2px">ACC'+((p.locks&&p.locks.accmax)?' 🔒':'')+'</div>'+
+              '<div>'+badge(p.accmax,mxA,'#D85A30')+'</div>'+
+            '</div>'+
+            '<div style="background:#fff;border:1px solid #f0d0db;border-radius:6px;padding:6px 8px;text-align:center">'+
+              '<div style="font-size:9px;color:#D4537E;font-weight:700;margin-bottom:2px">DCC'+((p.locks&&p.locks.dccmax)?' 🔒':'')+'</div>'+
+              '<div>'+badge(p.dccmax,mxD,'#D4537E')+'</div>'+
+            '</div>'+
+          '</div>'+
+          // Botones
+          '<div style="display:flex;gap:6px;justify-content:flex-end">'+
+            '<button class="btn bc" onclick="editProfile(\''+k+'\')" style="padding:5px 14px;font-size:11px">✏️ Editar</button>'+
+            '<button class="btn bc" onclick="openInjuryModal(\''+k+'\')" style="padding:5px 12px;font-size:11px;color:#E24B4A;border-color:#E24B4A55" title="Lesiones">🚑 '+(p.injuries&&p.injuries.length?p.injuries.length:'0')+'</button>'+
+            '<button class="btn-r" onclick="deleteProfile(\''+k+'\')" style="padding:5px 10px;font-size:11px">🗑</button>'+
+          '</div>'+
+        '</div>';
+      }).join('')+
+    '</div>';
+    return;
+  }
+
+  // ═══ VISTA DESKTOP: tabla ═══
   wrap.innerHTML='<div style="overflow-x:auto;border:1px solid #ddd;border-radius:7px"><table style="width:100%;border-collapse:collapse;font-size:11px">'+
     '<thead><tr style="background:#f5f5f5">'+
     '<th style="text-align:left;padding:5px 8px;border-bottom:1px solid #ddd">Jugador</th>'+
@@ -22774,6 +22873,9 @@ function cargaRenderPSE(){
   // ── Render ──
   var html='';
 
+  // Detectar móvil para usar vista compacta tipo lista
+  var isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+
   // Encabezado / resumen
   html+='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 16px;margin-bottom:12px">'+
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'+
@@ -22794,6 +22896,85 @@ function cargaRenderPSE(){
     '</div>'+
   '</div>';
 
+  if(isMobile){
+    // ═══ VISTA MÓVIL: Cards por jugador ═══
+    // Cada jugador es una card con sus PSE como chips de día coloreados.
+    // Mucho más usable en celular que una tabla 10 columnas con scroll-X.
+    html+='<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">';
+
+    // Card resumen de equipo arriba
+    var teamSumsM=data.sessionDays.map(function(sd, si){
+      var sumUA=0, n=0, sumPse=0, nPse=0;
+      data.players.forEach(function(p){
+        var s=p.sessions[si];
+        if(s.ua!=null){sumUA+=s.ua; n++;}
+        if(s.pseUsed!=null){sumPse+=s.pseUsed; nPse++;}
+      });
+      return {avgUA:n>0?sumUA/n:0, avgPse:nPse>0?sumPse/nPse:null};
+    });
+    var teamTotalUAm=teamSumsM.reduce(function(a,t){return a+t.avgUA;},0);
+    var teamSumPseM=0, teamNPseM=0;
+    data.players.forEach(function(p){if(p.avgPSE!=null){teamSumPseM+=p.avgPSE;teamNPseM++;}});
+    var teamAvgPseM=teamNPseM>0?teamSumPseM/teamNPseM:null;
+
+    html+='<div style="background:linear-gradient(135deg,#3B4D88,#0C447C);color:#fff;border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+      '<div style="font-size:13px;font-weight:800">🏆 EQUIPO</div>'+
+      '<div style="display:flex;gap:14px;flex:1;justify-content:flex-end;flex-wrap:wrap">'+
+        '<div style="text-align:right"><div style="font-size:16px;font-weight:800">'+Math.round(teamTotalUAm)+'</div><div style="font-size:9px;opacity:0.85">UA prom.</div></div>'+
+        '<div style="text-align:right"><div style="font-size:16px;font-weight:800">'+(teamAvgPseM!=null?teamAvgPseM.toFixed(1):'—')+'</div><div style="font-size:9px;opacity:0.85">PSE eq.</div></div>'+
+      '</div>'+
+    '</div>';
+
+    // Cards de cada jugador
+    data.players.forEach(function(p){
+      html+='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:10px 12px">';
+      // Header: nombre + total UA + PSE prom
+      html+='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px">'+
+        '<div style="min-width:0;flex:1">'+
+          '<div style="font-size:13px;font-weight:800;color:#0D1B2A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_extraEsc(p.name)+'</div>'+
+          '<div style="font-size:9.5px;color:#888;margin-top:1px">'+p.sessionsInGPS+'/'+p.sessionsExpected+' sesiones · '+p.sessionsWithPSE+' con PSE</div>'+
+        '</div>'+
+        '<div style="display:flex;gap:8px;flex-shrink:0">'+
+          '<div style="text-align:center"><div style="font-size:14px;font-weight:800;color:#0C447C;line-height:1">'+(p.totalUA>0?Math.round(p.totalUA):'—')+'</div><div style="font-size:8.5px;color:#7F77DD;font-weight:600">UA</div></div>'+
+          '<div style="text-align:center"><div style="font-size:14px;font-weight:800;color:'+(p.avgPSE!=null?_cargaPseColor(p.avgPSE).tx:'#ccc')+';line-height:1">'+(p.avgPSE!=null?p.avgPSE.toFixed(1):'—')+'</div><div style="font-size:8.5px;color:#888;font-weight:600">PSE</div></div>'+
+        '</div>'+
+      '</div>';
+      // Chips de días: una grilla de 2 columnas con día y PSE
+      html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(125px,1fr));gap:5px">';
+      p.sessions.forEach(function(s){
+        var st = s.status;
+        var bg, bord, txCol, contentMain, contentSub;
+        if(st==='ok'){
+          var c = _cargaPseColor(s.pseUsed);
+          bg=c.bg; bord=c.bg; txCol=c.tx;
+          contentMain = s.pseUsed.toFixed(1);
+          contentSub = s.ua!=null ? Math.round(s.ua)+' UA' : '';
+        } else if(st==='missing-pse'){
+          bg='#fff8e1'; bord='#f0d090'; txCol='#7a4a00';
+          contentMain = 'sin PSE';
+          contentSub = '⚠';
+        } else if(st==='missing-gps'){
+          bg='#f0eeff'; bord='#7F77DD55'; txCol='#3B4D88';
+          contentMain = s.pse!=null?s.pse.toFixed(1):'—';
+          contentSub = 'sin GPS';
+        } else {
+          bg='#fafafa'; bord='#eee'; txCol='#aaa';
+          contentMain = '—';
+          contentSub = 'ausente';
+        }
+        html+='<div onclick="cargaPseStartEdit(\''+_extraEsc(p.name).replace(/'/g,"\\'")+'\',\''+s.day+'\',\''+_extraEsc(week).replace(/'/g,"\\'")+'\')" style="background:'+bg+';border:1px solid '+bord+';border-radius:7px;padding:5px 7px;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:4px;cursor:pointer">'+
+          '<span style="font-size:10px;font-weight:700;color:#555">'+s.day+'</span>'+
+          '<span style="font-weight:800;color:'+txCol+'">'+contentMain+'</span>'+
+          (contentSub?'<span style="font-size:8.5px;color:'+txCol+';opacity:0.7">'+contentSub+'</span>':'')+
+        '</div>';
+      });
+      html+='</div>';
+      html+='</div>';
+    });
+
+    html+='</div>';
+  } else {
+    // ═══ VISTA DESKTOP: Tabla matricial completa ═══
   // Tabla principal
   var sessionHeaders=data.sessionDays.map(function(sd){
     var lbl=sd.day+(sd.date?' <span style="color:#aaa;font-weight:400;font-size:9px">('+_pseFormatDate(sd.date)+')</span>':'');
@@ -22865,6 +23046,7 @@ function cargaRenderPSE(){
   '</tr>';
 
   html+='</tbody></table></div>';
+  }
 
   // ── Lista de pendientes y advertencias ──
   var pendings=[];
