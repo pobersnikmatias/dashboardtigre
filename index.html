@@ -3261,7 +3261,7 @@ function getRefMatches(){
   return[];
 }
 
-function applyMatchRef(){
+function applyMatchRef(skipSave){
   const ms=getRefMatches();
   if(!ms.length){document.getElementById('ref-match-info').textContent='';return;}
   const avg=k=>ms.reduce((a,m)=>a+(m[k]||0),0)/ms.length;
@@ -3292,7 +3292,19 @@ function applyMatchRef(){
   const mode=document.getElementById('ref-match-mode').value;
   const lbl={last1:'último partido',last3:'prom. últimos 3',last5:'prom. últimos 5',lastN:`prom. últimos ${document.getElementById('ref-match-n').value}`,all:'prom. todos los partidos'}[mode]||'';
   document.getElementById('ref-match-info').textContent=`✓ Referencia actualizada (${lbl}, ${ms.length} partido${ms.length>1?'s':''})`;
-  refresh(); // recalcular % de entrenamientos
+  // recalcular % de entrenamientos. Si skipSave es true, no llamamos saveData (optimización
+  // para no guardar durante carga inicial — los datos ya están en Supabase).
+  if(skipSave){
+    recomputeAll();
+    const rows=gf(),s=stats(rows);
+    buildCards(s,'cards1');
+    rc1=buildRadar('r1',s,af==='all'?'Todos':af,BC[af]||'#3B4D88',rc1);
+    drawTable(rows);
+    if(tab===2)updateSel();
+    // NO saveData() acá: ya tenemos los datos en Supabase y guardarlos otra vez es lento
+  } else {
+    refresh();
+  }
 }
 window.applyMatchRef=applyMatchRef;
 
@@ -18679,6 +18691,22 @@ fixLoad();
 // pero igual re-corre si PLAYER_PROFILES cambia (porque se podrían agregar perfiles nuevos).
 function fixMigratePlanillasToFullName(){
   if(typeof PLAYER_PROFILES === 'undefined') return 0;
+  // OPTIMIZACIÓN: cachear un "hash" de la última migración exitosa.
+  // Si los datos (PLAYER_PROFILES + FIX_PLANILLAS) no cambiaron desde la última vez,
+  // salimos sin hacer nada. Esto evita ~50-200ms en cada carga de página.
+  try{
+    var profSize = Object.keys(PLAYER_PROFILES||{}).length;
+    var planSize = Object.keys(FIX_PLANILLAS||{}).length;
+    // Hash simple basado en cantidad + suma de longitudes (suficiente para detectar cambios)
+    var hashNow = profSize + ':' + planSize + ':' + JSON.stringify(FIX_PLANILLAS||{}).length;
+    var hashCached = localStorage.getItem('_fixMigrateHash');
+    if(hashCached === hashNow){
+      // Ya estaba migrado en esta exacta configuración → skip
+      return 0;
+    }
+    // Después de procesar, guardamos el hash. Lo seteamos al final.
+    window._fixMigrateNewHash = hashNow;
+  }catch(e){}
   var profileNames = []; // [{full, partsLower:[...]}, ...]
   Object.keys(PLAYER_PROFILES).forEach(function(k){
     var p = PLAYER_PROFILES[k];
@@ -18778,6 +18806,13 @@ function fixMigratePlanillasToFullName(){
     fixSave();
     console.log('[Fixture] Migración de nombres: '+changes+' campos actualizados a nombre completo.');
   }
+  // Guardar hash de "ya migrado para esta configuración" para skip en próxima carga
+  try{
+    if(window._fixMigrateNewHash){
+      localStorage.setItem('_fixMigrateHash', window._fixMigrateNewHash);
+      window._fixMigrateNewHash = null;
+    }
+  }catch(e){}
   return changes;
 }
 window.fixMigratePlanillasToFullName = fixMigratePlanillasToFullName;
@@ -26068,15 +26103,20 @@ function sbOnLoginSuccess(){
   // Revelar el body ahora que el loading overlay está cubriendo todo
   document.body.classList.add('sb-show');
   console.log('[Supabase] Sesión activa:', sbCurrentUser.email);
+  // Timer para medir cuánto tarda toda la carga inicial
+  var _loadT0 = performance.now();
   // Inyectar UI de "logueado como" en el header
   sbInjectUserBadge();
   // Cargar datos de Supabase y mergear con localStorage
   sbLoadInitialData().then(function(){
     sbReady = true;
-    console.log('[Supabase] Carga inicial completa.');
+    var sbT = Math.round(performance.now() - _loadT0);
+    console.log('[Supabase] Carga inicial completa. Datos en '+sbT+'ms');
     sbLoadingSet(95, 'Renderizando vistas…', '');
-    // Re-render: tras cargar microciclos, hay que rebuildear varios selectores
-    if(typeof refresh === 'function') try{ refresh(); }catch(e){}
+    var _renderT0 = performance.now();
+    // Re-render: rebuildear selectores y otras vistas que dependen de datos cargados.
+    // OPTIMIZACIÓN: NO llamamos refresh() acá porque applyMatchRef (más abajo) ya lo
+    // hace internamente. Llamar dos veces es duplicación y duplica el tiempo de render.
     if(typeof rebuildCatBtns === 'function') try{ rebuildCatBtns(); }catch(e){}
     if(typeof mcRebuildWeekSel === 'function') try{ mcRebuildWeekSel(); }catch(e){}
     if(typeof cargaRebuildWeekSel === 'function') try{ cargaRebuildWeekSel(); }catch(e){}
@@ -26089,13 +26129,17 @@ function sbOnLoginSuccess(){
     if(typeof gymRefreshSessions === 'function') try{ gymRefreshSessions(); }catch(e){}
     // Tanda 2b refrescos
     if(typeof refresh === 'function') try{ refresh(); }catch(e){}
-    if(typeof drawTable === 'function') try{ drawTable(); }catch(e){}
     if(typeof matchesRender === 'function') try{ matchesRender(); }catch(e){}
     // Aplicar referencia de partido automáticamente para que REF use los partidos reales
     // (de lo contrario el radar comparativo en Biblioteca de ejercicios usa defaults
     // y los ejercicios aparecen siempre "en el centro" sin distinguirse del partido).
+    // PASAMOS true para evitar saveData() que ralentiza la carga (los datos ya están en Supabase).
+    // applyMatchRef internamente llama drawTable, así que NO necesitamos llamarlo antes.
     if(typeof applyMatchRef === 'function' && typeof MATCHES !== 'undefined' && MATCHES.length){
-      try{ applyMatchRef(); }catch(e){ console.warn('applyMatchRef on load:', e); }
+      try{ applyMatchRef(true); }catch(e){ console.warn('applyMatchRef on load:', e); }
+    } else if(typeof drawTable === 'function'){
+      // Si no hay matches, igual hay que dibujar la tabla
+      try{ drawTable(); }catch(e){}
     }
     // Migrar nombres en planillas viejas a nombre completo (PLAYER_PROFILES ya está cargado)
     if(typeof fixMigratePlanillasToFullName === 'function') try{ fixMigratePlanillasToFullName(); }catch(e){}
@@ -26104,6 +26148,9 @@ function sbOnLoginSuccess(){
     if(typeof fixSubTab === 'function') try{ fixSubTab('fixture'); }catch(e){}
     // Si el usuario está en la subpestaña Jugadores, refrescar estadísticas
     if(typeof fixRenderJugadores === 'function') try{ fixRenderJugadores(); }catch(e){}
+    var renderMs = Math.round(performance.now() - _renderT0);
+    var totalMs = Math.round(performance.now() - _loadT0);
+    console.log('[Dashboard] Render en '+renderMs+'ms · Total: '+totalMs+'ms');
     sbLoadingSet(100, '¡Listo!', '');
     setTimeout(sbLoadingHide, 400);
   }).catch(function(err){
