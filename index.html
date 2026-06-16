@@ -205,6 +205,17 @@ body.sb-show{visibility:visible}
 
   /* Header sticky un poco más alto en el flujo */
   #mobile-header{margin-top:-10px}
+
+  /* Planificación: grid de días pasa a 1 columna (un día a la vez en móvil) */
+  .plan-days-grid{
+    grid-template-columns:1fr!important;
+  }
+  /* La barra navegadora de días: ocultar scrollbar */
+  #plan-days-mobile-nav::-webkit-scrollbar{display:none}
+  /* El día visible ocupa todo el ancho y puede ser más alto/cómodo */
+  .plan-day-card{
+    padding:12px 14px!important;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
@@ -5934,7 +5945,8 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       </div>
 
       <!-- Day columns -->
-      <div id="plan-days-grid" style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:14px;overflow:hidden"></div>
+      <div id="plan-days-mobile-nav" class="mobile-only" style="gap:6px;margin-bottom:10px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch;scrollbar-width:none"></div>
+      <div id="plan-days-grid" class="plan-days-grid" style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:14px;overflow:hidden"></div>
 
       <!-- Weekly summary -->
       <div id="plan-week-summary" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 14px"></div>
@@ -11762,7 +11774,7 @@ function planRenderDays(){
     }
 
     var barW=Math.min(pctMts,100);
-    return '<div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;min-width:0;overflow:hidden">'+
+    return '<div class="plan-day-card" data-day-idx="'+di+'" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;min-width:0;overflow:hidden">'+
       '<div style="display:flex;align-items:center;gap:5px">'+
         '<input type="text" value="'+day.mdLabel+'" '+
           'style="width:54px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;font-size:10px;font-weight:700;color:#3B4D88;text-align:center;background:#f0f5ff" '+
@@ -11789,13 +11801,59 @@ function planRenderDays(){
         'onmouseout="this.style.borderColor=\'#ccc\';this.style.color=\'#888\'">+ Agregar ejercicio</button>'+
     '</div>';
   }).join('');
+
+  // ─── Barra selectora de días para móvil ───
+  // En móvil mostramos un día a la vez (cada uno ocupa todo el ancho). Esta barra
+  // permite saltar entre días. En desktop queda oculta (CSS) y se ven los 6 en grilla.
+  var navBar = document.getElementById('plan-days-mobile-nav');
+  if(navBar){
+    if(typeof _planMobileDay === 'undefined' || _planMobileDay == null) _planMobileDay = 0;
+    if(_planMobileDay >= _planEditData.days.length) _planMobileDay = 0;
+    navBar.innerHTML = _planEditData.days.map(function(day, di){
+      var active = di === _planMobileDay;
+      var sum = planSumDay(day);
+      var hasContent = sum.totalMins > 0;
+      return '<button onclick="planMobileSetDay('+di+')" class="plan-day-nav-btn'+(active?' active':'')+'" '+
+        'style="flex-shrink:0;padding:7px 12px;border:1px solid '+(active?'#0C447C':'#ddd')+';border-radius:7px;'+
+        'background:'+(active?'#0C447C':(hasContent?'#eef4ff':'#fff'))+';color:'+(active?'#fff':(hasContent?'#0C447C':'#999'))+';'+
+        'font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">'+
+        (day.mdLabel||day.label)+
+        (hasContent?' <span style="font-size:9px;opacity:0.8">·'+sum.totalMins+"'</span>":'')+
+      '</button>';
+    }).join('');
+  }
+  // Aplicar el filtro de visibilidad (móvil)
+  planApplyMobileDayFilter();
 }
 
-function planSetMdLabel(di, val){
-  if(!_planEditData)return;
-  _planEditData.days[di].mdLabel=val;
+// Estado del día visible en móvil
+var _planMobileDay = 0;
+function planMobileSetDay(di){
+  _planMobileDay = di;
+  planRenderDays();
 }
-window.planSetMdLabel=planSetMdLabel;
+window.planMobileSetDay = planMobileSetDay;
+
+// Mostrar solo el día seleccionado en móvil (oculta los demás cards).
+// En desktop esta función no hace nada visible porque el CSS muestra todos.
+function planApplyMobileDayFilter(){
+  var isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+  var cards = document.querySelectorAll('#plan-days-grid .plan-day-card');
+  cards.forEach(function(card){
+    var idx = parseInt(card.getAttribute('data-day-idx'), 10);
+    if(isMobile){
+      card.style.display = (idx === _planMobileDay) ? 'flex' : 'none';
+    } else {
+      card.style.display = 'flex';
+    }
+  });
+}
+window.planApplyMobileDayFilter = planApplyMobileDayFilter;
+
+// Reaplica el filtro cuando cambia el tamaño de pantalla (rotar móvil, etc.)
+window.addEventListener('resize', function(){
+  if(document.getElementById('plan-days-grid')) planApplyMobileDayFilter();
+});
 
 function planSetExMins(di, bi, ei, val){
   if(!_planEditData)return;
