@@ -26097,6 +26097,7 @@ function sbDoLogout(){
 window.sbDoLogout = sbDoLogout;
 
 function sbOnLoginSuccess(){
+  console.log('%c[VERSIÓN PERF v3 — con timers de render]','background:#1D9E75;color:#fff;padding:2px 8px;border-radius:3px;font-weight:bold');
   sbHideLogin();
   sbLoadingShow();
   sbLoadingSet(10, 'Conectando con el servidor…', '');
