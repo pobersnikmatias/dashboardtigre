@@ -26114,40 +26114,52 @@ function sbOnLoginSuccess(){
     console.log('[Supabase] Carga inicial completa. Datos en '+sbT+'ms');
     sbLoadingSet(95, 'Renderizando vistas…', '');
     var _renderT0 = performance.now();
+    function _tlog(name, t0){ console.log('[Render] '+name+': '+Math.round(performance.now()-t0)+'ms'); return performance.now(); }
+    var _t = performance.now();
     // Re-render: rebuildear selectores y otras vistas que dependen de datos cargados.
     // OPTIMIZACIÓN: NO llamamos refresh() acá porque applyMatchRef (más abajo) ya lo
     // hace internamente. Llamar dos veces es duplicación y duplica el tiempo de render.
     if(typeof rebuildCatBtns === 'function') try{ rebuildCatBtns(); }catch(e){}
+    _t = _tlog('rebuildCatBtns', _t);
+    if(typeof rebuildCatSelects === 'function') try{ rebuildCatSelects(); }catch(e){}
+    _t = _tlog('rebuildCatSelects', _t);
     if(typeof mcRebuildWeekSel === 'function') try{ mcRebuildWeekSel(); }catch(e){}
-    if(typeof cargaRebuildWeekSel === 'function') try{ cargaRebuildWeekSel(); }catch(e){}
-    if(typeof mcRenderWeek === 'function') try{ mcRenderWeek(); }catch(e){}
-    if(typeof cargaRender === 'function') try{ cargaRender(); }catch(e){}
-    if(typeof cargaUpdateDataIndicator === 'function') try{ cargaUpdateDataIndicator(); }catch(e){}
-    if(typeof planRender === 'function') try{ planRender(); }catch(e){}
-    if(typeof planRebuildWeekSel === 'function') try{ planRebuildWeekSel(); }catch(e){}
-    if(typeof gymRender === 'function') try{ gymRender(); }catch(e){}
-    if(typeof gymRefreshSessions === 'function') try{ gymRefreshSessions(); }catch(e){}
-    // Tanda 2b refrescos
-    if(typeof refresh === 'function') try{ refresh(); }catch(e){}
+    _t = _tlog('mcRebuildWeekSel', _t);
+    if(typeof mcRender === 'function') try{ mcRender(); }catch(e){}
+    _t = _tlog('mcRender', _t);
+    if(typeof mcUpdateMatchSel === 'function') try{ mcUpdateMatchSel(); }catch(e){}
+    _t = _tlog('mcUpdateMatchSel', _t);
     if(typeof matchesRender === 'function') try{ matchesRender(); }catch(e){}
-    // Aplicar referencia de partido automáticamente para que REF use los partidos reales
-    // (de lo contrario el radar comparativo en Biblioteca de ejercicios usa defaults
-    // y los ejercicios aparecen siempre "en el centro" sin distinguirse del partido).
-    // PASAMOS true para evitar saveData() que ralentiza la carga (los datos ya están en Supabase).
-    // applyMatchRef internamente llama drawTable, así que NO necesitamos llamarlo antes.
+    _t = _tlog('matchesRender', _t);
     if(typeof applyMatchRef === 'function' && typeof MATCHES !== 'undefined' && MATCHES.length){
       try{ applyMatchRef(true); }catch(e){ console.warn('applyMatchRef on load:', e); }
     } else if(typeof drawTable === 'function'){
-      // Si no hay matches, igual hay que dibujar la tabla
       try{ drawTable(); }catch(e){}
     }
-    // Migrar nombres en planillas viejas a nombre completo (PLAYER_PROFILES ya está cargado)
+    _t = _tlog('applyMatchRef + drawTable', _t);
     if(typeof fixMigratePlanillasToFullName === 'function') try{ fixMigratePlanillasToFullName(); }catch(e){}
-    // Re-renderizar el fixture (vista por defecto) — si no, queda vacío hasta que el usuario navega
+    _t = _tlog('fixMigratePlanillasToFullName', _t);
     if(typeof fixtureRender === 'function') try{ fixtureRender(); }catch(e){}
+    _t = _tlog('fixtureRender', _t);
     if(typeof fixSubTab === 'function') try{ fixSubTab('fixture'); }catch(e){}
-    // Si el usuario está en la subpestaña Jugadores, refrescar estadísticas
+    _t = _tlog('fixSubTab', _t);
     if(typeof fixRenderJugadores === 'function') try{ fixRenderJugadores(); }catch(e){}
+    _t = _tlog('fixRenderJugadores', _t);
+    // Tanda 2b refrescos de otras vistas (sin duplicar los anteriores)
+    if(typeof cargaRebuildWeekSel === 'function') try{ cargaRebuildWeekSel(); }catch(e){}
+    _t = _tlog('cargaRebuildWeekSel', _t);
+    if(typeof mcRenderWeek === 'function') try{ mcRenderWeek(); }catch(e){}
+    _t = _tlog('mcRenderWeek', _t);
+    if(typeof cargaRender === 'function') try{ cargaRender(); }catch(e){}
+    _t = _tlog('cargaRender', _t);
+    if(typeof cargaUpdateDataIndicator === 'function') try{ cargaUpdateDataIndicator(); }catch(e){}
+    if(typeof planRender === 'function') try{ planRender(); }catch(e){}
+    _t = _tlog('planRender', _t);
+    if(typeof planRebuildWeekSel === 'function') try{ planRebuildWeekSel(); }catch(e){}
+    if(typeof gymRender === 'function') try{ gymRender(); }catch(e){}
+    _t = _tlog('gymRender', _t);
+    if(typeof gymRefreshSessions === 'function') try{ gymRefreshSessions(); }catch(e){}
+    _t = _tlog('gymRefreshSessions', _t);
     var renderMs = Math.round(performance.now() - _renderT0);
     var totalMs = Math.round(performance.now() - _loadT0);
     console.log('[Dashboard] Render en '+renderMs+'ms · Total: '+totalMs+'ms');
