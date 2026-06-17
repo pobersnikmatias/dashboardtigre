@@ -345,6 +345,36 @@ body.sb-show{visibility:visible}
     white-space:normal!important;
     min-width:90px;
   }
+
+  /* ════════════════════════════════════════════════════════════ */
+  /* MODALES EN MÓVIL — Etapa 6                                    */
+  /* Los modales con id conocido: su caja interna pasa a ocupar    */
+  /* casi toda la pantalla, anclada abajo (bottom-sheet).          */
+  /* ════════════════════════════════════════════════════════════ */
+  #exi-modal, #pei-modal, #gym-edit-modal, #injury-modal,
+  #eval-import-modal, #plan-csv-modal, #plan-new-ex-modal,
+  #plan-print-modal{
+    align-items:flex-end!important;
+    padding:0!important;
+  }
+  /* La caja interna (primer div hijo) ocupa todo el ancho y casi todo el alto */
+  #exi-modal > div, #pei-modal > div, #gym-edit-modal > div,
+  #injury-modal > div, #eval-import-modal > div, #plan-csv-modal > div,
+  #plan-new-ex-modal > div, #plan-print-modal > div{
+    width:100vw!important;
+    max-width:none!important;
+    max-height:94vh!important;
+    border-radius:16px 16px 0 0!important;
+    margin:0!important;
+  }
+  /* Inputs y selects dentro de modales: más grandes para tocar */
+  #exi-modal input, #exi-modal select, #exi-modal textarea,
+  #pei-modal input, #pei-modal select, #pei-modal textarea,
+  #gym-edit-modal input, #gym-edit-modal select, #gym-edit-modal textarea,
+  #injury-modal input, #injury-modal select, #injury-modal textarea,
+  #plan-new-ex-modal input, #plan-new-ex-modal select, #plan-new-ex-modal textarea{
+    font-size:14px!important;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
