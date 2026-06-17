@@ -2188,6 +2188,7 @@ function fDiagImgClear(){
 window.fDiagImgClear=fDiagImgClear;
 
 // Preview en vivo del cuadrante (a partir de jugadores/largo/ancho)
+// Usa la MISMA clasificación Casamichana (2015) que los demás ejercicios.
 function fUpdateQuadPreview(){
   var box=document.getElementById('f-quad-preview');
   if(!box)return;
@@ -2196,39 +2197,58 @@ function fUpdateQuadPreview(){
   var A=parseFloat((document.getElementById('f-A')||{}).value);
   if(!jug||!L||!A){box.style.display='none';return;}
   var area=L*A;
-  var eii=area/jug;  // espacio individual de interacción (m²/jugador)
+  var eii=area/jug;  // m²/jugador
 
-  // Clasificación del EII (mismos umbrales que la tabla de Biblioteca):
-  // <70 reducido (rojo) · 70-110 óptimo (verde) · 110-300 amplio (azul) · >300 muy amplio (violeta)
-  var cat, col;
-  if(eii < 70){ cat='Espacio reducido'; col='#E24B4A'; }
-  else if(eii <= 110){ cat='Espacio óptimo'; col='#1D9E75'; }
-  else if(eii <= 300){ cat='Espacio amplio'; col='#3B4D88'; }
-  else { cat='Espacio muy amplio'; col='#7F77DD'; }
+  // ── Clasificación Casamichana (2015): misma matriz que drawCasamichaela ──
+  // Columnas (jugadores): 1-2 / 3-4 / 5-7 / 8+   Filas (EII): <50 / 50-100 / 100-200 / >200
+  var matrix=[
+    ['Fuerza','Fuerza','Recuperación','Recuperación'],
+    ['Fuerza','Fuerza','Recuperación','Recuperación'],
+    ['Resistencia','Resistencia','Velocidad','Velocidad'],
+    ['Resistencia','Resistencia','Velocidad','Velocidad']
+  ];
+  var bclrs={'Fuerza':'#E24B4A','Recuperación':'#1D9E75','Resistencia':'#EF9F27','Velocidad':'#3B4D88'};
+  var descs={'Fuerza':'ACC, DCC y cambios de dirección','Recuperación':'Activación / recuperación / calentamiento','Resistencia':'Resistencia y FC elevada sostenida','Velocidad':'Alta intensidad y sprint'};
+  var col=jug<=2?0:jug<=4?1:jug<=7?2:3;
+  var rowIdx=eii<50?0:eii<100?1:eii<200?2:3;
+  var cat=matrix[rowIdx][col];
+  var clr=bclrs[cat];
+
+  // ── Mini-cancha con el rectángulo del ejercicio proporcional ──
+  // Cancha de referencia: 100m largo × 60m ancho (como FF B1/B2). El rectángulo
+  // del ejercicio se dibuja a escala REAL respecto a esa cancha.
+  var REF_L=100, REF_A=60;
+  var fieldW=90, fieldH=fieldW*(REF_A/REF_L); // svg: 90 × 54 px (proporción 100:60)
+  // Escala: cuántos px por metro
+  var pxPerM = fieldW/REF_L;
+  // El rectángulo del ejercicio. Si L o A superan la cancha de ref, se clampa visualmente.
+  var exW = Math.min(L, REF_L) * pxPerM;
+  var exH = Math.min(A, REF_A) * pxPerM;
+  var exX = (fieldW - exW)/2;
+  var exY = (fieldH - exH)/2;
+  var overLong = L>REF_L, overWide = A>REF_A;
 
   box.style.display='block';
   box.innerHTML=
-    '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-      // Mini-cancha visual con el área dibujada proporcional
-      '<svg width="64" height="44" viewBox="0 0 64 44" style="flex-shrink:0;border-radius:4px;background:#3d8c2f">'+
-        '<rect x="2" y="2" width="60" height="40" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="1"/>'+
-        '<line x1="32" y1="2" x2="32" y2="42" stroke="rgba(255,255,255,0.6)" stroke-width="0.7"/>'+
-        '<circle cx="32" cy="22" r="6" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="0.7"/>'+
-        // Rectángulo del ejercicio (proporcional al área, centrado)
-        (function(){
-          var ratio=Math.min(1, Math.sqrt(area)/120);  // escala visual
-          var w=Math.max(8, 56*ratio), h=Math.max(6, 36*ratio*(A/L||1));
-          if(h>36)h=36; if(w>56)w=56;
-          return '<rect x="'+(32-w/2)+'" y="'+(22-h/2)+'" width="'+w+'" height="'+h+'" fill="'+col+'33" stroke="'+col+'" stroke-width="1.5" stroke-dasharray="3 2" rx="2"/>';
-        })()+
+    '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
+      // Mini-cancha 100×60 con el ejercicio dibujado a escala
+      '<svg width="'+(fieldW+4)+'" height="'+(fieldH+4)+'" viewBox="0 0 '+(fieldW+4)+' '+(fieldH+4)+'" style="flex-shrink:0">'+
+        '<rect x="2" y="2" width="'+fieldW+'" height="'+fieldH+'" fill="#3d8c2f" stroke="rgba(255,255,255,0.7)" stroke-width="1" rx="2"/>'+
+        '<line x1="'+(2+fieldW/2)+'" y1="2" x2="'+(2+fieldW/2)+'" y2="'+(2+fieldH)+'" stroke="rgba(255,255,255,0.5)" stroke-width="0.6"/>'+
+        '<circle cx="'+(2+fieldW/2)+'" cy="'+(2+fieldH/2)+'" r="'+(fieldH*0.16)+'" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.6"/>'+
+        // Rectángulo del ejercicio (proporcional real)
+        '<rect x="'+(2+exX)+'" y="'+(2+exY)+'" width="'+exW+'" height="'+exH+'" fill="'+clr+'44" stroke="'+clr+'" stroke-width="1.5" stroke-dasharray="3 2" rx="1"/>'+
+        '<text x="'+(2+fieldW/2)+'" y="'+(2+fieldH/2+3)+'" text-anchor="middle" font-size="8" font-weight="700" fill="#fff" style="font-family:system-ui">'+Math.round(L)+'×'+Math.round(A)+'</text>'+
       '</svg>'+
       '<div style="flex:1;min-width:0">'+
-        '<div style="font-weight:800;color:'+col+';font-size:13px;margin-bottom:2px">'+cat+'</div>'+
+        '<div style="font-weight:800;color:'+clr+';font-size:14px;margin-bottom:2px">'+cat.toUpperCase()+'</div>'+
+        '<div style="font-size:10px;color:#777;margin-bottom:4px">'+descs[cat]+'</div>'+
         '<div style="font-size:11px;color:#555">'+
-          '📐 <strong>'+Math.round(L)+'×'+Math.round(A)+'m</strong> = '+area.toFixed(0)+' m² · '+
+          '📐 <strong>'+area.toFixed(0)+' m²</strong> · '+
           '<strong>'+jug+'</strong> jug · '+
-          'EII <strong style="color:'+col+'">'+eii.toFixed(1)+' m²/jug</strong>'+
+          'EII <strong style="color:'+clr+'">'+eii.toFixed(0)+' m²/jug</strong>'+
         '</div>'+
+        (overLong||overWide?'<div style="font-size:9px;color:#EF9F27;margin-top:2px">⚠ El espacio supera la cancha de referencia (100×60)</div>':'')+
       '</div>'+
     '</div>';
 }
@@ -7593,11 +7613,11 @@ window._diagUpdateHook=function(rows){
     var row=rows[0];var editId=row.id;
     if(row.img){
       // Imagen subida: mostrarla limitada en tamaño
-      dd.innerHTML='<img src="'+row.img+'" style="display:block;max-width:100%;max-height:260px;width:auto;height:auto;margin:0 auto;border-radius:5px">';
+      dd.innerHTML='<img src="'+row.img+'" style="display:block;width:100%;max-width:340px;height:auto;margin:0 auto;border-radius:5px">';
     } else if(row.diag){
-      // Canvas a tamaño contenido: limitar altura para que no se agrande de más.
-      // El canvas es 320×480 (vertical); con max-height y width auto mantiene proporción.
-      dd.innerHTML='<canvas id="diag-canvas" style="display:block;border-radius:5px;max-width:100%;max-height:260px;width:auto;height:auto;margin:0 auto"></canvas>';
+      // Canvas 480×300 (horizontal). Limitar por ANCHO y dejar alto automático
+      // mantiene la proporción correcta (el CSS escala el contenido del canvas).
+      dd.innerHTML='<canvas id="diag-canvas" style="display:block;border-radius:5px;width:100%;max-width:340px;height:auto;margin:0 auto"></canvas>';
       var cv=document.getElementById('diag-canvas');if(cv)drwRenderTo(cv,row.diag);
     } else {
       dd.innerHTML='<div style="background:#3d8c2f;border-radius:5px;min-height:120px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.55);font-size:10px">Sin diagrama</div>';
