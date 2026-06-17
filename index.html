@@ -3,8 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Dashboard · Departamento de Alto Rendimiento — Club Atlético Tigre</title>
-<script>window._BOOT_T0 = performance.now(); console.log('[BOOT] HTML head parseado: '+Math.round(performance.now())+'ms desde navegación');</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;font-size:12px;background:#f0f2f5;color:#1a1a1a;padding:12px}
@@ -26208,7 +26210,6 @@ var sbCurrentUser = null;
 var sbReady = false; // true cuando hay sesión activa y la primera carga terminó
 
 function sbInit(){
-  console.log('[BOOT] sbInit arranca: '+Math.round(performance.now()-window._BOOT_T0)+'ms desde head');
   if(typeof window.supabase === 'undefined' || !window.supabase.createClient){
     console.error('[Supabase] SDK no cargado. ¿Hay conexión a internet?');
     var splash = document.getElementById('boot-splash');
@@ -26224,10 +26225,8 @@ function sbInit(){
       detectSessionInUrl: false
     }
   });
-  var _getSessionT0 = performance.now();
   // Chequear si hay sesión guardada
   sbClient.auth.getSession().then(function(res){
-    console.log('[BOOT] getSession respondió en '+Math.round(performance.now()-_getSessionT0)+'ms');
     if(res.data && res.data.session){
       sbCurrentUser = res.data.session.user;
       sbOnLoginSuccess();
@@ -26244,7 +26243,6 @@ function sbInit(){
 // LOGIN / LOGOUT
 // ═══════════════════════════════════════════════════════════════
 function sbShowLogin(){
-  console.log('[BOOT] Login visible: '+Math.round(performance.now()-window._BOOT_T0)+'ms desde head');
   // Ocultar el splash de boot ahora que vamos a mostrar el login
   var splash = document.getElementById('boot-splash');
   if(splash) splash.style.display = 'none';
@@ -26311,7 +26309,6 @@ function sbDoLogout(){
 window.sbDoLogout = sbDoLogout;
 
 function sbOnLoginSuccess(){
-  console.log('%c[VERSIÓN PERF v3 — con timers de render]','background:#1D9E75;color:#fff;padding:2px 8px;border-radius:3px;font-weight:bold');
   // Ocultar el splash de boot (el loading overlay de Supabase lo reemplaza)
   var splash = document.getElementById('boot-splash');
   if(splash) splash.style.display = 'none';
@@ -26321,66 +26318,40 @@ function sbOnLoginSuccess(){
   // Revelar el body ahora que el loading overlay está cubriendo todo
   document.body.classList.add('sb-show');
   console.log('[Supabase] Sesión activa:', sbCurrentUser.email);
-  // Timer para medir cuánto tarda toda la carga inicial
-  var _loadT0 = performance.now();
   // Inyectar UI de "logueado como" en el header
   sbInjectUserBadge();
   // Cargar datos de Supabase y mergear con localStorage
   sbLoadInitialData().then(function(){
     sbReady = true;
-    var sbT = Math.round(performance.now() - _loadT0);
-    console.log('[Supabase] Carga inicial completa. Datos en '+sbT+'ms');
+    console.log('[Supabase] Carga inicial completa.');
     sbLoadingSet(95, 'Renderizando vistas…', '');
-    var _renderT0 = performance.now();
-    function _tlog(name, t0){ console.log('[Render] '+name+': '+Math.round(performance.now()-t0)+'ms'); return performance.now(); }
-    var _t = performance.now();
     // Re-render: rebuildear selectores y otras vistas que dependen de datos cargados.
     // OPTIMIZACIÓN: NO llamamos refresh() acá porque applyMatchRef (más abajo) ya lo
     // hace internamente. Llamar dos veces es duplicación y duplica el tiempo de render.
     if(typeof rebuildCatBtns === 'function') try{ rebuildCatBtns(); }catch(e){}
-    _t = _tlog('rebuildCatBtns', _t);
     if(typeof rebuildCatSelects === 'function') try{ rebuildCatSelects(); }catch(e){}
-    _t = _tlog('rebuildCatSelects', _t);
     if(typeof mcRebuildWeekSel === 'function') try{ mcRebuildWeekSel(); }catch(e){}
-    _t = _tlog('mcRebuildWeekSel', _t);
     if(typeof mcRender === 'function') try{ mcRender(); }catch(e){}
-    _t = _tlog('mcRender', _t);
     if(typeof mcUpdateMatchSel === 'function') try{ mcUpdateMatchSel(); }catch(e){}
-    _t = _tlog('mcUpdateMatchSel', _t);
     if(typeof matchesRender === 'function') try{ matchesRender(); }catch(e){}
-    _t = _tlog('matchesRender', _t);
     if(typeof applyMatchRef === 'function' && typeof MATCHES !== 'undefined' && MATCHES.length){
       try{ applyMatchRef(true); }catch(e){ console.warn('applyMatchRef on load:', e); }
     } else if(typeof drawTable === 'function'){
       try{ drawTable(); }catch(e){}
     }
-    _t = _tlog('applyMatchRef + drawTable', _t);
     if(typeof fixMigratePlanillasToFullName === 'function') try{ fixMigratePlanillasToFullName(); }catch(e){}
-    _t = _tlog('fixMigratePlanillasToFullName', _t);
     if(typeof fixtureRender === 'function') try{ fixtureRender(); }catch(e){}
-    _t = _tlog('fixtureRender', _t);
     if(typeof fixSubTab === 'function') try{ fixSubTab('fixture'); }catch(e){}
-    _t = _tlog('fixSubTab', _t);
     if(typeof fixRenderJugadores === 'function') try{ fixRenderJugadores(); }catch(e){}
-    _t = _tlog('fixRenderJugadores', _t);
     // Tanda 2b refrescos de otras vistas (sin duplicar los anteriores)
     if(typeof cargaRebuildWeekSel === 'function') try{ cargaRebuildWeekSel(); }catch(e){}
-    _t = _tlog('cargaRebuildWeekSel', _t);
     if(typeof mcRenderWeek === 'function') try{ mcRenderWeek(); }catch(e){}
-    _t = _tlog('mcRenderWeek', _t);
     if(typeof cargaRender === 'function') try{ cargaRender(); }catch(e){}
-    _t = _tlog('cargaRender', _t);
     if(typeof cargaUpdateDataIndicator === 'function') try{ cargaUpdateDataIndicator(); }catch(e){}
     if(typeof planRender === 'function') try{ planRender(); }catch(e){}
-    _t = _tlog('planRender', _t);
     if(typeof planRebuildWeekSel === 'function') try{ planRebuildWeekSel(); }catch(e){}
     if(typeof gymRender === 'function') try{ gymRender(); }catch(e){}
-    _t = _tlog('gymRender', _t);
     if(typeof gymRefreshSessions === 'function') try{ gymRefreshSessions(); }catch(e){}
-    _t = _tlog('gymRefreshSessions', _t);
-    var renderMs = Math.round(performance.now() - _renderT0);
-    var totalMs = Math.round(performance.now() - _loadT0);
-    console.log('[Dashboard] Render en '+renderMs+'ms · Total: '+totalMs+'ms');
     sbLoadingSet(100, '¡Listo!', '');
     setTimeout(sbLoadingHide, 400);
   }).catch(function(err){
