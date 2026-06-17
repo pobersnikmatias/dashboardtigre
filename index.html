@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard · Departamento de Alto Rendimiento — Club Atlético Tigre</title>
+<script>window._BOOT_T0 = performance.now(); console.log('[BOOT] HTML head parseado: '+Math.round(performance.now())+'ms desde navegación');</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;font-size:12px;background:#f0f2f5;color:#1a1a1a;padding:12px}
@@ -26207,6 +26208,7 @@ var sbCurrentUser = null;
 var sbReady = false; // true cuando hay sesión activa y la primera carga terminó
 
 function sbInit(){
+  console.log('[BOOT] sbInit arranca: '+Math.round(performance.now()-window._BOOT_T0)+'ms desde head');
   if(typeof window.supabase === 'undefined' || !window.supabase.createClient){
     console.error('[Supabase] SDK no cargado. ¿Hay conexión a internet?');
     var splash = document.getElementById('boot-splash');
@@ -26222,8 +26224,10 @@ function sbInit(){
       detectSessionInUrl: false
     }
   });
+  var _getSessionT0 = performance.now();
   // Chequear si hay sesión guardada
   sbClient.auth.getSession().then(function(res){
+    console.log('[BOOT] getSession respondió en '+Math.round(performance.now()-_getSessionT0)+'ms');
     if(res.data && res.data.session){
       sbCurrentUser = res.data.session.user;
       sbOnLoginSuccess();
@@ -26240,6 +26244,7 @@ function sbInit(){
 // LOGIN / LOGOUT
 // ═══════════════════════════════════════════════════════════════
 function sbShowLogin(){
+  console.log('[BOOT] Login visible: '+Math.round(performance.now()-window._BOOT_T0)+'ms desde head');
   // Ocultar el splash de boot ahora que vamos a mostrar el login
   var splash = document.getElementById('boot-splash');
   if(splash) splash.style.display = 'none';
