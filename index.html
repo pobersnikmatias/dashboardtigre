@@ -301,6 +301,47 @@ body.sb-show{visibility:visible}
   #plan-week-summary{
     padding:10px!important;
   }
+
+  /* ─── Microciclo GPS: ocultar columnas no críticas en móvil ─── */
+  /* Orden: ☑(1) Jugador(2) Pos(3) Min(4) Dist(5) Mts/min(6) 18-21(7) 21-25(8)
+     +25(9) Spr(10) Vmax(11) Acc(12) Dec(13) AccMax(14) DccMax(15) RHIE(16) PL(17) PL/min(18)
+     Mostramos: Jugador(2), Min(4), Dist(5), Mts/min(6), Vmax(11), PL(17) */
+  .mc-data-table th:nth-child(1),    /* checkbox */
+  .mc-data-table th:nth-child(3),    /* Pos */
+  .mc-data-table th:nth-child(7),    /* 18-21 */
+  .mc-data-table th:nth-child(8),    /* 21-25 */
+  .mc-data-table th:nth-child(9),    /* +25 */
+  .mc-data-table th:nth-child(10),   /* Spr */
+  .mc-data-table th:nth-child(12),   /* Acc */
+  .mc-data-table th:nth-child(13),   /* Dec */
+  .mc-data-table th:nth-child(14),   /* AccMax */
+  .mc-data-table th:nth-child(15),   /* DccMax */
+  .mc-data-table th:nth-child(16),   /* RHIE */
+  .mc-data-table th:nth-child(18),   /* PL/min */
+  .mc-data-table td:nth-child(1),
+  .mc-data-table td:nth-child(3),
+  .mc-data-table td:nth-child(7),
+  .mc-data-table td:nth-child(8),
+  .mc-data-table td:nth-child(9),
+  .mc-data-table td:nth-child(10),
+  .mc-data-table td:nth-child(12),
+  .mc-data-table td:nth-child(13),
+  .mc-data-table td:nth-child(14),
+  .mc-data-table td:nth-child(15),
+  .mc-data-table td:nth-child(16),
+  .mc-data-table td:nth-child(18){
+    display:none!important;
+  }
+  /* La tabla ya no necesita min-width grande con menos columnas */
+  .mc-data-table{
+    min-width:0!important;
+  }
+  /* Jugador con más espacio */
+  .mc-data-table th:nth-child(2),
+  .mc-data-table td:nth-child(2){
+    white-space:normal!important;
+    min-width:90px;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
@@ -4308,7 +4349,7 @@ function mcBuildTable(players,ref,ctx){
       +'<td style="padding:3px 5px;border-bottom:0.5px solid #eee;text-align:center;color:#5B8FD9;font-size:9px" title="Player Load por minuto">'+((r.pl||0)>0&&(r.tot_dur||0)>0?(r.pl/r.tot_dur).toFixed(2):'<span style=\"color:#ccc\">—</span>')+'</td>'
       +'</tr>';
   }
-  return '<table style="font-size:10px;width:100%;border-collapse:collapse;min-width:600px"><thead><tr style="background:#f5f5f5">'
+  return '<table class="mc-data-table" style="font-size:10px;width:100%;border-collapse:collapse;min-width:600px"><thead><tr style="background:#f5f5f5">'
     +'<th style="padding:4px 5px;text-align:center;border-bottom:1px solid #ddd;width:46px" title="Incluir en promedio">☑</th>'
     +'<th style="padding:4px 5px;text-align:left;border-bottom:1px solid #ddd">Jugador</th>'
     +'<th style="padding:4px 5px;border-bottom:1px solid #ddd">Pos</th>'
