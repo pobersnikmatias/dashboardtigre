@@ -375,6 +375,51 @@ body.sb-show{visibility:visible}
   #plan-new-ex-modal input, #plan-new-ex-modal select, #plan-new-ex-modal textarea{
     font-size:14px!important;
   }
+
+  /* ─── Diseñá tus ejercicios: form cómodo en móvil ─── */
+  #form-det .fg{
+    flex-direction:column!important;
+    gap:10px!important;
+  }
+  #form-det .fg > label,
+  #form-det .fg > div{
+    width:100%!important;
+    min-width:0!important;
+  }
+  #form-det .fg input,
+  #form-det .fg select{
+    width:100%!important;
+    font-size:14px!important;
+    padding:9px 11px!important;
+  }
+  /* Las métricas GPS (dentro del details) sí pueden ir en grilla de 2 */
+  #form-det details .fg{
+    flex-direction:row!important;
+    flex-wrap:wrap!important;
+  }
+  #form-det details .fg > label{
+    width:calc(50% - 5px)!important;
+    flex:0 0 calc(50% - 5px)!important;
+  }
+  /* Botones del diagrama más grandes */
+  #f-diag-draw-panel button,
+  #f-diag-mode-draw, #f-diag-mode-img{
+    padding:7px 12px!important;
+    font-size:11px!important;
+  }
+  /* Canvas del diagrama a todo el ancho */
+  #drw-canvas{
+    width:100%!important;
+    height:auto!important;
+  }
+  #f-diag-draw-panel > div[style*="display:inline-block"]{
+    display:block!important;
+    width:100%;
+  }
+  /* Textarea descripción */
+  #f-desc{
+    font-size:14px!important;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
@@ -596,39 +641,82 @@ body.sb-show{visibility:visible}
 <details id="form-det" class="panel">
 <summary>Diseñá tus ejercicios</summary>
 <div class="panel-body">
-<div style="font-size:11px;color:#666;margin-bottom:8px">
-  Igual que el CSV: <strong>Mts/min</strong> ya es un valor por minuto. <strong>El resto (18-21, 21-25, +25, Acc, Dec, RHIE) son volúmenes totales</strong> del ejercicio — se dividen automáticamente por los minutos.
-</div>
 <div class="fg">
   <label class="fw">Nombre <span class="req">*</span><input id="f-n" type="text" placeholder="Ej: 4vs4 transición"></label>
   <label class="fm">Categoría <span class="req">*</span>
     <select id="f-cat"><option value="">— elegir —</option></select>
   </label>
-  <div class="fn" style="min-width:240px;display:flex;flex-direction:column;gap:2px">
-    <span style="font-size:10px;color:#555;font-weight:600">Minutos</span>
-    <input id="f-min" type="hidden">
-    <div id="f-tn"></div>
+  <label class="fn">Jugadores <span class="req">*</span><input id="f-jug" type="number" min="1" placeholder="22"></label>
+  <label class="fn">Largo m <span class="req">*</span><input id="f-L" type="number" min="1" placeholder="75"></label>
+  <label class="fn">Ancho m <span class="req">*</span><input id="f-A" type="number" min="1" placeholder="60"></label>
+</div>
+
+<!-- Indicador de cuadrante calculado en vivo -->
+<div id="f-quad-preview" style="display:none;margin-top:8px;padding:8px 12px;background:#f0f5ff;border:1px solid #d0dff5;border-radius:7px;font-size:11px"></div>
+
+<!-- Métricas opcionales (colapsable) -->
+<details style="margin-top:8px">
+  <summary style="font-size:11px;font-weight:700;color:#3B4D88;cursor:pointer;padding:4px 0">⚙️ Métricas GPS (opcional)</summary>
+  <div style="font-size:11px;color:#666;margin:6px 0 8px">
+    <strong>Mts/min</strong> ya es un valor por minuto. <strong>El resto (18-21, 21-25, +25, Acc, Dec, RHIE) son volúmenes totales</strong> — se dividen automáticamente por los minutos.
   </div>
-  <label class="fn">Mts/min<input id="f-mts" type="number" step="0.1" placeholder="95.0"></label>
-  <label class="fn">18-21 km/h<input id="f-hsr" type="number" step="0.1" placeholder="vol total"></label>
-  <label class="fn">21-25 km/h<input id="f-h2" type="number" step="0.1" placeholder="vol total"></label>
-  <label class="fn">+25 km/h<input id="f-h25" type="number" step="0.1" placeholder="vol total"></label>
-  <label class="fn">Acc+3<input id="f-acc" type="number" step="0.1" placeholder="vol total"></label>
-  <label class="fn">Dec+3<input id="f-dcc" type="number" step="0.1" placeholder="vol total"></label>
-  <label class="fn">RHIE<input id="f-rhie" type="number" step="0.1" placeholder="vol total"></label>
-  <label class="fn">Vmax km/h<input id="f-vmax" type="number" step="0.1" placeholder="28.5"></label>
-  <label class="fn">Sprint avg<input id="f-spr" type="number" step="0.1" placeholder="1.5"></label>
-  <label class="fn">Player Load<input id="f-pl" type="number" step="1" placeholder="180" title="Player Load total del ejercicio"></label>
-  <label class="fn">Jugadores<input id="f-jug" type="number" min="1" placeholder="22"></label>
-  <label class="fn">Largo m<input id="f-L" type="number" min="1" placeholder="75"></label>
-  <label class="fn">Ancho m<input id="f-A" type="number" min="1" placeholder="60"></label>
+  <div class="fg">
+    <div class="fn" style="min-width:180px;display:flex;flex-direction:column;gap:2px">
+      <span style="font-size:10px;color:#555;font-weight:600">Minutos</span>
+      <input id="f-min" type="hidden">
+      <div id="f-tn"></div>
+    </div>
+    <label class="fn">Mts/min<input id="f-mts" type="number" step="0.1" placeholder="95.0"></label>
+    <label class="fn">18-21 km/h<input id="f-hsr" type="number" step="0.1" placeholder="vol total"></label>
+    <label class="fn">21-25 km/h<input id="f-h2" type="number" step="0.1" placeholder="vol total"></label>
+    <label class="fn">+25 km/h<input id="f-h25" type="number" step="0.1" placeholder="vol total"></label>
+    <label class="fn">Acc+3<input id="f-acc" type="number" step="0.1" placeholder="vol total"></label>
+    <label class="fn">Dec+3<input id="f-dcc" type="number" step="0.1" placeholder="vol total"></label>
+    <label class="fn">RHIE<input id="f-rhie" type="number" step="0.1" placeholder="vol total"></label>
+    <label class="fn">Vmax km/h<input id="f-vmax" type="number" step="0.1" placeholder="28.5"></label>
+    <label class="fn">Sprint avg<input id="f-spr" type="number" step="0.1" placeholder="1.5"></label>
+    <label class="fn">Player Load<input id="f-pl" type="number" step="1" placeholder="180" title="Player Load total del ejercicio"></label>
+  </div>
+</details>
+
+<!-- Descripción del ejercicio -->
+<div style="margin-top:10px">
+  <label style="font-size:11px;font-weight:700;color:#333;display:block;margin-bottom:4px">📝 Descripción <span style="font-weight:400;color:#999">(opcional)</span></label>
+  <textarea id="f-desc" rows="3" placeholder="Explicá cómo se juega el ejercicio, reglas, objetivos…" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical"></textarea>
 </div>
 
 <!-- DIAGRAM EDITOR -->
 <div style="margin-top:10px;border-top:1px solid #eee;padding-top:10px">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
     <span style="font-size:11px;font-weight:700;color:#333">Diagrama del ejercicio</span>
     <span style="font-size:10px;color:#999">(opcional)</span>
+  </div>
+  <!-- Toggle: Dibujar | Subir imagen -->
+  <div style="display:flex;gap:6px;margin-bottom:10px">
+    <button id="f-diag-mode-draw" onclick="fDiagSetMode('draw')" class="btn bb" style="padding:6px 14px;font-size:11px">✏️ Dibujar</button>
+    <button id="f-diag-mode-img" onclick="fDiagSetMode('img')" class="btn bc" style="padding:6px 14px;font-size:11px">🖼️ Subir imagen</button>
+  </div>
+
+  <!-- MODO SUBIR IMAGEN -->
+  <div id="f-diag-img-panel" style="display:none">
+    <input type="file" id="f-diag-img-input" accept="image/*" onchange="fDiagImgUpload(event)" style="display:none">
+    <div id="f-diag-img-empty" style="border:2px dashed #ccc;border-radius:8px;padding:24px;text-align:center;cursor:pointer;background:#fafafa" onclick="document.getElementById('f-diag-img-input').click()">
+      <div style="font-size:32px;margin-bottom:6px">📷</div>
+      <div style="font-size:12px;color:#666;font-weight:600">Tocá para subir una imagen</div>
+      <div style="font-size:10px;color:#aaa;margin-top:3px">o sacá una foto del pizarrón / cuaderno</div>
+    </div>
+    <div id="f-diag-img-preview" style="display:none;position:relative">
+      <img id="f-diag-img-el" style="width:100%;max-height:340px;object-fit:contain;border:1px solid #ddd;border-radius:8px;background:#f7f7f7">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn bc" onclick="document.getElementById('f-diag-img-input').click()" style="padding:5px 12px;font-size:11px">🔄 Cambiar</button>
+        <button class="btn bc" onclick="fDiagImgClear()" style="padding:5px 12px;font-size:11px;color:#E24B4A;border-color:#E24B4A55">🗑 Quitar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODO DIBUJAR -->
+  <div id="f-diag-draw-panel">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap">
     <button class="btn bc" onclick="drwUndo()" style="padding:2px 8px;font-size:10px">↩ Deshacer</button>
     <button class="btn bc" onclick="drwClear()" style="padding:2px 8px;font-size:10px;margin-left:auto">🗑 Limpiar</button>
   </div>
@@ -668,6 +756,7 @@ body.sb-show{visibility:visible}
   <div style="font-size:10px;color:#aaa;margin-top:4px">
     <strong>Mover:</strong> clic → arrastrá. <strong>Línea recta:</strong> Shift+drag. <strong>Copiar:</strong> sel. + <kbd style="background:#f0f0f0;padding:0 3px;border-radius:2px;font-size:9px">C</kbd>. <strong>Girar:</strong> sel. + <kbd style="background:#f0f0f0;padding:0 3px;border-radius:2px;font-size:9px">R</kbd>. <strong>Borrar:</strong> <kbd style="background:#f0f0f0;padding:0 3px;border-radius:2px;font-size:9px">Del</kbd>
   </div>
+  </div><!-- /f-diag-draw-panel -->
 </div>
 
 <div style="display:flex;gap:8px;align-items:center;margin-top:9px">
@@ -1971,11 +2060,13 @@ function drawTable(rows){
 function addRow(){
   const n=document.getElementById('f-n').value.trim(),cat=document.getElementById('f-cat').value;
   const msg=document.getElementById('f-msg');
-  if(!n||!cat){msg.style.color='#E24B4A';msg.textContent='Nombre y categoría son obligatorios.';return;}
   const pf=id=>{const v=parseFloat(document.getElementById(id).value);return isNaN(v)?0:v;};
   const pi=id=>{const v=parseInt(document.getElementById(id).value);return isNaN(v)?null:v;};
-  const newId=D.length>0?Math.max(...D.map(r=>r.id))+1:0;
   const jug=pi('f-jug'),L=pf('f-L')||null,A=pf('f-A')||null;
+  // Validación: Nombre, Categoría, Jugadores, Largo, Ancho son obligatorios
+  if(!n||!cat){msg.style.color='#E24B4A';msg.textContent='Nombre y categoría son obligatorios.';return;}
+  if(!jug||!L||!A){msg.style.color='#E24B4A';msg.textContent='Jugadores, Largo y Ancho son obligatorios (para calcular el cuadrante).';return;}
+  const newId=D.length>0?Math.max(...D.map(r=>r.id))+1:0;
   const minVal=pi('f-min')||1;
   // mts ya es /min; el resto son volúmenes totales → ÷ minutos (igual que CSV)
   const raw=mkRaw(
@@ -1990,7 +2081,6 @@ function addRow(){
   );
   const today=new Date();
   const dateStr=`${today.getDate().toString().padStart(2,'0')}/${(today.getMonth()+1).toString().padStart(2,'0')}/${today.getFullYear()}`;
-  // Si el widget está en modo bloques, leer los componentes para guardarlos
   const tnB=parseFloat((document.getElementById('f-tn-b')||{}).value)||0;
   const tnW=parseFloat((document.getElementById('f-tn-w')||{}).value)||0;
   const tnP=parseFloat((document.getElementById('f-tn-p')||{}).value)||0;
@@ -1998,15 +2088,122 @@ function addRow(){
   if(tnB>0)nr.blocks=tnB;
   if(tnW>0)nr.work=tnW;
   if(tnP>0)nr.pause=tnP;
+  // Descripción
+  var descVal=(document.getElementById('f-desc').value||'').trim();
+  if(descVal)nr.desc=descVal;
+  // Diagrama: imagen subida o dibujo
+  if(_fDiagMode==='img' && _fDiagImg){
+    nr.img=_fDiagImg;
+  } else if(_fDiagMode==='draw' && typeof drwShapes!=='undefined' && drwShapes.length){
+    // Guardar el dibujo como imagen del canvas
+    try{
+      var cnv=document.getElementById('drw-canvas');
+      if(cnv) nr.diag=cnv.toDataURL('image/png');
+    }catch(e){}
+  }
   computeRatios(nr);D.push(nr);
   rebuildCatBtns();
-  ['f-n','f-min','f-mts','f-hsr','f-h2','f-h25','f-acc','f-dcc','f-rhie','f-vmax','f-spr','f-pl','f-jug','f-L','f-A'].forEach(id=>document.getElementById(id).value='');
+  ['f-n','f-min','f-mts','f-hsr','f-h2','f-h25','f-acc','f-dcc','f-rhie','f-vmax','f-spr','f-pl','f-jug','f-L','f-A','f-desc'].forEach(id=>{var el=document.getElementById(id);if(el)el.value='';});
   if(typeof tnReset==='function')tnReset('f-tn');
   document.getElementById('f-cat').value='';
+  // Limpiar diagrama
+  if(typeof drwClear==='function')drwClear();
+  fDiagImgClear();
+  fUpdateQuadPreview();
   msg.style.color='#1D9E75';msg.textContent=`"${n}" agregado.`;setTimeout(()=>msg.textContent='',3000);
   refresh();
 }
 window.addRow=addRow;
+
+// ── Diseñá ejercicios: modo diagrama (dibujar / subir imagen) ──────────────────
+var _fDiagMode='draw';   // 'draw' | 'img'
+var _fDiagImg=null;      // dataURL de la imagen subida
+
+function fDiagSetMode(mode){
+  _fDiagMode=mode;
+  var drawPanel=document.getElementById('f-diag-draw-panel');
+  var imgPanel=document.getElementById('f-diag-img-panel');
+  var btnDraw=document.getElementById('f-diag-mode-draw');
+  var btnImg=document.getElementById('f-diag-mode-img');
+  if(mode==='draw'){
+    if(drawPanel)drawPanel.style.display='';
+    if(imgPanel)imgPanel.style.display='none';
+    if(btnDraw)btnDraw.className='btn bb';
+    if(btnImg)btnImg.className='btn bc';
+  } else {
+    if(drawPanel)drawPanel.style.display='none';
+    if(imgPanel)imgPanel.style.display='';
+    if(btnDraw)btnDraw.className='btn bc';
+    if(btnImg)btnImg.className='btn bb';
+  }
+}
+window.fDiagSetMode=fDiagSetMode;
+
+function fDiagImgUpload(ev){
+  var file=ev.target.files&&ev.target.files[0];
+  if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    // Comprimir a máx 640x480 para no llenar el storage
+    var img=new Image();
+    img.onload=function(){
+      var maxW=640,maxH=480;
+      var w=img.width,h=img.height;
+      if(w>maxW){h=h*maxW/w;w=maxW;}
+      if(h>maxH){w=w*maxH/h;h=maxH;}
+      var canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      _fDiagImg=canvas.toDataURL('image/jpeg',0.78);
+      // Mostrar preview
+      document.getElementById('f-diag-img-el').src=_fDiagImg;
+      document.getElementById('f-diag-img-empty').style.display='none';
+      document.getElementById('f-diag-img-preview').style.display='block';
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+window.fDiagImgUpload=fDiagImgUpload;
+
+function fDiagImgClear(){
+  _fDiagImg=null;
+  var inp=document.getElementById('f-diag-img-input');if(inp)inp.value='';
+  var empty=document.getElementById('f-diag-img-empty');if(empty)empty.style.display='';
+  var prev=document.getElementById('f-diag-img-preview');if(prev)prev.style.display='none';
+}
+window.fDiagImgClear=fDiagImgClear;
+
+// Preview en vivo del cuadrante (a partir de jugadores/largo/ancho)
+function fUpdateQuadPreview(){
+  var box=document.getElementById('f-quad-preview');
+  if(!box)return;
+  var jug=parseInt((document.getElementById('f-jug')||{}).value);
+  var L=parseFloat((document.getElementById('f-L')||{}).value);
+  var A=parseFloat((document.getElementById('f-A')||{}).value);
+  if(!jug||!L||!A){box.style.display='none';return;}
+  var eii=(L*A)/jug;  // espacio individual de interacción (m²/jugador)
+  var area=L*A;
+  // Clasificación de orientación (usa la misma lógica que gpsExerciseOrientation)
+  var orient=null;
+  if(typeof gpsExerciseOrientation==='function'){
+    orient=gpsExerciseOrientation({jug:jug,L:L,A:A});
+  }
+  var orientHtml=orient?'<span style="font-weight:700;color:'+orient.color+'">'+orient.label+'</span>':'—';
+  box.style.display='block';
+  box.innerHTML='📐 <strong>'+area.toFixed(0)+' m²</strong> · '+
+    'EII: <strong>'+eii.toFixed(1)+' m²/jug</strong> · '+
+    'Orientación: '+orientHtml;
+}
+window.fUpdateQuadPreview=fUpdateQuadPreview;
+
+// Conectar inputs jug/L/A al preview de cuadrante en vivo
+document.addEventListener('DOMContentLoaded',function(){
+  ['f-jug','f-L','f-A'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el)el.addEventListener('input',fUpdateQuadPreview);
+  });
+});
 
 function delRow(id){if(!confirm('¿Eliminar este ejercicio?'))return;const idx=D.findIndex(r=>r.id===id);if(idx>-1){D.splice(idx,1);sel.delete(id);refresh();}}
 window.delRow=delRow;
@@ -7023,27 +7220,45 @@ function drwDrawBg(ctx,W,H,bg){
     var gW=pw*0.2,gD=14,gX=ox+(pw-gW)/2;
     ctx.strokeRect(gX,oy+ph,gW,gD);
   } else if(bg==='full'){
-    ctx.beginPath();ctx.moveTo(ox,oy+ph/2);ctx.lineTo(ox+pw,oy+ph/2);ctx.stroke();
-    var cr=Math.min(pw,ph)*0.15;
-    ctx.beginPath();ctx.arc(ox+pw/2,oy+ph/2,cr,0,Math.PI*2);ctx.stroke();
+    // Campo COMPLETO en orientación HORIZONTAL (apaisado): las áreas van a
+    // izquierda y derecha, la línea de mitad de cancha es vertical. Como el canvas
+    // es más alto que ancho, el campo se dibuja "acostado" ocupando el ancho.
+    // Línea de mitad de cancha (vertical, en el centro horizontal)
+    ctx.beginPath();ctx.moveTo(ox+pw/2,oy);ctx.lineTo(ox+pw/2,oy+ph);ctx.stroke();
+    // Círculo central
+    var crF=Math.min(pw,ph)*0.13;
+    ctx.beginPath();ctx.arc(ox+pw/2,oy+ph/2,crF,0,Math.PI*2);ctx.stroke();
     ctx.beginPath();ctx.arc(ox+pw/2,oy+ph/2,2.5,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,0.9)';ctx.fill();
-    var paW2=pw*0.6,paH2=ph*0.18,paXt=ox+(pw-paW2)/2;
-    ctx.strokeRect(paXt,oy,paW2,paH2);ctx.strokeRect(paXt,oy+ph-paH2,paW2,paH2);
-    var gaW2=pw*0.3,gaH2=ph*0.085,gaXt=ox+(pw-gaW2)/2;
-    ctx.strokeRect(gaXt,oy,gaW2,gaH2);ctx.strokeRect(gaXt,oy+ph-gaH2,gaW2,gaH2);
-    var ps1Y=oy+ph*0.13,ps2Y=oy+ph*0.87,psX2=ox+pw/2;
-    ctx.beginPath();ctx.arc(psX2,ps1Y,2.5,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,0.9)';ctx.fill();
-    ctx.beginPath();ctx.arc(psX2,ps2Y,2.5,0,Math.PI*2);ctx.fill();
-    var arcR3=pw*0.18;
-    ctx.save();ctx.beginPath();ctx.rect(ox,oy+paH2,pw,ph-paH2*2);ctx.clip();
-    ctx.beginPath();ctx.arc(psX2,ps1Y,arcR3,0,Math.PI*2);ctx.stroke();ctx.restore();
-    ctx.save();ctx.beginPath();ctx.rect(ox,oy+paH2,pw,ph-paH2*2);ctx.clip();
-    ctx.beginPath();ctx.arc(psX2,ps2Y,arcR3,0,Math.PI*2);ctx.stroke();ctx.restore();
+    // Áreas grandes (izquierda y derecha). En horizontal: alto = fracción del alto, ancho = fracción del ancho
+    var paH_F=ph*0.55, paW_F=pw*0.16;          // área grande
+    var paY_F=oy+(ph-paH_F)/2;
+    ctx.strokeRect(ox, paY_F, paW_F, paH_F);                    // área izquierda
+    ctx.strokeRect(ox+pw-paW_F, paY_F, paW_F, paH_F);           // área derecha
+    // Áreas chicas
+    var gaH_F=ph*0.28, gaW_F=pw*0.07;
+    var gaY_F=oy+(ph-gaH_F)/2;
+    ctx.strokeRect(ox, gaY_F, gaW_F, gaH_F);                    // chica izquierda
+    ctx.strokeRect(ox+pw-gaW_F, gaY_F, gaW_F, gaH_F);           // chica derecha
+    // Puntos de penal
+    var psXL=ox+pw*0.11, psXR=ox+pw-pw*0.11, psY_F=oy+ph/2;
+    ctx.beginPath();ctx.arc(psXL,psY_F,2.5,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,0.9)';ctx.fill();
+    ctx.beginPath();ctx.arc(psXR,psY_F,2.5,0,Math.PI*2);ctx.fill();
+    // Medialunas de las áreas (semicírculos que asoman del borde del área hacia el centro)
+    var arcRF=ph*0.13;
+    // Izquierda: arco que asoma a la derecha del área izquierda. Clip para que solo se vea fuera del área.
+    ctx.save();ctx.beginPath();ctx.rect(ox+paW_F,oy,pw-paW_F*2,ph);ctx.clip();
+    ctx.beginPath();ctx.arc(psXL,psY_F,arcRF,0,Math.PI*2);ctx.stroke();ctx.restore();
+    // Derecha
+    ctx.save();ctx.beginPath();ctx.rect(ox+paW_F,oy,pw-paW_F*2,ph);ctx.clip();
+    ctx.beginPath();ctx.arc(psXR,psY_F,arcRF,0,Math.PI*2);ctx.stroke();ctx.restore();
+    // Córners (en las 4 esquinas)
     [[ox,oy,0,Math.PI/2],[ox+pw,oy,Math.PI/2,Math.PI],[ox,oy+ph,-Math.PI/2,0],[ox+pw,oy+ph,Math.PI,-Math.PI/2]].forEach(function(c){
       ctx.beginPath();ctx.arc(c[0],c[1],8,c[2],c[3]);ctx.stroke();
     });
-    var gW3=pw*0.2,gD3=14,gX3=ox+(pw-gW3)/2;
-    ctx.strokeRect(gX3,oy-gD3,gW3,gD3);ctx.strokeRect(gX3,oy+ph,gW3,gD3);
+    // Arcos (porterías) sobresaliendo por fuera de cada lado
+    var goalH_F=ph*0.18, goalD_F=14, goalY_F=oy+(ph-goalH_F)/2;
+    ctx.strokeRect(ox-goalD_F, goalY_F, goalD_F, goalH_F);       // arco izquierdo
+    ctx.strokeRect(ox+pw, goalY_F, goalD_F, goalH_F);            // arco derecho
   }
 }
 
