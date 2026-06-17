@@ -262,6 +262,45 @@ body.sb-show{visibility:visible}
     font-size:14px!important;
     order:99;  /* el botón Agregar al final, ancho completo */
   }
+
+  /* ─── Header del editor de semana: inputs a todo el ancho ─── */
+  .plan-editor-header input[type="text"]{
+    width:100%!important;
+    font-size:14px!important;
+    padding:9px 12px!important;
+    min-width:0!important;
+  }
+  .plan-editor-header .btn{
+    font-size:12px!important;
+    padding:8px 14px!important;
+  }
+  .plan-editor-header select{
+    font-size:13px!important;
+    padding:7px 10px!important;
+  }
+  /* Panel de grupos: el bloque de "nuevo grupo" baja completo, no se aprieta */
+  .plan-groups-panel > div{
+    flex-direction:column!important;
+    align-items:stretch!important;
+  }
+  .plan-groups-panel > div > div[style*="margin-left:auto"]{
+    margin-left:0!important;
+    margin-top:6px;
+  }
+  .plan-groups-panel input[type="text"]{
+    flex:1!important;
+    width:auto!important;
+    font-size:14px!important;
+    padding:8px 10px!important;
+  }
+  #plan-groups-list{
+    margin-bottom:4px;
+  }
+
+  /* Resumen semanal: el SVG ya es responsive; la tabla scrollea (heredado) */
+  #plan-week-summary{
+    padding:10px!important;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
@@ -5956,7 +5995,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
 
     <!-- Editor panel (shown when creating/editing a week) -->
     <div id="plan-editor" style="display:none">
-      <div style="background:#f7f9fc;border:1px solid #d0dff5;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+      <div class="plan-editor-header" style="background:#f7f9fc;border:1px solid #d0dff5;border-radius:8px;padding:12px 14px;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
           <div style="font-size:12px;font-weight:700;color:#0C447C">✏️ Editor de semana</div>
           <input id="plan-week-name" type="text" placeholder="Nombre (ej: Semana 12 — vs Racing)" style="flex:1;min-width:200px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px">
@@ -5977,7 +6016,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       </div>
 
       <!-- Grupos de trabajo -->
-      <div style="background:#fff;border:1px solid #dde;border-radius:6px;padding:8px 12px;margin-bottom:10px">
+      <div class="plan-groups-panel" style="background:#fff;border:1px solid #dde;border-radius:6px;padding:8px 12px;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="font-size:11px;font-weight:700;color:#555">👥 Grupos:</span>
           <div id="plan-groups-list" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
