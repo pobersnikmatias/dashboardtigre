@@ -202,6 +202,22 @@ body.sb-show{visibility:visible}
   .desktop-only{display:none!important}
   body{padding:10px!important;padding-top:64px!important}
 
+  /* Prevenir desborde horizontal de toda la página (causa del "zoom al entrar").
+     El contenido ancho (tablas) tiene su propio scroll; el body nunca scrollea
+     lateralmente. */
+  html, body{
+    overflow-x:hidden!important;
+    max-width:100vw!important;
+  }
+  /* Los contenedores de vista no deben exceder el ancho de pantalla */
+  #view-fixture, #view-plan, #view-carga, #view-profiles, #view-players,
+  #view-gym, #view-train, #view-micro, #view-match,
+  #fix-content-fixture, #fix-content-equipo, #fix-content-jugadores,
+  #fix-content-gps, #fix-content-tareas{
+    max-width:100%!important;
+    overflow-x:hidden;
+  }
+
   /* Header fijo arriba: ocupa todo el ancho, no se cruza al scrollear */
   #mobile-header{display:flex!important;height:auto}
 
@@ -920,7 +936,7 @@ body.sb-show{visibility:visible}
         🎨 Diagrama
         <button class="btn bc" id="diag-edit-btn" style="padding:1px 7px;font-size:10px;margin-left:auto">✏️ Editar</button>
       </div>
-      <div id="diag-display"></div>
+      <div id="diag-display" style="width:320px;max-width:100%"></div>
     </div>
   </div>
   <!-- Mensaje cuando no hay selección -->
@@ -7613,11 +7629,11 @@ window._diagUpdateHook=function(rows){
     var row=rows[0];var editId=row.id;
     if(row.img){
       // Imagen subida: mostrarla limitada en tamaño
-      dd.innerHTML='<img src="'+row.img+'" style="display:block;width:100%;max-width:340px;height:auto;margin:0 auto;border-radius:5px">';
+      dd.innerHTML='<img src="'+row.img+'" style="display:block;width:320px;max-width:100%;height:auto;margin:0 auto;border-radius:5px">';
     } else if(row.diag){
       // Canvas 480×300 (horizontal). Limitar por ANCHO y dejar alto automático
       // mantiene la proporción correcta (el CSS escala el contenido del canvas).
-      dd.innerHTML='<canvas id="diag-canvas" style="display:block;border-radius:5px;width:100%;max-width:340px;height:auto;margin:0 auto"></canvas>';
+      dd.innerHTML='<canvas id="diag-canvas" style="display:block;border-radius:5px;width:320px;max-width:100%;height:auto;margin:0 auto"></canvas>';
       var cv=document.getElementById('diag-canvas');if(cv)drwRenderTo(cv,row.diag);
     } else {
       dd.innerHTML='<div style="background:#3d8c2f;border-radius:5px;min-height:120px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.55);font-size:10px">Sin diagrama</div>';
