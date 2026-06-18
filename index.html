@@ -461,6 +461,25 @@ body.sb-show{visibility:visible}
     height:100%!important;
     max-height:none!important;
   }
+
+  /* ─── Perfil de competencia / Jugadores: gráficos con más aire en móvil ─── */
+  /* Los cuadros de perfil (MÁXIMO/PROMEDIO) y gráficos se apilan con separación */
+  #comp-jugadores-slot canvas,
+  #fix-content-jugadores canvas,
+  #prof-subview-competencia canvas{
+    min-height:220px!important;
+    margin-bottom:14px!important;
+  }
+  /* Los contenedores lado a lado (flex con min-width) se apilan limpio */
+  #prof-subview-competencia div[style*="min-width:240px"],
+  #comp-jugadores-slot div[style*="min-width:240px"]{
+    min-width:100%!important;
+    flex:1 1 100%!important;
+  }
+  /* KPI cards de competencia con separación */
+  #comp-jugadores-slot div[style*="flex-wrap:wrap"] > div{
+    margin-bottom:6px;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
@@ -28060,7 +28079,8 @@ var SB_SETTINGS_KEYS = [
   'NUT_COL_MAP',
   'MOB_COL_MAP',
   'FIX_FIXTURE',
-  'FIX_PLANILLAS'
+  'FIX_PLANILLAS',
+  'RESI_TESTS'
 ];
 
 // Devuelve el valor actual de la variable global con ese nombre (o undefined).
@@ -28218,6 +28238,12 @@ sbLoadInitialData = function(){
       // Llamar a fixSave SIN re-disparar el sync (porque vienen de Supabase)
       localStorage.setItem('FIX_DATA', JSON.stringify({fixture:FIX_FIXTURE,planillas:FIX_PLANILLAS}));
     }}catch(e){}
+    // Re-render de Resistencia: RESI_TESTS puede haberse actualizado desde la nube
+    try{
+      window.RESI_TESTS = RESI_TESTS;
+      localStorage.setItem('RESI_TESTS', JSON.stringify(RESI_TESTS));
+      if(typeof resiRender === 'function') resiRender();
+    }catch(e){}
   });
 };
 
@@ -28427,6 +28453,9 @@ window.pfSetTab = pfSetTab;
 // porque cada test guarda su propio tipo y valores.
 
 var RESI_TESTS = JSON.parse(localStorage.getItem('RESI_TESTS')||'[]');
+// Exponer en window para que el sistema de sync de Supabase pueda leerlo/escribirlo
+// (Safari/iPad no siempre propaga var top-level a window automáticamente)
+window.RESI_TESTS = RESI_TESTS;
 
 // Definición de tipos de test disponibles
 var RESI_TYPES = {
@@ -28494,7 +28523,13 @@ var RESI_TYPES = {
 };
 
 function resiSave(){
+  // Mantener window.RESI_TESTS apuntando al array actual
+  window.RESI_TESTS = RESI_TESTS;
   try{ localStorage.setItem('RESI_TESTS', JSON.stringify(RESI_TESTS)); }catch(e){}
+  // Sincronizar con Supabase (igual que el fixture) para que se vea en otros dispositivos
+  if(typeof sbForceSyncSettings === 'function'){
+    try{ sbForceSyncSettings(); }catch(e){ console.warn('resiSave sync:', e); }
+  }
 }
 
 // Estado: qué test está siendo editado (mostrar formulario) — null = mostrar lista
