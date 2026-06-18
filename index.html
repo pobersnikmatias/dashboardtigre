@@ -449,6 +449,18 @@ body.sb-show{visibility:visible}
     line-height:1.2!important;
     min-height:24px;
   }
+
+  /* ─── Gráficos GPS de Partidos: más altos y legibles en móvil ─── */
+  /* maintainAspectRatio:false + altura fija del contenedor = gráfico grande */
+  .match-chart-box{
+    height:300px!important;
+    padding:8px 6px!important;
+    position:relative;
+  }
+  .match-chart-box canvas{
+    height:100%!important;
+    max-height:none!important;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
@@ -1117,10 +1129,10 @@ body.sb-show{visibility:visible}
   </select>
 </div>
 
-<div id="mc-p1"><div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart1" height="110"></canvas></div></div>
-<div id="mc-p2" style="display:none"><div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart2" height="110"></canvas></div></div>
-<div id="mc-p3" style="display:none"><div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart3" height="110"></canvas></div></div>
-<div id="mc-p4" style="display:none"><div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart4" height="110"></canvas></div></div>
+<div id="mc-p1"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart1" height="110"></canvas></div></div>
+<div id="mc-p2" style="display:none"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart2" height="110"></canvas></div></div>
+<div id="mc-p3" style="display:none"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart3" height="110"></canvas></div></div>
+<div id="mc-p4" style="display:none"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart4" height="110"></canvas></div></div>
 
 </div><!-- /match-charts-wrap -->
 
@@ -3810,6 +3822,14 @@ function destroyMC(){Object.keys(mcCharts).forEach(k=>{if(mcCharts[k]){mcCharts[
 function renderMatchCharts(){
   const sorted=getMatchesSorted();
   if(!sorted.length)return;
+  // En móvil: gráficos más altos y sin mantener aspect ratio fijo, para que se
+  // aprecien bien (si no, quedan muy achatados en pantallas angostas).
+  const _isMob = window.matchMedia && window.matchMedia('(max-width:768px)').matches;
+  const _mob = function(extra){
+    var base = {responsive:true, maintainAspectRatio:!_isMob};
+    if(extra) for(var k in extra) base[k]=extra[k];
+    return base;
+  };
   const metKey=document.getElementById('mc-metric')?.value||'mts';
   const met=MATCH_METRICS.find(m=>m.k===metKey)||MATCH_METRICS[0];
   const labels=sorted.map(m=>{const d=m.fecha?m.fecha.split('-').slice(1).reverse().join('/'):m.rival.slice(0,8);return d;});
@@ -3827,7 +3847,7 @@ function renderMatchCharts(){
       {label:met.lbl,data:vals,borderColor:met.color,backgroundColor:met.color+'22',borderWidth:2,pointRadius:4,pointBackgroundColor:met.color,tension:.3,fill:true},
       {label:'Media móvil 3',data:avg3,borderColor:'#EF9F27',borderWidth:1.5,borderDash:[5,3],pointRadius:0,tension:.4,fill:false},
       {label:'Promedio',data:vals.map(()=>avgAll),borderColor:'#aaa',borderWidth:1,borderDash:[3,4],pointRadius:0,fill:false}
-    ]},options:{responsive:true,plugins:{legend:{labels:{font:{size:10},color:'#555'}}},scales:{x:{ticks:{font:{size:9},color:'#777'},grid:{display:false}},y:{ticks:{font:{size:9},color:'#777'},title:{display:true,text:met.unit||met.lbl,font:{size:9},color:'#999'}}}}});
+    ]},options:Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{x:{ticks:{font:{size:_isMob?10:9},color:'#777'},grid:{display:false}},y:{ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:met.unit||met.lbl,font:{size:9},color:'#999'}}}})});
 
   } else if(matchTab===2){
     // Radar comparativo: último partido vs promedio
@@ -3843,7 +3863,7 @@ function renderMatchCharts(){
     mcCharts.c2=new Chart(document.getElementById('mc-chart2'),{type:'radar',data:{labels:['Dist.','18-21','21-25','+25','Acc+3','Dec+3','RHIE'],datasets:[
       {label:'Promedio temporada',data:normAvg,borderColor:'#3B4D88',backgroundColor:'#3B4D8818',borderWidth:1.5,borderDash:[4,3],pointRadius:0},
       {label:`Último (${last.rival})`,data:normLast,borderColor:'#1D9E75',backgroundColor:'#1D9E7522',borderWidth:2,pointBackgroundColor:'#1D9E75',pointRadius:3}
-    ]},options:{responsive:true,aspectRatio:2.5,plugins:{legend:{labels:{font:{size:10},color:'#555'}}},scales:{r:{min:0,ticks:{stepSize:.5,font:{size:9},backdropColor:'transparent',color:'#777'},grid:{color:'rgba(0,0,0,.07)'},pointLabels:{font:{size:10},color:'#555'}}}}});
+    ]},options:Object.assign(_mob({aspectRatio:_isMob?1.1:2.5}),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{r:{min:0,ticks:{stepSize:.5,font:{size:9},backdropColor:'transparent',color:'#777'},grid:{color:'rgba(0,0,0,.07)'},pointLabels:{font:{size:_isMob?11:10},color:'#555'}}}})});
 
   } else if(matchTab===3){
     // Barras apiladas de zona de velocidad por partido
@@ -3852,7 +3872,7 @@ function renderMatchCharts(){
       {label:'18-21 km/h',data:sorted.map(m=>m.hsr||0),backgroundColor:'#1D9E7588',borderWidth:0},
       {label:'21-25 km/h',data:sorted.map(m=>m.h2||0),backgroundColor:'#7F77DD88',borderWidth:0},
       {label:'+25 km/h',data:sorted.map(m=>m.h25||0),backgroundColor:'#EF9F2788',borderWidth:0},
-    ]},options:{responsive:true,plugins:{legend:{labels:{font:{size:10},color:'#555'}}},scales:{x:{stacked:true,ticks:{font:{size:9},color:'#777'},grid:{display:false}},y:{stacked:true,ticks:{font:{size:9},color:'#777'},title:{display:true,text:'Metros',font:{size:9},color:'#999'}}}}});
+    ]},options:Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{x:{stacked:true,ticks:{font:{size:_isMob?10:9},color:'#777'},grid:{display:false}},y:{stacked:true,ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:'Metros',font:{size:9},color:'#999'}}}})});
 
   } else if(matchTab===4){
     // Sprints y Vmax — doble eje
@@ -3860,11 +3880,11 @@ function renderMatchCharts(){
     mcCharts.c4=new Chart(document.getElementById('mc-chart4'),{type:'bar',data:{labels,datasets:[
       {type:'bar',label:'Sprints totales',data:sorted.map(m=>m.spr||0),backgroundColor:'#D85A3066',borderWidth:0,yAxisID:'y'},
       {type:'line',label:'Vmax km/h',data:sorted.map(m=>m.vmax||0),borderColor:'#E24B4A',backgroundColor:'transparent',borderWidth:2,pointRadius:4,pointBackgroundColor:'#E24B4A',tension:.3,yAxisID:'y2'}
-    ]},options:{responsive:true,plugins:{legend:{labels:{font:{size:10},color:'#555'}}},scales:{
-      x:{ticks:{font:{size:9},color:'#777'},grid:{display:false}},
-      y:{ticks:{font:{size:9},color:'#777'},title:{display:true,text:'Sprints',font:{size:9},color:'#999'},position:'left'},
-      y2:{ticks:{font:{size:9},color:'#E24B4A'},title:{display:true,text:'Vmax km/h',font:{size:9},color:'#E24B4A'},position:'right',grid:{drawOnChartArea:false}}
-    }}});
+    ]},options:Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{
+      x:{ticks:{font:{size:_isMob?10:9},color:'#777'},grid:{display:false}},
+      y:{ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:'Sprints',font:{size:9},color:'#999'},position:'left'},
+      y2:{ticks:{font:{size:_isMob?10:9},color:'#E24B4A'},title:{display:true,text:'Vmax km/h',font:{size:9},color:'#E24B4A'},position:'right',grid:{drawOnChartArea:false}}
+    }})});
   }
 }
 window.renderMatchCharts=renderMatchCharts;
