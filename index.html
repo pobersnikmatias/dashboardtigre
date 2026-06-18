@@ -7688,12 +7688,19 @@ window.drwOpenEdit=drwOpenEdit;
 
 // ── MATCH COMPARISON & PDF EXPORT ────────────────────────────────────────────
 var matchCmpSel = new Set(); // selected match IDs for comparison
+var _matchCmpInit = false;   // ¿ya se hizo la preselección inicial?
 
 function matchCmpRebuild(){
   var list=document.getElementById('match-cmp-list');
   if(!list)return;
   var sorted=getMatchesSorted();
   if(!sorted.length){list.innerHTML='<div style="color:#aaa;font-size:11px;padding:6px">Sin partidos registrados.</div>';return;}
+  // Primera vez: arrancar con TODOS los partidos seleccionados, así la comparativa
+  // se ve inmediatamente sin tener que tildar manualmente.
+  if(!_matchCmpInit && matchCmpSel.size===0){
+    sorted.forEach(function(m){matchCmpSel.add(m.id);});
+    _matchCmpInit = true;
+  }
   list.innerHTML=sorted.map(function(m){
     var d=m.fecha?m.fecha.split('-').reverse().join('/'):'—';
     var checked=matchCmpSel.has(m.id)?'checked':'';
@@ -8098,25 +8105,11 @@ function matchExportPDF(){
     }
     html+='</div>'; // end page 1
 
-    // ── Page 2: Radar + bar charts ─────────────────────────────────────────
+    // ── Page 2: Bar charts por métrica ─────────────────────────────────────
+    // (Radar comparativo removido: con varios partidos se superponían las áreas
+    //  y no se apreciaba nada. Las barras por métrica son más claras.)
     html+='<div class="pdf-page" style="font-family:system-ui,sans-serif;color:#1a1a1a;padding:20px 24px">';
-    html+='<div style="font-size:16px;font-weight:800;color:#0D1B2A;border-bottom:2px solid #0D1B2A;padding-bottom:8px;margin-bottom:16px">📡 Comparativa visual — Radar</div>';
-
-    // Radar chart image centered
-    html+='<div style="display:flex;justify-content:center;margin-bottom:20px">';
-    html+='<img src="'+radarCanvas.toDataURL('image/png')+'" style="width:380px;height:auto;border-radius:8px;border:1px solid #eee">';
-    html+='</div>';
-
-    // Legend
-    html+='<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:20px">';
-    selected.forEach(function(m,i){
-      html+='<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px">'+
-        '<span style="width:12px;height:12px;border-radius:2px;background:'+colors[i%colors.length]+';display:inline-block"></span>'+
-        m.rival+'</span>';
-    });
-    html+='</div>';
-
-    html+='<div style="font-size:14px;font-weight:800;color:#0D1B2A;border-bottom:1px solid #eee;padding-bottom:8px;margin-bottom:14px">📊 Comparativa por métrica</div>';
+    html+='<div style="font-size:16px;font-weight:800;color:#0D1B2A;border-bottom:2px solid #0D1B2A;padding-bottom:8px;margin-bottom:16px">📊 Comparativa por métrica</div>';
 
     // Bar charts — 2 per row
     html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
@@ -8163,23 +8156,39 @@ function matchExportPDF(){
       '<title>Informe GPS — Partidos</title>'+
       '<style>'+
       '*{box-sizing:border-box;margin:0;padding:0}'+
-      'body{font-family:system-ui,sans-serif;background:#fff;color:#1a1a1a}'+
+      'body{font-family:system-ui,sans-serif;background:#e8eaed;color:#1a1a1a}'+
       'table{border-collapse:collapse;width:100%}'+
       // Evitar que las tablas se corten entre páginas
       'table,tr,td,th{page-break-inside:avoid;break-inside:avoid}'+
       'thead{display:table-header-group}'+
       'img{max-width:100%;height:auto}'+
+      // Barra superior con acciones (no se imprime)
+      '.pdf-toolbar{position:sticky;top:0;z-index:100;background:#0D1B2A;display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:10px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.2)}'+
+      '.pdf-toolbar button{border:none;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:system-ui,sans-serif}'+
+      '.pdf-toolbar .btn-print{background:#1D9E75;color:#fff}'+
+      '.pdf-toolbar .btn-close{background:#fff;color:#0D1B2A}'+
+      '.pdf-pages-wrap{max-width:900px;margin:0 auto;padding:16px}'+
+      '.pdf-page{background:#fff;box-shadow:0 1px 6px rgba(0,0,0,0.12);margin-bottom:16px;border-radius:6px}'+
       // Reglas específicas según cantidad de partidos:
       compactCSS+
       '@media print{'+
         '@page{margin:8mm;size:A4 '+pageOrientation+'}'+
-        'body{margin:0}'+
-        '.pdf-page{page-break-after:always}'+
+        'body{margin:0;background:#fff}'+
+        '.pdf-toolbar{display:none !important}'+   // la barra NO se imprime
+        '.pdf-pages-wrap{max-width:none;margin:0;padding:0}'+
+        '.pdf-page{box-shadow:none;margin:0;border-radius:0;page-break-after:always}'+
         '.pdf-page:last-child{page-break-after:avoid}'+
       '}'+
-      '</style></head><body>'+html+'</body></html>');
+      '</style></head><body>'+
+      '<div class="pdf-toolbar">'+
+        '<button class="btn-close" onclick="window.close()">✕ Cerrar</button>'+
+        '<button class="btn-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>'+
+      '</div>'+
+      '<div class="pdf-pages-wrap">'+html+'</div>'+
+      '</body></html>');
     printWin.document.close();
-    printWin.onload=function(){printWin.focus();printWin.print();};
+    // Ya no auto-imprime: el usuario decide con el botón (así puede ver primero)
+    printWin.onload=function(){printWin.focus();};
 
   },120); // wait for Chart.js to finish rendering
 }
@@ -19861,6 +19870,12 @@ function fixSubTab(tab){
     if(typeof renderMatchTable==='function') try{ renderMatchTable(); }catch(e){}
     if(typeof renderMatchKPI==='function')   try{ renderMatchKPI();   }catch(e){}
     if(typeof renderMatchCharts==='function')try{ renderMatchCharts();}catch(e){}
+    // Re-render de la comparativa de partidos (los charts necesitan el contenedor
+    // visible para calcular su tamaño; al entrar acá ya lo está, así no quedan en "línea 0").
+    setTimeout(function(){
+      if(typeof matchCmpRebuild==='function') try{ matchCmpRebuild(); }catch(e){}
+      if(typeof matchCmpRender==='function') try{ matchCmpRender(); }catch(e){}
+    }, 60);
   }
 }
 window.fixSubTab=fixSubTab;
