@@ -480,6 +480,16 @@ body.sb-show{visibility:visible}
   #comp-jugadores-slot div[style*="flex-wrap:wrap"] > div{
     margin-bottom:6px;
   }
+
+  /* ─── Grids que usan minmax con mínimo grande: forzar 1 columna en móvil ─── */
+  /* (Movilidad medianas/distribución, Wellness lado a lado, etc. — el minmax
+     de 360-420px desbordaba en pantallas de ~360px. En móvil van apilados.) */
+  .mob-metric-grid,
+  div[style*="minmax(420px"],
+  div[style*="minmax(380px"],
+  div[style*="minmax(360px"]{
+    grid-template-columns:1fr!important;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
@@ -25717,7 +25727,7 @@ function mobRenderGroup(){
   // Cada métrica ocupa una fila con grid 2-cols. Dentro de cada celda, Izq y Der lado a lado.
   metrics.forEach(function(m){
     html+='<div style="font-size:10px;font-weight:700;color:#0D1B2A;margin-bottom:4px;margin-top:8px">'+m.lbl+' <span style="color:#888;font-weight:500">— '+m.refTxt+'</span></div>';
-    html+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:12px;margin-bottom:12px">';
+    html+='<div class="mob-metric-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:12px;margin-bottom:12px">';
 
     // ── Bloque 1: MEDIANA por lado (Izq + Der) ──
     html+='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px">'+
