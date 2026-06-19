@@ -498,12 +498,18 @@ body.sb-show{visibility:visible}
   }
 
   /* ─── Gráficos del jugador (perfil de competencia): 1 por fila en móvil ─── */
-  /* Antes se ponían N columnas (= N métricas), quedando diminutos. */
+  /* Cada gráfico tiene scroll horizontal propio (crece según cantidad de partidos),
+     así no se achican los puntos. En móvil van apilados 1 por fila. */
   .pl-charts-grid{
     grid-template-columns:1fr!important;
   }
+  /* Mantener altura de los contenedores con scroll */
   .pl-charts-grid > div{
-    height:240px!important;
+    height:auto!important;
+  }
+  /* Indicador visual de que se puede scrollear: sombra sutil en bordes */
+  .pl-charts-grid > div[style*="overflow-x:auto"]{
+    border-radius:6px;
   }
   /* KPI cards del jugador: 2 por fila en vez de apretadas */
   #pl-content div[style*="flex-wrap:wrap"] > div[style*="min-width:140px"]{
@@ -11218,10 +11224,16 @@ function plRender(){
       });
       html+='</div>';
       // Charts grid
+      // Cada gráfico scrollea horizontal si hay muchos partidos: ancho mínimo
+      // proporcional a la cantidad de fechas (≈55px por partido). Así con pocos
+      // partidos llena el ancho, y con muchos crece y se scrollea lateralmente
+      // sin achicar los puntos hasta volverse ilegibles.
+      var nMatches=rows.length;
+      var chartMinW=Math.max(320, nMatches*58 + 80);
       var gridCols=prof.metrics.length;
       html+='<div class="pl-charts-grid" style="display:grid;grid-template-columns:repeat('+gridCols+',1fr);gap:12px">';
       prof.metrics.forEach(function(m,mi){
-        html+='<div style="position:relative;height:220px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div>';
+        html+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="position:relative;height:220px;min-width:'+chartMinW+'px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div></div>';
       });
       html+='</div></div></div>';
     });
@@ -11324,9 +11336,11 @@ function plRender(){
       html+='<div style="font-size:10px;color:#666">'+prof.desc+'</div></div></div>';
       html+='<div style="padding:12px 16px">';
       var gridCols=prof.metrics.length;
+      var nPlayers=playerData.length;
+      var chartMinWM=Math.max(280, nPlayers*70 + 60);
       html+='<div class="pl-charts-grid" style="display:grid;grid-template-columns:repeat('+gridCols+',1fr);gap:12px">';
       prof.metrics.forEach(function(m,mi){
-        html+='<div style="position:relative;height:240px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div>';
+        html+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="position:relative;height:240px;min-width:'+chartMinWM+'px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div></div>';
       });
       html+='</div></div></div>';
     });
