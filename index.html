@@ -490,6 +490,12 @@ body.sb-show{visibility:visible}
   div[style*="minmax(360px"]{
     grid-template-columns:1fr!important;
   }
+
+  /* ─── Perfil de competencia: cajas MÁX/PROM apiladas a todo el ancho ─── */
+  #comp-max-box, #comp-avg-box{
+    min-width:100%!important;
+    flex:1 1 100%!important;
+  }
 }
 
 /* En desktop, ocultar elementos mobile */
@@ -24053,6 +24059,56 @@ function compRender(){
   var metricsList=firstWithData.stats.metrics;
   var totalRows=statsByPlayer.reduce(function(a,sp){return a+(sp.stats?sp.stats.rows.length:0);},0);
   if(info) info.textContent=selected.length+' jugadores · '+totalRows+' partidos totales';
+
+  // ── VISTA MÓVIL: una card por jugador con máx y prom lado a lado ──
+  // (La tabla comparativa ancha no entra bien en celular; las cards sí.)
+  var _isMobComp = window.matchMedia && window.matchMedia('(max-width:768px)').matches;
+  if(_isMobComp){
+    var cardsHtml = statsByPlayer.map(function(sp){
+      var nameShort=sp.player.display;
+      if(!sp.stats || !sp.stats.rows.length){
+        return '<div style="background:#fff;border:1px solid #eee;border-radius:7px;padding:8px 10px;margin-bottom:8px">'+
+          '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:4px">'+nameShort+'</div>'+
+          '<div style="font-size:10px;color:#c87000">⚠ Sin partidos con ≥'+minMins+' min</div>'+
+        '</div>';
+      }
+      var mx=sp.stats.max, av=sp.stats.avg;
+      var rows=metricsList.map(function(m){
+        return '<div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:4px;padding:3px 0;border-bottom:0.5px dotted #e5e5e5;align-items:center">'+
+          '<span style="font-size:10px;color:#555">'+m.lbl+'</span>'+
+          '<span style="font-size:11px;font-weight:800;color:#9c5a00;text-align:right">'+m.fmt(mx[m.k])+'</span>'+
+          '<span style="font-size:11px;font-weight:700;color:#0F6E56;text-align:right">'+m.fmt(av[m.k])+'</span>'+
+        '</div>';
+      }).join('');
+      return '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;margin-bottom:10px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;border-bottom:1px solid #eee;padding-bottom:5px">'+
+          '<span style="font-size:13px;font-weight:800;color:#0D1B2A">'+nameShort+'</span>'+
+          '<span style="font-size:9px;color:#888">'+sp.stats.rows.length+' part.</span>'+
+        '</div>'+
+        // Encabezado de columnas
+        '<div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:4px;margin-bottom:3px">'+
+          '<span></span>'+
+          '<span style="font-size:9px;font-weight:700;color:#9c5a00;text-align:right;text-transform:uppercase">⭐ Máx</span>'+
+          '<span style="font-size:9px;font-weight:700;color:#0F6E56;text-align:right;text-transform:uppercase">📊 Prom</span>'+
+        '</div>'+
+        rows+
+      '</div>';
+    }).join('');
+    // En móvil, ponemos todo en el cuadro MÁXIMO y ocultamos el de PROMEDIO
+    // (las cards ya muestran ambos valores juntos).
+    maxCont.innerHTML='<div style="font-size:9px;color:#888;margin-bottom:8px">Cada card muestra el valor MÁXIMO (naranja) y PROMEDIO (verde) por métrica.</div>'+cardsHtml;
+    avgCont.innerHTML='';
+    var avgBox=document.getElementById('comp-avg-box');
+    if(avgBox) avgBox.style.display='none';
+    var maxBox=document.getElementById('comp-max-box');
+    if(maxBox){ maxBox.style.background='#fff'; maxBox.style.borderColor='#e0e0e0'; }
+    return;
+  }
+  // (desktop: restaurar visibilidad del box promedio por si venía de móvil)
+  var avgBoxD=document.getElementById('comp-avg-box');
+  if(avgBoxD) avgBoxD.style.display='';
+  var maxBoxD=document.getElementById('comp-max-box');
+  if(maxBoxD){ maxBoxD.style.background='#fff8e1'; maxBoxD.style.borderColor='#f0d878'; }
 
   // Header de la tabla compacta
   function buildCompareTable(getValsForPlayer, color){
