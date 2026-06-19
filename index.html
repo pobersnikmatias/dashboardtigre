@@ -1173,6 +1173,8 @@ body.sb-show{visibility:visible}
   <button class="tb" id="mc-t2" onclick="setMatchTab(2)">Radar comparativo</button>
   <button class="tb" id="mc-t3" onclick="setMatchTab(3)">Velocidades</button>
   <button class="tb" id="mc-t4" onclick="setMatchTab(4)">Sprints / Vmax</button>
+  <button class="tb" id="mc-t5" onclick="setMatchTab(5)">Acc / Dec</button>
+  <button class="tb" id="mc-t6" onclick="setMatchTab(6)">RHIE</button>
   <select id="mc-metric" onchange="renderMatchCharts()" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;margin-left:auto">
     <option value="mts">Dist. total</option>
     <option value="hsr">18-21 km/h</option>
@@ -1188,6 +1190,8 @@ body.sb-show{visibility:visible}
 <div id="mc-p2" style="display:none"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart2" height="110"></canvas></div></div>
 <div id="mc-p3" style="display:none"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart3" height="110"></canvas></div></div>
 <div id="mc-p4" style="display:none"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart4" height="110"></canvas></div></div>
+<div id="mc-p5" style="display:none"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart5" height="110"></canvas></div></div>
+<div id="mc-p6" style="display:none"><div class="match-chart-box" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><canvas id="mc-chart6" height="110"></canvas></div></div>
 
 </div><!-- /match-charts-wrap -->
 
@@ -3864,9 +3868,9 @@ function renderMatchKPI(){
 
 function setMatchTab(t){
   matchTab=t;
-  [1,2,3,4].forEach(i=>{
-    document.getElementById(`mc-p${i}`).style.display=i===t?'':'none';
-    document.getElementById(`mc-t${i}`).className='tb'+(i===t?' on':'');
+  [1,2,3,4,5,6].forEach(i=>{
+    var pEl=document.getElementById(`mc-p${i}`); if(pEl)pEl.style.display=i===t?'':'none';
+    var tEl=document.getElementById(`mc-t${i}`); if(tEl)tEl.className='tb'+(i===t?' on':'');
   });
   renderMatchCharts();
 }
@@ -3887,7 +3891,44 @@ function renderMatchCharts(){
   };
   const metKey=document.getElementById('mc-metric')?.value||'mts';
   const met=MATCH_METRICS.find(m=>m.k===metKey)||MATCH_METRICS[0];
-  const labels=sorted.map(m=>{const d=m.fecha?m.fecha.split('-').slice(1).reverse().join('/'):m.rival.slice(0,8);return d;});
+  // Eje X = rival enfrentado (más útil que la fecha para identificar el partido)
+  const labels=sorted.map(m=>m.rival||'—');
+  // Plugin reutilizable: dibuja el valor numérico encima de cada punto/barra del
+  // primer dataset. Con alineación inteligente para que no se corten en los bordes.
+  function valueLabelsPlugin(fmt, colorFn){
+    return {id:'mcValLbls', afterDatasetsDraw:function(ch){
+      var ctx=ch.ctx, meta=ch.getDatasetMeta(0);
+      if(!meta||meta.hidden)return;
+      var area=ch.chartArea, n=meta.data.length;
+      meta.data.forEach(function(pt,i){
+        var raw=ch.data.datasets[0].data[i];
+        if(raw==null)return;
+        var txt=fmt?fmt(raw):String(Math.round(raw));
+        ctx.save();
+        ctx.font='bold 9px system-ui,sans-serif';
+        ctx.fillStyle=colorFn?colorFn(i):(met.color||'#333');
+        ctx.textBaseline='bottom';
+        var tx=pt.x, ty=pt.y-6;
+        if(i===0){ctx.textAlign='left';tx=Math.max(pt.x-5,area.left+1);}
+        else if(i===n-1){ctx.textAlign='right';tx=Math.min(pt.x+5,area.right-1);}
+        else ctx.textAlign='center';
+        if(ty<area.top+10){ty=pt.y+15;ctx.textBaseline='top';}
+        var tw=ctx.measureText(txt).width;
+        var bx=ctx.textAlign==='left'?tx:(ctx.textAlign==='right'?tx-tw:tx-tw/2);
+        ctx.fillStyle='rgba(255,255,255,0.78)';
+        ctx.fillRect(bx-1,ty-(ctx.textBaseline==='top'?0:10),tw+2,11);
+        ctx.fillStyle=colorFn?colorFn(i):(met.color||'#333');
+        ctx.fillText(txt,tx,ty);
+        ctx.restore();
+      });
+    }};
+  }
+  // Padding/offset para que el primer y último partido entren completos
+  function withPadding(o){
+    o.layout={padding:{top:22,right:14,left:6,bottom:4}};
+    if(o.scales&&o.scales.x)o.scales.x.offset=true;
+    return o;
+  }
   // Guard: canvas must be visible/available
   const c1el=document.getElementById('mc-chart1');
   if(!c1el||!c1el.offsetParent&&matchTab===1)return;
@@ -3902,7 +3943,7 @@ function renderMatchCharts(){
       {label:met.lbl,data:vals,borderColor:met.color,backgroundColor:met.color+'22',borderWidth:2,pointRadius:4,pointBackgroundColor:met.color,tension:.3,fill:true},
       {label:'Media móvil 3',data:avg3,borderColor:'#EF9F27',borderWidth:1.5,borderDash:[5,3],pointRadius:0,tension:.4,fill:false},
       {label:'Promedio',data:vals.map(()=>avgAll),borderColor:'#aaa',borderWidth:1,borderDash:[3,4],pointRadius:0,fill:false}
-    ]},options:Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{x:{ticks:{font:{size:_isMob?10:9},color:'#777'},grid:{display:false}},y:{ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:met.unit||met.lbl,font:{size:9},color:'#999'}}}})});
+    ]},plugins:[valueLabelsPlugin(function(v){return met.unit==='km/h'?v.toFixed(1):Math.round(v);})],options:withPadding(Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{x:{ticks:{font:{size:_isMob?10:9},color:'#777',maxRotation:35,minRotation:0},grid:{display:false}},y:{ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:met.unit||met.lbl,font:{size:9},color:'#999'},grace:'18%'}}}))});
 
   } else if(matchTab===2){
     // Radar comparativo: último partido vs promedio
@@ -3927,7 +3968,7 @@ function renderMatchCharts(){
       {label:'18-21 km/h',data:sorted.map(m=>m.hsr||0),backgroundColor:'#1D9E7588',borderWidth:0},
       {label:'21-25 km/h',data:sorted.map(m=>m.h2||0),backgroundColor:'#7F77DD88',borderWidth:0},
       {label:'+25 km/h',data:sorted.map(m=>m.h25||0),backgroundColor:'#EF9F2788',borderWidth:0},
-    ]},options:Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{x:{stacked:true,ticks:{font:{size:_isMob?10:9},color:'#777'},grid:{display:false}},y:{stacked:true,ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:'Metros',font:{size:9},color:'#999'}}}})});
+    ]},options:withPadding(Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{x:{stacked:true,ticks:{font:{size:_isMob?10:9},color:'#777',maxRotation:35},grid:{display:false}},y:{stacked:true,ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:'Metros',font:{size:9},color:'#999'}}}}))});
 
   } else if(matchTab===4){
     // Sprints y Vmax — doble eje
@@ -3935,11 +3976,82 @@ function renderMatchCharts(){
     mcCharts.c4=new Chart(document.getElementById('mc-chart4'),{type:'bar',data:{labels,datasets:[
       {type:'bar',label:'Sprints totales',data:sorted.map(m=>m.spr||0),backgroundColor:'#D85A3066',borderWidth:0,yAxisID:'y'},
       {type:'line',label:'Vmax km/h',data:sorted.map(m=>m.vmax||0),borderColor:'#E24B4A',backgroundColor:'transparent',borderWidth:2,pointRadius:4,pointBackgroundColor:'#E24B4A',tension:.3,yAxisID:'y2'}
-    ]},options:Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{
-      x:{ticks:{font:{size:_isMob?10:9},color:'#777'},grid:{display:false}},
-      y:{ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:'Sprints',font:{size:9},color:'#999'},position:'left'},
-      y2:{ticks:{font:{size:_isMob?10:9},color:'#E24B4A'},title:{display:true,text:'Vmax km/h',font:{size:9},color:'#E24B4A'},position:'right',grid:{drawOnChartArea:false}}
-    }})});
+    ]},plugins:[
+      // Números de Sprints (barras, dataset 0) abajo y Vmax (línea, dataset 1) arriba
+      {id:'mcSprVmaxLbls',afterDatasetsDraw:function(ch){
+        var ctx=ch.ctx, area=ch.chartArea;
+        // Vmax encima de cada punto de la línea
+        var m1=ch.getDatasetMeta(1);
+        if(m1&&!m1.hidden){
+          m1.data.forEach(function(pt,i){
+            var v=sorted[i].vmax||0; if(!v)return;
+            var txt=v.toFixed(1);
+            ctx.save();ctx.font='bold 9px system-ui,sans-serif';ctx.textBaseline='bottom';
+            var tx=pt.x,ty=pt.y-6,n=m1.data.length;
+            if(i===0){ctx.textAlign='left';tx=Math.max(pt.x-5,area.left+1);}
+            else if(i===n-1){ctx.textAlign='right';tx=Math.min(pt.x+5,area.right-1);}
+            else ctx.textAlign='center';
+            if(ty<area.top+10){ty=pt.y+15;ctx.textBaseline='top';}
+            var tw=ctx.measureText(txt).width;
+            var bx=ctx.textAlign==='left'?tx:(ctx.textAlign==='right'?tx-tw:tx-tw/2);
+            ctx.fillStyle='rgba(255,255,255,0.8)';ctx.fillRect(bx-1,ty-(ctx.textBaseline==='top'?0:10),tw+2,11);
+            ctx.fillStyle='#E24B4A';ctx.fillText(txt,tx,ty);ctx.restore();
+          });
+        }
+        // Sprints dentro de cada barra (arriba)
+        var m0=ch.getDatasetMeta(0);
+        if(m0&&!m0.hidden){
+          m0.data.forEach(function(bar,i){
+            var v=sorted[i].spr||0; if(!v)return;
+            var txt=String(Math.round(v));
+            ctx.save();ctx.font='bold 9px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
+            ctx.fillStyle='#A03D18';ctx.fillText(txt,bar.x,bar.y-2);ctx.restore();
+          });
+        }
+      }}
+    ],options:withPadding(Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{
+      x:{ticks:{font:{size:_isMob?10:9},color:'#777',maxRotation:35},grid:{display:false}},
+      y:{ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:'Sprints',font:{size:9},color:'#999'},position:'left',grace:'15%'},
+      y2:{ticks:{font:{size:_isMob?10:9},color:'#E24B4A'},title:{display:true,text:'Vmax km/h',font:{size:9},color:'#E24B4A'},position:'right',grid:{drawOnChartArea:false},grace:'15%'}
+    }}))});
+
+  } else if(matchTab===5){
+    // Acc+3 y Dec+3 — doble línea
+    destroyMC();
+    var accV=sorted.map(m=>m.acc||0), dccV=sorted.map(m=>m.dcc||0);
+    mcCharts.c5=new Chart(document.getElementById('mc-chart5'),{type:'line',data:{labels,datasets:[
+      {label:'Acc+3',data:accV,borderColor:'#D85A30',backgroundColor:'#D85A3018',borderWidth:2,pointRadius:4,pointBackgroundColor:'#D85A30',tension:.3,fill:false},
+      {label:'Dec+3',data:dccV,borderColor:'#D4537E',backgroundColor:'#D4537E18',borderWidth:2,pointRadius:4,pointBackgroundColor:'#D4537E',tension:.3,fill:false}
+    ]},plugins:[
+      {id:'accDecLbls',afterDatasetsDraw:function(ch){
+        var ctx=ch.ctx,area=ch.chartArea;
+        [[0,'#D85A30',accV,-6],[1,'#D4537E',dccV,16]].forEach(function(cfg){
+          var meta=ch.getDatasetMeta(cfg[0]); if(!meta||meta.hidden)return;
+          meta.data.forEach(function(pt,i){
+            var v=cfg[2][i]; if(v==null)return;
+            var txt=String(Math.round(v)),n=meta.data.length;
+            ctx.save();ctx.font='bold 9px system-ui,sans-serif';ctx.textBaseline='bottom';
+            var tx=pt.x,ty=pt.y+cfg[3];
+            if(i===0){ctx.textAlign='left';tx=Math.max(pt.x-5,area.left+1);}
+            else if(i===n-1){ctx.textAlign='right';tx=Math.min(pt.x+5,area.right-1);}
+            else ctx.textAlign='center';
+            if(ty<area.top+10){ty=pt.y+15;ctx.textBaseline='top';}
+            var tw=ctx.measureText(txt).width;
+            var bx=ctx.textAlign==='left'?tx:(ctx.textAlign==='right'?tx-tw:tx-tw/2);
+            ctx.fillStyle='rgba(255,255,255,0.8)';ctx.fillRect(bx-1,ty-(ctx.textBaseline==='top'?0:10),tw+2,11);
+            ctx.fillStyle=cfg[1];ctx.fillText(txt,tx,ty);ctx.restore();
+          });
+        });
+      }}
+    ],options:withPadding(Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{x:{ticks:{font:{size:_isMob?10:9},color:'#777',maxRotation:35},grid:{display:false}},y:{ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:'Cantidad',font:{size:9},color:'#999'},grace:'18%',beginAtZero:true}}}))});
+
+  } else if(matchTab===6){
+    // RHIE — barras
+    destroyMC();
+    var rhieV=sorted.map(m=>m.rhie||0);
+    mcCharts.c6=new Chart(document.getElementById('mc-chart6'),{type:'bar',data:{labels,datasets:[
+      {label:'RHIE',data:rhieV,backgroundColor:'#0F6E5699',borderColor:'#0F6E56',borderWidth:1.5,borderRadius:3}
+    ]},plugins:[valueLabelsPlugin(function(v){return Math.round(v);},function(){return '#0F6E56';})],options:withPadding(Object.assign(_mob(),{plugins:{legend:{labels:{font:{size:_isMob?11:10},color:'#555'}}},scales:{x:{ticks:{font:{size:_isMob?10:9},color:'#777',maxRotation:35},grid:{display:false}},y:{ticks:{font:{size:_isMob?10:9},color:'#777'},title:{display:true,text:'RHIE',font:{size:9},color:'#999'},grace:'18%',beginAtZero:true}}}))});
   }
 }
 window.renderMatchCharts=renderMatchCharts;
@@ -7864,55 +7976,13 @@ function matchCmpRender(){
     '<tr><td style="padding:3px 7px;background:#f0f2f5;font-weight:700;font-size:10px">Promedio</td>'+avgCells+'</tr>'+
     '</tbody></table>';
 
-  // ── Bar charts ──
-  cWrap.style.display='';
-  var _isMobCmp = window.matchMedia && window.matchMedia('(max-width:768px)').matches;
-  var _chH = _isMobCmp ? 200 : 110;
-  cWrap.innerHTML='<div style="font-size:11px;font-weight:700;color:#0D1B2A;margin:10px 0 8px">Comparativa visual</div>'+
-    METRICS.map(function(met,idx){
-      return '<div style="height:'+_chH+'px;margin-bottom:10px;background:#fff;border:1px solid #eee;border-radius:6px;padding:6px;position:relative"><canvas id="cmp-chart-'+idx+'"></canvas></div>';
-    }).join('');
-
-  // Destroy old charts
-  if(!window._cmpCharts)window._cmpCharts=[];
-  window._cmpCharts.forEach(function(c){if(c)c.destroy();});
-  window._cmpCharts=[];
-
-  var labels=selected.map(function(m){
-    var d=m.fecha?m.fecha.split('-').slice(1).reverse().join('/'):m.rival.slice(0,8);
-    return m.rival.slice(0,10)+(d?' ('+d+')':'');
-  });
-
-  // Render diferido para asegurar que los contenedores ya tienen tamaño
-  setTimeout(function(){
-    METRICS.forEach(function(met,idx){
-      var canvas=document.getElementById('cmp-chart-'+idx);
-      if(!canvas)return;
-      var vals=selected.map(function(m){return m[met.k]||0;});
-      var avgVal=vals.reduce(function(a,v){return a+v;},0)/vals.length;
-      var ch=new Chart(canvas,{
-        type:'bar',
-        data:{
-          labels:labels,
-          datasets:[
-            {label:met.lbl+(met.unit?' ('+met.unit+')':''),data:vals,
-             backgroundColor:vals.map(function(){return met.color+'99';}),
-             borderColor:met.color,borderWidth:1.5,borderRadius:3},
-            {type:'line',label:'Promedio',data:vals.map(function(){return avgVal;}),
-             borderColor:'#EF9F27',borderWidth:1.5,borderDash:[5,3],pointRadius:0,fill:false}
-          ]
-        },
-        options:{responsive:true,maintainAspectRatio:false,plugins:{
-          legend:{labels:{font:{size:_isMobCmp?11:9},color:'#555'}},
-          title:{display:true,text:met.lbl,font:{size:_isMobCmp?12:10},color:'#333'}
-        },scales:{
-          x:{ticks:{font:{size:_isMobCmp?10:9},color:'#777'},grid:{display:false}},
-          y:{ticks:{font:{size:_isMobCmp?10:9},color:'#777'},beginAtZero:true}
-        }}
-      });
-      window._cmpCharts.push(ch);
-    });
-  }, 50);
+  // ── Comparativa visual (bar charts) REMOVIDA ──
+  // Con el eje arrancando en 0 y valores grandes, las barras quedaban casi planas
+  // y no se diferenciaban entre partidos. La tabla de datos de arriba es más clara.
+  cWrap.style.display='none';
+  cWrap.innerHTML='';
+  // Destruir charts viejos si quedaron
+  if(window._cmpCharts){window._cmpCharts.forEach(function(c){if(c)c.destroy();});window._cmpCharts=[];}
 }
 window.matchCmpRender=matchCmpRender;
 
