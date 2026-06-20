@@ -3972,8 +3972,8 @@ function renderMatchCharts(){
       {label:'18-21 km/h',data:hsrV,backgroundColor:'#1D9E7588',borderWidth:0,stack:'z'},
       {label:'21-25 km/h',data:h2V,backgroundColor:'#7F77DD88',borderWidth:0,stack:'z'},
       {label:'+25 km/h',data:h25V,backgroundColor:'#EF9F2788',borderWidth:0,stack:'z'},
-      {type:'line',label:'Media móvil 3',data:totMM3,borderColor:'#EF9F27',borderWidth:1.5,borderDash:[5,3],pointRadius:0,tension:.4,fill:false},
-      {type:'line',label:'Promedio',data:totV.map(()=>totAvg),borderColor:'#888',borderWidth:1,borderDash:[3,4],pointRadius:0,fill:false}
+      {type:'line',label:'Media móvil 3',data:totMM3,borderColor:'#EF9F27',borderWidth:1.5,borderDash:[5,3],pointRadius:0,tension:.4,fill:false,stack:'_mm3'},
+      {type:'line',label:'Promedio',data:totV.map(()=>totAvg),borderColor:'#888',borderWidth:1,borderDash:[3,4],pointRadius:0,fill:false,stack:'_prom'}
     ]},plugins:[
       // Total escrito encima de cada barra apilada
       {id:'velTotLbls',afterDatasetsDraw:function(ch){
