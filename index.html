@@ -99,6 +99,16 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 .cat-inline:focus{outline:none;border-color:#3B4D88;background:#fff}
 .mc-tot-row td{background:#f0f2f5;font-weight:700;font-size:10px}
 .mc-ratio{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700}
+/* Perfil de competencia — gráficos: por defecto (PC e impresión) el gráfico
+   llena su columna y se ve completo. El scroll horizontal con min-width solo
+   se activa dentro del media query móvil. */
+.pl-chart-scroll{overflow-x:visible}
+.pl-chart-scroll > .pl-chart-inner{min-width:0;width:100%}
+@media print{
+  /* Aunque se imprima desde un móvil, los gráficos salen completos, no cortados */
+  .pl-chart-scroll{overflow-x:visible!important}
+  .pl-chart-scroll > .pl-chart-inner{min-width:0!important;width:100%!important}
+}
 @media print{
   body > *:not(#pdf-print-area){display:none!important}
   #pdf-print-area{display:block!important}
@@ -510,6 +520,17 @@ body.sb-show{visibility:visible}
   /* Indicador visual de que se puede scrollear: sombra sutil en bordes */
   .pl-charts-grid > div[style*="overflow-x:auto"]{
     border-radius:6px;
+  }
+  /* ─── Charts del perfil de competencia: scroll horizontal SOLO en móvil ───
+     En móvil el gráfico crece (min-width proporcional a la cantidad de
+     fechas/jugadores) y el contenedor scrollea. En PC el gráfico llena la
+     columna y se ve completo (regla por defecto, fuera de este media query). */
+  .pl-chart-scroll{
+    overflow-x:auto;
+    border-radius:6px;
+  }
+  .pl-chart-scroll > .pl-chart-inner{
+    min-width:var(--pl-chart-minw,100%);
   }
   /* KPI cards del jugador: 2 por fila en vez de apretadas */
   #pl-content div[style*="flex-wrap:wrap"] > div[style*="min-width:140px"]{
@@ -11339,7 +11360,7 @@ function plRender(){
       var gridCols=prof.metrics.length;
       html+='<div class="pl-charts-grid" style="display:grid;grid-template-columns:repeat('+gridCols+',1fr);gap:12px">';
       prof.metrics.forEach(function(m,mi){
-        html+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="position:relative;height:220px;min-width:'+chartMinW+'px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div></div>';
+        html+='<div class="pl-chart-scroll" style="-webkit-overflow-scrolling:touch;--pl-chart-minw:'+chartMinW+'px"><div class="pl-chart-inner" style="position:relative;height:220px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div></div>';
       });
       html+='</div></div></div>';
     });
@@ -11446,7 +11467,7 @@ function plRender(){
       var chartMinWM=Math.max(280, nPlayers*70 + 60);
       html+='<div class="pl-charts-grid" style="display:grid;grid-template-columns:repeat('+gridCols+',1fr);gap:12px">';
       prof.metrics.forEach(function(m,mi){
-        html+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="position:relative;height:240px;min-width:'+chartMinWM+'px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div></div>';
+        html+='<div class="pl-chart-scroll" style="-webkit-overflow-scrolling:touch;--pl-chart-minw:'+chartMinWM+'px"><div class="pl-chart-inner" style="position:relative;height:240px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div></div>';
       });
       html+='</div></div></div>';
     });
@@ -11685,6 +11706,10 @@ function plExportPDF(){
     '.panel,.pdf-block,#comp-max-box,#comp-avg-box{page-break-inside:avoid;break-inside:avoid}'+
     /* Imágenes (canvas convertidos a img) no se cortan: */
     'img{page-break-inside:avoid;break-inside:avoid;max-width:100%;height:auto}'+
+    /* Gráficos del perfil de competencia: completos en el PDF (sin scroll/recorte tipo móvil) */
+    '.pl-chart-scroll{overflow:visible!important}'+
+    '.pl-chart-scroll>.pl-chart-inner{min-width:0!important;width:100%!important}'+
+    '.pl-charts-grid{display:grid!important}'+
     /* Bloques que tienen títulos h2/h3/h4 no se separan del contenido siguiente: */
     'h1,h2,h3,h4{page-break-after:avoid;break-after:avoid}'+
     '@media print{'+
