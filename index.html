@@ -2371,7 +2371,7 @@ document.addEventListener('DOMContentLoaded',function(){
   });
 });
 
-function delRow(id){if(!confirm('¿Eliminar este ejercicio?'))return;const idx=D.findIndex(r=>r.id===id);if(idx>-1){D.splice(idx,1);sel.delete(id);refresh();}}
+function delRow(id){if(!confirm('¿Eliminar este ejercicio?'))return;const idx=D.findIndex(r=>r.id===id);if(idx>-1){D.splice(idx,1);sel.delete(id);if(typeof sbDeleteOneDrill==='function')sbDeleteOneDrill(id);refresh();}}
 window.delRow=delRow;
 function changeCat(sel){const id=parseInt(sel.dataset.id);const row=D.find(r=>r.id===id);if(!row)return;row.cat=sel.value;const c=BC[sel.value]||'#888';sel.style.color=c;refresh();}
 window.changeCat=changeCat;
@@ -3312,6 +3312,8 @@ function cmpSesCombinarConfirm(deleteOriginal){
   if(deleteOriginal){
     var i=D.findIndex(function(r){return r.id===d.lib.id;});
     if(i>-1)D.splice(i,1);
+    // Borrar también de la nube, sino reaparece al re-loguear
+    if(typeof sbDeleteOneDrill==='function') sbDeleteOneDrill(d.lib.id);
   }
   if(typeof saveData==='function')saveData();
   if(typeof refresh==='function')refresh();
@@ -4471,7 +4473,12 @@ function doMergeExercises(){
   if(typeof sbUpsertOneDrill==='function') sbUpsertOneDrill(newRow);
   // Preguntar si eliminar los originales
   if(confirm('¿Eliminar los '+ids.length+' ejercicios originales?')){
-    ids.forEach(function(id){var i=D.findIndex(function(r){return r.id===id;});if(i>-1)D.splice(i,1);});
+    ids.forEach(function(id){
+      var i=D.findIndex(function(r){return r.id===id;});
+      if(i>-1)D.splice(i,1);
+      // Borrar también de la nube, sino reaparecen al re-loguear
+      if(typeof sbDeleteOneDrill==='function') sbDeleteOneDrill(id);
+    });
   }
   sel.clear();
   updateMergeBtn();
@@ -28378,6 +28385,15 @@ function _sbDrillToPayload(d){
 // la nube y aparezcan al re-iniciar sesión, incluso desde otro dispositivo.
 function sbUpsertOneDrill(d){
   try{
+    // Si este id estaba marcado como borrado, quitarlo del tombstone (se recreó).
+    try{
+      var idN = Number(d && d.id);
+      if(!isNaN(idN)){
+        var tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]');
+        var fi = tomb.indexOf(idN);
+        if(fi>-1){ tomb.splice(fi,1); localStorage.setItem('drills_deleted', JSON.stringify(tomb)); }
+      }
+    }catch(e){}
     if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return;
     var payload = _sbDrillToPayload(d);
     if(!payload) return;
@@ -28388,6 +28404,31 @@ function sbUpsertOneDrill(d){
   }catch(e){ console.warn('sbUpsertOneDrill error:', e); }
 }
 window.sbUpsertOneDrill = sbUpsertOneDrill;
+// Borra UN ejercicio de Supabase de inmediato. Se usa al combinar y elegir
+// "eliminar originales": sin esto, los originales siguen en la nube y reaparecen
+// (separados) al volver a iniciar sesión, aunque se hayan borrado localmente.
+function sbDeleteOneDrill(id){
+  try{
+    var idNum = Number(id);
+    if(isNaN(idNum)) return Promise.resolve();
+    // Registrar el id borrado (tombstone) para no revivirlo al cargar desde la nube,
+    // por si el delete remoto falla o la sesión todavía no está lista.
+    try{
+      var tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]');
+      if(tomb.indexOf(idNum)<0){ tomb.push(idNum); localStorage.setItem('drills_deleted', JSON.stringify(tomb)); }
+    }catch(e){}
+    if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return Promise.resolve();
+    return sbClient.from('drills_exercises')
+      .delete()
+      .eq('id', idNum)
+      .eq('categoria', SB_CATEGORIA)
+      .then(function(res){
+        if(res.error) console.error('[Supabase] Borrado ejercicio error (id '+idNum+'):', res.error);
+        else console.log('[Supabase] Ejercicio borrado de la nube (id '+idNum+')');
+      });
+  }catch(e){ console.warn('sbDeleteOneDrill error:', e); return Promise.resolve(); }
+}
+window.sbDeleteOneDrill = sbDeleteOneDrill;
 // Sube TODA la biblioteca de ejercicios a Supabase de inmediato (sin debounce).
 // Útil tras importar un CSV con varias filas nuevas/modificadas.
 function sbSyncAllDrillsNow(){
@@ -28486,13 +28527,28 @@ sbLoadInitialData = function(){
     return sbDrillsFetchAll();
   }).then(function(rows){
     if(typeof D!=='undefined' && rows && rows.length){
+      // Tombstones: ids que el usuario borró localmente. No revivirlos desde la nube,
+      // y reintentar borrarlos en Supabase por si el delete anterior no llegó.
+      var tomb = [];
+      try{ tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]'); }catch(e){}
+      var tombSet = {};
+      tomb.forEach(function(t){ tombSet[t]=true; });
       var keys = {};
-      rows.forEach(function(row){ keys[row.id] = _sbDrillFromRow(row); });
-      var localOnly = D.filter(function(d){ return !(d.id in keys); });
+      rows.forEach(function(row){
+        if(tombSet[Number(row.id)]){
+          // Estaba borrado localmente pero sigue en la nube → borrarlo de nuevo
+          if(typeof sbClient!=='undefined' && sbClient && sbCurrentUser){
+            sbClient.from('drills_exercises').delete().eq('id', Number(row.id)).eq('categoria', SB_CATEGORIA).then(function(){});
+          }
+          return; // no incorporarlo a D
+        }
+        keys[row.id] = _sbDrillFromRow(row);
+      });
+      var localOnly = D.filter(function(d){ return !(d.id in keys) && !tombSet[Number(d.id)]; });
       D.length = 0;
       Object.values(keys).forEach(function(d){ D.push(d); });
       localOnly.forEach(function(d){ D.push(d); });
-      console.log('[Supabase] Cargados ' + rows.length + ' drills_exercises.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+      console.log('[Supabase] Cargados ' + Object.keys(keys).length + ' drills_exercises.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':'') + (tomb.length?' ['+tomb.length+' borrados ignorados]':''));
     } else {
       console.log('[Supabase] No hay drills_exercises en Supabase todavía.');
     }
