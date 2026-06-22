@@ -2223,6 +2223,7 @@ function addRow(){
     }catch(e){}
   }
   computeRatios(nr);D.push(nr);
+  if(typeof sbUpsertOneDrill==='function') sbUpsertOneDrill(nr);
   rebuildCatBtns();
   ['f-n','f-min','f-mts','f-hsr','f-h2','f-h25','f-acc','f-dcc','f-rhie','f-vmax','f-spr','f-pl','f-jug','f-L','f-A','f-desc'].forEach(id=>{var el=document.getElementById(id);if(el)el.value='';});
   if(typeof tnReset==='function')tnReset('f-tn');
@@ -3299,12 +3300,14 @@ function cmpSesCombinarConfirm(deleteOriginal){
   if(!cat) {msg.style.color='#E24B4A';msg.textContent='Falta la categoría.';return;}
   if(!confirm('¿Estás seguro de combinar los ejercicios "'+(d.ses.name||'')+'" y "'+(d.lib.n||'')+'" en uno solo llamado "'+name+'"?'+(deleteOriginal?'\n\nSE ELIMINARÁ el ejercicio "'+d.lib.n+'" de la biblioteca.':'')))return;
 
-  var newId=Date.now();
+  var newId=(D.length?Math.max.apply(null,D.map(function(r){return Number(r.id)||0;})):0)+1;
   // Conservar dimensiones del lib (de la biblioteca) si las tiene, sino las de la sesión
   var jug=d.lib.jug||d.ses.jug||0, L=d.lib.L||d.ses.L||0, A=d.lib.A||d.ses.A||0;
   var rec={id:newId,n:name,cat:cat,min:Math.round(d.avgMin*10)/10,raw:d.merged,vmax:d.vmax,spr:0,jug:jug,L:L,A:A,date:''};
   computeRatios(rec);
   D.push(rec);
+  // Persistir el combinado en la nube de inmediato (no esperar el debounce)
+  if(typeof sbUpsertOneDrill==='function') sbUpsertOneDrill(rec);
 
   if(deleteOriginal){
     var i=D.findIndex(function(r){return r.id===d.lib.id;});
@@ -3406,7 +3409,7 @@ function cmpSesImportConfirm(){
 
   // Armar el registro como lo hace addRow / importCSV
   var raw={mts:ses.mts||0,hsr:ses.hsr||0,h2:ses.h2||0,h25:ses.h25||0,acc:ses.acc||0,dcc:ses.dcc||0,rhie:ses.rhie||0};
-  var newId=Date.now();
+  var newId=(D.length?Math.max.apply(null,D.map(function(r){return Number(r.id)||0;})):0)+1;
   var rec={id:newId,n:name,cat:cat,min:min,raw:raw,vmax:ses.vmax||0,spr:0,jug:jug,L:L,A:A,date:''};
   // Si el usuario eligió modo bloques en el widget, guardar también esos campos
   var tnB=parseFloat((document.getElementById('imp-tn-b')||{}).value)||0;
@@ -3417,6 +3420,7 @@ function cmpSesImportConfirm(){
   if(tnP>0)rec.pause=tnP;
   computeRatios(rec);
   D.push(rec);
+  if(typeof sbUpsertOneDrill==='function') sbUpsertOneDrill(rec);
   if(typeof saveData==='function')saveData();
   if(typeof refresh==='function')refresh();
   msg.style.color='#1D9E75';
@@ -3535,6 +3539,8 @@ function importCSV(){
   csvParsed=[];document.getElementById('csv-raw').value='';document.getElementById('csv-pw').style.display='none';document.getElementById('csv-stat').textContent='';
   setTimeout(()=>{msg.textContent='';document.getElementById('csv-det').removeAttribute('open');},4000);
   refresh();
+  // Subir a la nube todos los ejercicios afectados por el import de inmediato
+  if(typeof sbSyncAllDrillsNow==='function') sbSyncAllDrillsNow();
 }
 window.importCSV=importCSV;
 function csvDrop(e){e.preventDefault();document.getElementById('csv-drop').style.borderColor='#ccc';const file=e.dataTransfer.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{document.getElementById('csv-raw').value=ev.target.result;document.getElementById('csv-det').setAttribute('open','');parseCSV();};r.readAsText(file,'UTF-8');}
@@ -4461,6 +4467,8 @@ function doMergeExercises(){
   var newRow={id:newId,n:newName.trim(),cat:data.rows[0].cat,min:Math.round(data.totalMin/data.rows.length),raw:data.merged,vmax:data.vmax,spr:0,jug:null,jug0:null,L:null,A:null,L0:null,A0:null,date:data.rows[0].date||''};
   computeRatios(newRow);
   D.push(newRow);
+  // Persistir el combinado en la nube de inmediato (no esperar el debounce)
+  if(typeof sbUpsertOneDrill==='function') sbUpsertOneDrill(newRow);
   // Preguntar si eliminar los originales
   if(confirm('¿Eliminar los '+ids.length+' ejercicios originales?')){
     ids.forEach(function(id){var i=D.findIndex(function(r){return r.id===id;});if(i>-1)D.splice(i,1);});
@@ -10457,6 +10465,37 @@ window.mcRoleSaveTargetsFromModal = mcRoleSaveTargetsFromModal;
 // Funciones nuevas con prefijo planCmp*. Lee PLAN_WEEKS, no escribe.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Ordena las semanas/microciclos por su NOMBRE de forma natural (numérica):
+// "Semana 5" < "Semana 15" < "Semana 20" < "Semana 22". Si los nombres no
+// alcanzan para desempatar, usa la fecha de creación como criterio secundario.
+function planCmpWeekSortKey(name){
+  var s = (name||'').toString().toLowerCase().trim();
+  // Partir en tramos de texto y número para comparar número-a-número.
+  return s.match(/(\d+|\D+)/g) || [s];
+}
+function planCmpCompareWeeks(a, b){
+  var ka = planCmpWeekSortKey(a && a.name);
+  var kb = planCmpWeekSortKey(b && b.name);
+  var n = Math.max(ka.length, kb.length);
+  for(var i=0;i<n;i++){
+    var pa = ka[i], pb = kb[i];
+    if(pa===undefined) return -1;
+    if(pb===undefined) return 1;
+    var na = parseFloat(pa), nb = parseFloat(pb);
+    var aNum = !isNaN(na) && /^\s*\d/.test(pa);
+    var bNum = !isNaN(nb) && /^\s*\d/.test(pb);
+    if(aNum && bNum){
+      if(na!==nb) return na-nb;
+    } else {
+      var c = String(pa).localeCompare(String(pb),'es',{numeric:true});
+      if(c!==0) return c;
+    }
+  }
+  // Desempate final por fecha de creación
+  var ac = (a&&a.created)||0, bc = (b&&b.created)||0;
+  return (''+ac).localeCompare(''+bc);
+}
+
 var PLAN_CMP_METRICS = [
   {k:'mts',     lbl:'Distancia (m)',  color:'#304483'},
   {k:'mts_min', lbl:'Mts/min',        color:'#0277BD'},
@@ -10736,11 +10775,8 @@ function planCmpRenderTable(){
   var isPct = state.mode==='pct';
   var selectedGroups = state.selectedGroups;
 
-  // Sort weeks: by created date if present, fall back to current order
-  var weeks = [].concat(PLAN_WEEKS).sort(function(a,b){
-    var ac = a.created||0, bc = b.created||0;
-    return ac - bc;
-  });
+  // Sort weeks: by name (natural/numeric), tie-break by created date
+  var weeks = [].concat(PLAN_WEEKS).sort(planCmpCompareWeeks);
 
   // Precompute sums + refs for each week
   var weekData = weeks.map(function(w){
@@ -10939,9 +10975,7 @@ function planCmpRenderChart(){
   var metric = PLAN_CMP_METRICS.find(function(m){return m.k===state.metric;}) || PLAN_CMP_METRICS[0];
   var isPct = state.mode==='pct';
 
-  var weeks = [].concat(PLAN_WEEKS).sort(function(a,b){
-    return (a.created||0)-(b.created||0);
-  });
+  var weeks = [].concat(PLAN_WEEKS).sort(planCmpCompareWeeks);
   var weekData = weeks.map(function(w){
     return {week:w, ref:planCmpGetWeekRef(w), sums:planCmpSumWeekByGroup(w)};
   });
@@ -14984,6 +15018,12 @@ document.addEventListener('DOMContentLoaded',function(){
 
   <!-- Fixture tab content (existing grid + panel) -->
   <div id="fix-content-fixture" style="padding:14px">
+    <!-- Toolbar de edición del fixture -->
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button id="fix-edit-toggle" onclick="fixToggleEdit()" class="btn bc" style="font-size:11px;padding:5px 12px">✏️ Editar fixture</button>
+      <button id="fix-add-btn" onclick="fixAddFecha()" class="btn bg" style="font-size:11px;padding:5px 12px;display:none">＋ Agregar fecha</button>
+      <span id="fix-edit-hint" style="font-size:10px;color:#888;display:none">Tocá una tarjeta para editarla · usá ◀ ▶ para reordenar · 🗑 para eliminar</span>
+    </div>
     <div id="fix-grid-inner" class="fix-grid-inner" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px"></div>
     <div id="fix-panel" style="display:none;border-radius:10px;overflow:hidden;border:1px solid #e0e0e0;box-shadow:0 2px 16px #0001">
       <div style="background:#0D1B2A;padding:11px 18px;display:flex;align-items:center;justify-content:space-between">
@@ -14996,6 +15036,38 @@ document.addEventListener('DOMContentLoaded',function(){
       <div id="fix-panel-body" style="padding:16px 18px;background:#fff"></div>
     </div>
   </div>
+
+  <!-- MODAL: editar / agregar fecha del fixture -->
+  <div id="fix-edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2200;align-items:center;justify-content:center;padding:16px">
+    <div style="background:#fff;border-radius:12px;max-width:380px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);overflow:hidden">
+      <div style="background:#0D1B2A;padding:12px 18px;display:flex;align-items:center;justify-content:space-between">
+        <div id="fix-edit-modal-title" style="font-size:14px;font-weight:700;color:#fff">Editar fecha</div>
+        <button onclick="fixEditCancel()" style="border:none;background:#ffffff22;color:#fff;border-radius:5px;cursor:pointer;padding:3px 10px;font-size:11px;font-weight:600">✕</button>
+      </div>
+      <div style="padding:16px 18px;display:flex;flex-direction:column;gap:11px">
+        <label style="font-size:11px;font-weight:600;color:#444">Rival
+          <input id="fix-edit-rival" type="text" placeholder="Nombre del rival" style="width:100%;margin-top:3px;padding:7px 9px;border:1px solid #ccc;border-radius:6px;font-size:12px">
+        </label>
+        <label style="font-size:11px;font-weight:600;color:#444">Condición
+          <select id="fix-edit-cond" style="width:100%;margin-top:3px;padding:7px 9px;border:1px solid #ccc;border-radius:6px;font-size:12px;background:#fff">
+            <option value="Local">🏠 Local</option>
+            <option value="Visitante">✈️ Visitante</option>
+          </select>
+        </label>
+        <label style="font-size:11px;font-weight:600;color:#444">Fecha (opcional)
+          <input id="fix-edit-fecha" type="date" style="width:100%;margin-top:3px;padding:7px 9px;border:1px solid #ccc;border-radius:6px;font-size:12px">
+        </label>
+        <label style="font-size:11px;font-weight:600;color:#444">Resultado (opcional, ej: 2-1)
+          <input id="fix-edit-resultado" type="text" placeholder="—" style="width:100%;margin-top:3px;padding:7px 9px;border:1px solid #ccc;border-radius:6px;font-size:12px">
+        </label>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button onclick="fixEditSave()" class="btn bg" style="flex:1;font-size:12px;padding:8px">💾 Guardar</button>
+          <button onclick="fixEditCancel()" class="btn bc" style="flex:1;font-size:12px;padding:8px">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 
   <!-- Equipo tab -->
   <div id="fix-content-equipo" style="display:none;padding:16px">
@@ -19606,11 +19678,20 @@ document.addEventListener('DOMContentLoaded', function(){
 var _fixActive = null;
 window._fixActive = _fixActive;
 
+// Busca un partido por su id estable `n` (no por posición en el array).
+// Necesario ahora que el fixture es editable (se pueden agregar/quitar/reordenar
+// fechas, así que el índice del array ya no coincide con `n`).
+function fixGet(n){
+  return (FIX_FIXTURE||[]).find(function(m){return m.n===n;}) || null;
+}
+window.fixGet = fixGet;
+
 // ── Grid render ──
 function fixtureRender(){
   var grid = document.getElementById('fix-grid-inner');
   if(!grid) return;
-  grid.innerHTML = FIX_FIXTURE.map(function(m){
+  var editing = !!window._fixEditMode;
+  grid.innerHTML = FIX_FIXTURE.map(function(m, idx){
     var res = m.resultado;
     var parts = res ? res.split('-') : null;
     var n1 = parts ? parseInt(parts[0]) : null;
@@ -19624,31 +19705,178 @@ function fixtureRender(){
       else if(n1<n2){resColor='#E24B4A';resBg='#fff0f0';resBd='#E24B4A44';}
       else{resColor='#EF9F27';resBg='#fffbf0';resBd='#EF9F2744';}
     }
-    return '<div id="fix-item-'+m.n+'" onclick="fixOpenPartido('+m.n+')" style="'
-      +'background:'+(isActive?'#0D1B2A':'#fff')+';border:1.5px solid '+(isActive?'#3B4D88':resBd)+';'
+    var clickAttr = editing ? 'onclick="fixEditOpen('+m.n+')"' : 'onclick="fixOpenPartido('+m.n+')"';
+    var hover = editing ? '' :
+        'onmouseover="this.style.background=('+m.n+'===window._fixActive)?\'#0D1B2A\':\'#f0f5ff\';this.style.borderColor=('+m.n+'===window._fixActive)?\'#3B4D88\':\'#3B4D8855\'" '
+      + 'onmouseout="this.style.background=('+m.n+'===window._fixActive)?\'#0D1B2A\':\'#fff\';this.style.borderColor=('+m.n+'===window._fixActive)?\'#3B4D88\':\''+resBd+'\'"';
+    var editControls = '';
+    if(editing){
+      editControls =
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:3px" onclick="event.stopPropagation()">'
+        + '<button title="Mover antes" onclick="event.stopPropagation();fixMove('+m.n+',-1)" '+(idx===0?'disabled':'')+' style="flex:1;border:1px solid #ccc;background:#fff;border-radius:4px;font-size:11px;padding:2px 0;cursor:'+(idx===0?'default':'pointer')+';color:'+(idx===0?'#ccc':'#3B4D88')+'">◀</button>'
+        + '<button title="Eliminar fecha" onclick="event.stopPropagation();fixDeleteFecha('+m.n+')" style="flex:1;border:1px solid #E24B4A44;background:#fff;border-radius:4px;font-size:11px;padding:2px 0;cursor:pointer;color:#E24B4A">🗑</button>'
+        + '<button title="Mover después" onclick="event.stopPropagation();fixMove('+m.n+',1)" '+(idx===FIX_FIXTURE.length-1?'disabled':'')+' style="flex:1;border:1px solid #ccc;background:#fff;border-radius:4px;font-size:11px;padding:2px 0;cursor:'+(idx===FIX_FIXTURE.length-1?'default':'pointer')+';color:'+(idx===FIX_FIXTURE.length-1?'#ccc':'#3B4D88')+'">▶</button>'
+        + '</div>';
+    }
+    return '<div id="fix-item-'+m.n+'" '+clickAttr+' style="'
+      +'background:'+(isActive&&!editing?'#0D1B2A':'#fff')+';border:1.5px solid '+(isActive&&!editing?'#3B4D88':(editing?'#3B4D8855':resBd))+';'
       +'border-radius:8px;padding:10px 11px;cursor:pointer;position:relative;transition:all .15s;'
-      +'box-shadow:'+(isActive?'0 0 0 2px #3B4D8844':'none')+'" '
-      +'onmouseover="this.style.background=('+m.n+'===window._fixActive)?\'#0D1B2A\':\'#f0f5ff\';this.style.borderColor=('+m.n+'===window._fixActive)?\'#3B4D88\':\'#3B4D8855\'" '
-      +'onmouseout="this.style.background=('+m.n+'===window._fixActive)?\'#0D1B2A\':\'#fff\';this.style.borderColor=('+m.n+'===window._fixActive)?\'#3B4D88\':\''+resBd+'\'">'
+      +'box-shadow:'+(isActive&&!editing?'0 0 0 2px #3B4D8844':'none')+'" '
+      + hover + '>'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
-        +'<span style="font-size:9px;font-weight:700;color:'+(isActive?'#3B4D88':'#aaa')+';letter-spacing:.3px">F'+m.n+'</span>'
+        +'<span style="font-size:9px;font-weight:700;color:'+(isActive&&!editing?'#3B4D88':'#aaa')+';letter-spacing:.3px">F'+(idx+1)+'</span>'
         +(hasData?'<span title="Con planilla" style="width:6px;height:6px;border-radius:50%;background:#3B4D88;display:inline-block"></span>':'')
       +'</div>'
-      +'<div style="font-size:10px;font-weight:700;color:'+(isActive?'#fff':'#1a1a1a')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px">'+condIcon+' '+m.rival+'</div>'
+      +'<div style="font-size:10px;font-weight:700;color:'+(isActive&&!editing?'#fff':'#1a1a1a')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px">'+condIcon+' '+m.rival+'</div>'
       +(res
         ?'<div style="display:inline-block;background:'+resBg+';border:1px solid '+resBd+';border-radius:4px;padding:2px 7px;font-size:11px;font-weight:800;color:'+resColor+'">'+res+'</div>'
         :'<div style="font-size:9px;color:#bbb">pendiente</div>')
+      + editControls
       +'</div>';
   }).join('');
 }
 window.fixtureRender = fixtureRender;
+
+// ══════════════════════════════════════════════════════════════
+// EDICIÓN DEL FIXTURE — agregar / quitar / reordenar / editar fechas
+// ══════════════════════════════════════════════════════════════
+window._fixEditMode = false;
+var _fixEditTarget = null; // n del partido en edición, o null = nuevo
+
+function fixToggleEdit(){
+  window._fixEditMode = !window._fixEditMode;
+  var btn = document.getElementById('fix-edit-toggle');
+  var addBtn = document.getElementById('fix-add-btn');
+  var hint = document.getElementById('fix-edit-hint');
+  if(window._fixEditMode){
+    if(btn){ btn.textContent='✓ Listo'; btn.classList.remove('bc'); btn.classList.add('bg'); }
+    if(addBtn) addBtn.style.display='';
+    if(hint) hint.style.display='';
+    fixClosePanel();
+  } else {
+    if(btn){ btn.textContent='✏️ Editar fixture'; btn.classList.remove('bg'); btn.classList.add('bc'); }
+    if(addBtn) addBtn.style.display='none';
+    if(hint) hint.style.display='none';
+  }
+  fixtureRender();
+}
+window.fixToggleEdit = fixToggleEdit;
+
+// Devuelve un id `n` libre (estable, no reutiliza ids de partidos eliminados)
+function _fixNextN(){
+  var max = 0;
+  (FIX_FIXTURE||[]).forEach(function(m){ if((m.n||0)>max) max=m.n; });
+  return max + 1;
+}
+
+function fixAddFecha(){
+  _fixEditTarget = null;
+  document.getElementById('fix-edit-modal-title').textContent = 'Agregar fecha';
+  document.getElementById('fix-edit-rival').value = '';
+  document.getElementById('fix-edit-cond').value = 'Local';
+  document.getElementById('fix-edit-fecha').value = '';
+  document.getElementById('fix-edit-resultado').value = '';
+  document.getElementById('fix-edit-modal').style.display = 'flex';
+  setTimeout(function(){ var el=document.getElementById('fix-edit-rival'); if(el) el.focus(); }, 50);
+}
+window.fixAddFecha = fixAddFecha;
+
+function fixEditOpen(n){
+  var m = fixGet(n);
+  if(!m) return;
+  _fixEditTarget = n;
+  document.getElementById('fix-edit-modal-title').textContent = 'Editar fecha';
+  document.getElementById('fix-edit-rival').value = m.rival || '';
+  document.getElementById('fix-edit-cond').value = m.cond || 'Local';
+  document.getElementById('fix-edit-fecha').value = m.fecha || '';
+  document.getElementById('fix-edit-resultado').value = m.resultado || '';
+  document.getElementById('fix-edit-modal').style.display = 'flex';
+  setTimeout(function(){ var el=document.getElementById('fix-edit-rival'); if(el) el.focus(); }, 50);
+}
+window.fixEditOpen = fixEditOpen;
+
+function fixEditCancel(){
+  document.getElementById('fix-edit-modal').style.display = 'none';
+  _fixEditTarget = null;
+}
+window.fixEditCancel = fixEditCancel;
+
+function fixEditSave(){
+  var rival = (document.getElementById('fix-edit-rival').value||'').trim();
+  var cond  = document.getElementById('fix-edit-cond').value || 'Local';
+  var fecha = document.getElementById('fix-edit-fecha').value || '';
+  var resRaw= (document.getElementById('fix-edit-resultado').value||'').trim();
+  if(!rival){ alert('Poné el nombre del rival.'); return; }
+  // Validar resultado si se cargó algo (formato N-N)
+  var resultado = null;
+  if(resRaw){
+    if(!/^\d{1,2}\s*-\s*\d{1,2}$/.test(resRaw)){ alert('El resultado debe ser tipo 2-1 (o dejalo vacío).'); return; }
+    resultado = resRaw.replace(/\s+/g,'');
+  }
+  if(_fixEditTarget==null){
+    // Nuevo partido al final
+    var nn = _fixNextN();
+    FIX_FIXTURE.push({n:nn, rival:rival, cond:cond, fecha:fecha, resultado:resultado});
+  } else {
+    var m = fixGet(_fixEditTarget);
+    if(m){
+      m.rival = rival;
+      m.cond = cond;
+      m.fecha = fecha;
+      m.resultado = resultado;
+    }
+  }
+  window.FIX_FIXTURE = FIX_FIXTURE;
+  if(typeof fixSave==='function') fixSave();
+  document.getElementById('fix-edit-modal').style.display = 'none';
+  _fixEditTarget = null;
+  fixtureRender();
+  // Refrescar estadísticas/equipo si están a la vista
+  if(typeof fixRenderEquipo==='function'){ try{ fixRenderEquipo(); }catch(e){} }
+}
+window.fixEditSave = fixEditSave;
+
+function fixDeleteFecha(n){
+  var m = fixGet(n);
+  if(!m) return;
+  var hasData = !!FIX_PLANILLAS[n];
+  var msg = '¿Eliminar la fecha vs "'+(m.rival||'?')+'"?';
+  if(hasData) msg += '\n\nATENCIÓN: esta fecha tiene una planilla cargada que también se eliminará.';
+  if(!confirm(msg)) return;
+  var i = FIX_FIXTURE.findIndex(function(x){return x.n===n;});
+  if(i>-1) FIX_FIXTURE.splice(i,1);
+  if(FIX_PLANILLAS[n]) delete FIX_PLANILLAS[n];
+  window.FIX_FIXTURE = FIX_FIXTURE;
+  window.FIX_PLANILLAS = FIX_PLANILLAS;
+  if(_fixActive===n){ _fixActive=null; window._fixActive=null; fixClosePanel(); }
+  if(typeof fixSave==='function') fixSave();
+  fixtureRender();
+  if(typeof fixRenderEquipo==='function'){ try{ fixRenderEquipo(); }catch(e){} }
+}
+window.fixDeleteFecha = fixDeleteFecha;
+
+function fixMove(n, dir){
+  var i = FIX_FIXTURE.findIndex(function(x){return x.n===n;});
+  if(i<0) return;
+  var j = i + dir;
+  if(j<0 || j>=FIX_FIXTURE.length) return;
+  var tmp = FIX_FIXTURE[i];
+  FIX_FIXTURE[i] = FIX_FIXTURE[j];
+  FIX_FIXTURE[j] = tmp;
+  window.FIX_FIXTURE = FIX_FIXTURE;
+  if(typeof fixSave==='function') fixSave();
+  fixtureRender();
+  if(typeof fixRenderEquipo==='function'){ try{ fixRenderEquipo(); }catch(e){} }
+}
+window.fixMove = fixMove;
 
 // ── Open partido panel (view mode) ──
 function fixOpenPartido(n){
   _fixActive = n;
   window._fixActive = n;
   fixtureRender();
-  var fix = FIX_FIXTURE[n-1];
+  var fix = fixGet(n);
+  if(!fix) return;
   var data = FIX_PLANILLAS[n];
   var panel = document.getElementById('fix-panel');
   document.getElementById('fix-panel-title').textContent = 'Fecha '+n+' — '+fix.rival+(fix.resultado?' ('+fix.resultado+')':'');
@@ -19696,7 +19924,7 @@ function fixBuildViewHTML(n, fix, data){
   if(data.goles&&data.goles.length){
     html+='<div style="margin-bottom:16px"><div style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">⚽ Goles</div><div style="display:flex;gap:7px;flex-wrap:wrap">';
     data.goles.forEach(function(g){
-      var rival=FIX_FIXTURE[n-1].rival;
+      var rival=(fixGet(n)||{}).rival;
       var isNuestro=g.gol!==rival;
       html+='<div style="background:'+(isNuestro?'#edfaf3':'#fff5f5')+';border:1px solid '+(isNuestro?'#1D9E7530':'#E24B4A30')+';border-radius:7px;padding:7px 12px"><div style="font-size:12px;font-weight:700;color:'+(isNuestro?'#1D9E75':'#E24B4A')+'">'+g.gol+'</div>'+(g.asist&&g.asist!=='—'&&isNuestro?'<div style="font-size:10px;color:#888;margin-top:1px">asist. '+g.asist+'</div>':'')+'<div style="font-size:9px;color:#aaa;margin-top:3px">'+g.min+"' · "+g.result+'</div></div>';
     });
@@ -19740,7 +19968,8 @@ function fixBuildViewHTML(n, fix, data){
 
 // ── EDIT MODE ──
 function fixStartEdit(n){
-  var fix = FIX_FIXTURE[n-1];
+  var fix = fixGet(n);
+  if(!fix) return;
   var data = FIX_PLANILLAS[n] || {};
 
   document.getElementById('fix-panel-title').textContent = '✏️ Editando F'+n+' — '+fix.rival;
@@ -19958,7 +20187,8 @@ window.fixAddGolRow = fixAddGolRow;
 
 // ── Save edit ──
 function fixSaveEdit(n){
-  var fix = FIX_FIXTURE[n-1];
+  var fix = fixGet(n);
+  if(!fix) return;
 
   // Result
   var resultado = (document.getElementById('fe-resultado').value||'').trim()||null;
@@ -28142,6 +28372,37 @@ function _sbDrillToPayload(d){
     updated_at: new Date().toISOString()
   };
 }
+// Sube UN solo ejercicio a Supabase de inmediato (no espera el debounce ni
+// depende del batch completo, que podría fallar por tamaño de otra fila con
+// imagen). Se usa al combinar/crear ejercicios para que queden guardados en
+// la nube y aparezcan al re-iniciar sesión, incluso desde otro dispositivo.
+function sbUpsertOneDrill(d){
+  try{
+    if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return;
+    var payload = _sbDrillToPayload(d);
+    if(!payload) return;
+    sbClient.from('drills_exercises').upsert(payload, { onConflict: 'id' }).then(function(res){
+      if(res.error) console.error('[Supabase] Upsert ejercicio combinado error:', res.error);
+      else console.log('[Supabase] Ejercicio combinado guardado en la nube (id ' + payload.id + ')');
+    });
+  }catch(e){ console.warn('sbUpsertOneDrill error:', e); }
+}
+window.sbUpsertOneDrill = sbUpsertOneDrill;
+// Sube TODA la biblioteca de ejercicios a Supabase de inmediato (sin debounce).
+// Útil tras importar un CSV con varias filas nuevas/modificadas.
+function sbSyncAllDrillsNow(){
+  try{
+    if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return;
+    if(typeof D==='undefined' || !Array.isArray(D) || !D.length) return;
+    var payload = D.map(_sbDrillToPayload).filter(function(p){return p && p.id!=null;});
+    if(!payload.length) return;
+    sbClient.from('drills_exercises').upsert(payload, { onConflict: 'id' }).then(function(res){
+      if(res.error) console.error('[Supabase] Sync inmediato drills error:', res.error);
+      else console.log('[Supabase] Sync inmediato drills OK (' + payload.length + ')');
+    });
+  }catch(e){ console.warn('sbSyncAllDrillsNow error:', e); }
+}
+window.sbSyncAllDrillsNow = sbSyncAllDrillsNow;
 function _sbDrillFromRow(row){
   var d = Object.assign({}, row.data || {});
   d.id = row.id;
