@@ -15183,6 +15183,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
   <div style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto">
     <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:#3B4D88;color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid #3B4D88">💚 Wellness &amp; PSE</button>
+    <button id="carga-view-dia" onclick="cargaSetView('dia')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🌅 Wellness del día</button>
     <button id="carga-view-cuadrante" onclick="cargaSetView('cuadrante')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">📊 Cuadrante</button>
   </div>
 </div>
@@ -21464,11 +21465,11 @@ function cargaSelfRenderStep1(){
   body.innerHTML=
     '<div style="font-size:13px;color:#555;margin-bottom:14px">Elegí tu nombre y confirmá la fecha de hoy.</div>'+
     '<label style="display:block;font-size:13px;font-weight:700;color:#0D1B2A;margin-bottom:6px">Jugador</label>'+
-    '<select id="carga-self-name" style="width:100%;padding:13px 12px;font-size:16px;border:2px solid #ddd;border-radius:9px;background:#fff;margin-bottom:16px">'+
+    '<select id="carga-self-name" style="width:100%;box-sizing:border-box;padding:13px 12px;font-size:16px;border:2px solid #ddd;border-radius:9px;background:#fff;margin-bottom:16px">'+
       '<option value="">— Seleccioná tu nombre —</option>'+opts+
     '</select>'+
     '<label style="display:block;font-size:13px;font-weight:700;color:#0D1B2A;margin-bottom:6px">Fecha</label>'+
-    '<input type="date" id="carga-self-date" value="'+_cargaSelfState.date+'" style="width:100%;padding:13px 12px;font-size:16px;border:2px solid #ddd;border-radius:9px;background:#fff;margin-bottom:22px">'+
+    '<input type="date" id="carga-self-date" value="'+_cargaSelfState.date+'" style="width:100%;box-sizing:border-box;padding:13px 12px;font-size:16px;border:2px solid #ddd;border-radius:9px;background:#fff;margin-bottom:22px">'+
     '<button onclick="cargaSelfStep1Next()" style="width:100%;padding:15px;font-size:16px;font-weight:800;color:#fff;background:'+accent+';border:none;border-radius:10px;cursor:pointer">Continuar →</button>';
 }
 
@@ -21511,18 +21512,24 @@ function cargaSelfRenderWellness(){
     '<div style="font-size:13px;color:#555;margin-bottom:6px"><strong>'+_cargaSelfState.name+'</strong> · '+_cargaSelfState.date+'</div>'+
     '<div style="font-size:11px;color:#888;margin-bottom:18px">Deslizá / tocá un valor del 1 (muy mal) al 5 (excelente) en cada ítem.</div>'+
     sliders+
-    // Dolor
+    // Dolor muscular — desplegables (igual que la carga grupal por CSV)
     '<div style="border-top:1px solid #eee;padding-top:16px;margin-top:4px">'+
-      '<div style="font-size:15px;font-weight:700;color:#0D1B2A;margin-bottom:10px">¿Tenés dolor?</div>'+
-      '<div style="display:flex;gap:8px;margin-bottom:12px">'+
-        '<button type="button" id="csw-dolor-no" onclick="cargaSelfSetDolor(false)" style="flex:1;padding:13px;font-size:15px;font-weight:700;border:2px solid '+accent+';background:'+accent+';color:#fff;border-radius:9px;cursor:pointer">No</button>'+
-        '<button type="button" id="csw-dolor-si" onclick="cargaSelfSetDolor(true)" style="flex:1;padding:13px;font-size:15px;font-weight:700;border:2px solid #ddd;background:#fff;color:#888;border-radius:9px;cursor:pointer">Sí</button>'+
-      '</div>'+
+      '<label style="display:block;font-size:15px;font-weight:700;color:#0D1B2A;margin-bottom:8px">Dolor muscular</label>'+
+      '<select id="csw-dolor-sel" onchange="cargaSelfDolorChange()" style="width:100%;box-sizing:border-box;padding:13px 12px;font-size:16px;border:2px solid #ddd;border-radius:9px;background:#fff;margin-bottom:12px">'+
+        '<option value="No">No</option>'+
+        '<option value="Si">Sí ⚠️</option>'+
+      '</select>'+
       '<div id="csw-dolor-detail" style="display:none">'+
-        '<label style="display:block;font-size:12px;font-weight:600;color:#444;margin-bottom:5px">¿Dónde?</label>'+
-        '<input type="text" id="csw-dolor-zona" placeholder="Ej: isquiotibial derecho" style="width:100%;padding:11px;font-size:14px;border:2px solid #ddd;border-radius:8px;margin-bottom:12px">'+
-        '<label style="display:block;font-size:12px;font-weight:600;color:#444;margin-bottom:5px">¿Hace cuánto?</label>'+
-        '<input type="text" id="csw-dolor-tiempo" placeholder="Ej: 2 días" style="width:100%;padding:11px;font-size:14px;border:2px solid #ddd;border-radius:8px;margin-bottom:6px">'+
+        '<label style="display:block;font-size:13px;font-weight:700;color:#0D1B2A;margin-bottom:6px">Zona del dolor</label>'+
+        '<select id="csw-dolor-zona" style="width:100%;box-sizing:border-box;padding:13px 12px;font-size:16px;border:2px solid #E24B4A55;border-radius:9px;background:#fff;margin-bottom:12px">'+
+          '<option value="">— Elegí la zona —</option>'+
+          DOLOR_ZONAS.map(function(z){return '<option>'+z+'</option>';}).join('')+
+        '</select>'+
+        '<label style="display:block;font-size:13px;font-weight:700;color:#0D1B2A;margin-bottom:6px">¿Hace cuánto?</label>'+
+        '<select id="csw-dolor-tiempo" style="width:100%;box-sizing:border-box;padding:13px 12px;font-size:16px;border:2px solid #ddd;border-radius:9px;background:#fff;margin-bottom:6px">'+
+          '<option value="">— Elegí —</option>'+
+          ['Hoy','1 día','2 días','3 días','4-7 días','Más de 1 semana','Más de 1 mes'].map(function(t){return '<option>'+t+'</option>';}).join('')+
+        '</select>'+
       '</div>'+
     '</div>'+
     '<div id="carga-self-send-wrap" style="margin-top:22px"></div>'+
@@ -21546,22 +21553,15 @@ function cargaSelfSetWell(key,v){
 }
 window.cargaSelfSetWell=cargaSelfSetWell;
 
-function cargaSelfSetDolor(has){
-  _cargaSelfState.dolor=has;
-  var bNo=document.getElementById('csw-dolor-no'), bSi=document.getElementById('csw-dolor-si');
+function cargaSelfDolorChange(){
+  var sel=document.getElementById('csw-dolor-sel');
   var det=document.getElementById('csw-dolor-detail');
-  if(has){
-    bSi.style.background='#E24B4A'; bSi.style.color='#fff'; bSi.style.borderColor='#E24B4A';
-    bNo.style.background='#fff'; bNo.style.color='#888'; bNo.style.borderColor='#ddd';
-    if(det)det.style.display='block';
-  } else {
-    bNo.style.background='#1D9E75'; bNo.style.color='#fff'; bNo.style.borderColor='#1D9E75';
-    bSi.style.background='#fff'; bSi.style.color='#888'; bSi.style.borderColor='#ddd';
-    if(det)det.style.display='none';
-  }
+  var has = sel && sel.value==='Si';
+  _cargaSelfState.dolor=has;
+  if(det)det.style.display=has?'block':'none';
   cargaSelfUpdateWellSend();
 }
-window.cargaSelfSetDolor=cargaSelfSetDolor;
+window.cargaSelfDolorChange=cargaSelfDolorChange;
 
 // El botón "Enviar" sólo aparece cuando están todas las métricas completas
 function cargaSelfUpdateWellSend(){
@@ -22460,7 +22460,7 @@ window.cargaWeekChange=cargaWeekChange;
 // ── View switcher ──
 function cargaSetView(view){
   document.getElementById('carga-tab-mode').value=view;
-  ['cuadrante','wellpse'].forEach(function(t){
+  ['cuadrante','wellpse','dia'].forEach(function(t){
     var btn=document.getElementById('carga-view-'+t);
     if(btn){btn.style.background=t===view?'#3B4D88':'none';btn.style.color=t===view?'#fff':'#aaa';btn.style.borderBottom=t===view?'2px solid #3B4D88':'2px solid transparent';}
   });
@@ -22475,9 +22475,142 @@ function cargaRender(){
   // Compatibilidad con tabs viejas: 'pse', 'wellness', 'tendencia', 'dolores' redirigen a 'wellpse'
   if(tab==='pse'||tab==='wellness'||tab==='tendencia'||tab==='dolores') tab='wellpse';
   if(tab==='cuadrante')cargaRenderCuadrante();
+  else if(tab==='dia')cargaRenderWellnessDia();
   else if(tab==='wellpse')cargaRenderWellPse();
 }
 window.cargaRender=cargaRender;
+
+// ═══════════════════════════════════════════════════════════════
+// VISTA "WELLNESS DEL DÍA": cómo amaneció todo el grupo en una fecha,
+// con sistema de colores (igual que la revisión al importar CSV grupal).
+// ═══════════════════════════════════════════════════════════════
+var _cargaDiaDate = null;  // fecha seleccionada (ISO)
+
+function _cargaWellDiaDates(){
+  // Fechas únicas con datos de wellness, normalizadas a ISO, ordenadas desc
+  var set={};
+  (WELLNESS_DATA||[]).forEach(function(r){
+    var iso=(typeof cargaParseDate==='function' && cargaParseDate(r.date))||r.date;
+    if(iso) set[iso]=true;
+  });
+  return Object.keys(set).sort(function(a,b){return a<b?1:-1;});
+}
+
+function cargaDiaSetDate(d){ _cargaDiaDate=d; cargaRenderWellnessDia(); }
+window.cargaDiaSetDate=cargaDiaSetDate;
+
+function cargaRenderWellnessDia(){
+  var out=document.getElementById('carga-main-content'); if(!out) return;
+  var layout=WELLNESS_LAYOUT||cargaDefaultWellnessLayout();
+  var dates=_cargaWellDiaDates();
+
+  if(!dates.length){
+    out.innerHTML='<div style="padding:30px;text-align:center;color:#aaa"><div style="font-size:28px;margin-bottom:8px">🌅</div>'+
+      '<div style="font-size:13px;font-weight:600;color:#555">Todavía no hay datos de wellness cargados</div>'+
+      '<div style="font-size:11px;color:#aaa;margin-top:5px">Usá "📲 Cargá tu Wellness" o importá un CSV grupal</div></div>';
+    return;
+  }
+  if(!_cargaDiaDate || dates.indexOf(_cargaDiaDate)<0) _cargaDiaDate=dates[0]; // más reciente
+
+  // Registros de esa fecha (último por jugador si hay duplicados)
+  var byName={};
+  (WELLNESS_DATA||[]).forEach(function(r){
+    var iso=(typeof cargaParseDate==='function' && cargaParseDate(r.date))||r.date;
+    if(iso!==_cargaDiaDate) return;
+    byName[r.name]=r; // si se repite, queda el último del array
+  });
+  var rows=Object.keys(byName).sort(function(a,b){return a.localeCompare(b,'es');}).map(function(n){return byName[n];});
+  var maxTotal=layout.fields.reduce(function(a,f){return a+(f.max||5);},0);
+
+  // Selector de fecha (botones rápidos + input date)
+  var dateBtns=dates.slice(0,8).map(function(d){
+    var sel=d===_cargaDiaDate;
+    var lbl=(function(){var p=d.split('-');return p.length===3?(p[2]+'/'+p[1]):d;})();
+    return '<button onclick="cargaDiaSetDate(\''+d+'\')" style="padding:5px 11px;border:1px solid '+(sel?'#1D9E75':'#ddd')+';background:'+(sel?'#1D9E75':'#fff')+';color:'+(sel?'#fff':'#555')+';border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">'+lbl+'</button>';
+  }).join('');
+
+  // Color helpers (mismos umbrales que la revisión CSV)
+  function colMetric(v,mx){var p=mx>0?v/mx:0;return p>=0.8?'#1D9E75':p>=0.6?'#8BC34A':p>=0.4?'#EF9F27':'#E24B4A';}
+  function bgMetric(v,mx){var p=mx>0?v/mx:0;return p>=0.8?'#e8f8f0':p>=0.6?'#f1f8e9':p>=0.4?'#fff8e1':'#fdeaea';}
+  function colTotal(r){var p=maxTotal>0?r.readiness/maxTotal:0;return p>=0.8?'#1D9E75':p>=0.6?'#EF9F27':'#E24B4A';}
+
+  // Promedios del grupo por métrica
+  var avg={}; layout.fields.forEach(function(f){
+    var vals=rows.map(function(r){return (r.fields&&r.fields[f.key])||0;}).filter(function(v){return v>0;});
+    avg[f.key]=vals.length?vals.reduce(function(a,b){return a+b;},0)/vals.length:0;
+  });
+  var avgTotal=rows.length?rows.reduce(function(a,r){return a+(r.readiness||0);},0)/rows.length:0;
+  var nDolor=rows.filter(function(r){return r.dolor==='Si';}).length;
+
+  var html='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">';
+  // Header con selector
+  html+='<div style="background:#0D1B2A;padding:12px 16px">';
+  html+='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">';
+  html+='<div style="color:#fff;font-size:14px;font-weight:800">🌅 ¿Cómo amaneció el grupo?</div>';
+  html+='<label style="font-size:11px;color:#9fb3c8;display:flex;align-items:center;gap:6px">Otra fecha: <input type="date" value="'+_cargaDiaDate+'" onchange="cargaDiaSetDate(this.value)" style="font-size:11px;padding:4px 7px;border:none;border-radius:5px"></label>';
+  html+='</div>';
+  html+='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">'+dateBtns+'</div>';
+  html+='</div>';
+
+  // Resumen
+  html+='<div style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#f8faff;border-bottom:1px solid #eef2f8">';
+  html+='<div style="font-size:11px;color:#555"><strong>'+rows.length+'</strong> jugadores</div>';
+  html+='<div style="font-size:11px;color:'+colTotal({readiness:avgTotal})+'">Promedio grupo: <strong>'+Math.round(avgTotal)+'/'+maxTotal+'</strong></div>';
+  if(nDolor>0) html+='<div style="font-size:11px;color:#C62828">⚠️ <strong>'+nDolor+'</strong> con dolor</div>';
+  html+='</div>';
+
+  // Tabla
+  html+='<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:11px;min-width:560px">';
+  html+='<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">';
+  html+='<th style="padding:8px 12px;text-align:left;font-weight:700;color:#555;white-space:nowrap;position:sticky;left:0;background:#f5f7fa">Jugador</th>';
+  layout.fields.forEach(function(f){
+    html+='<th style="padding:8px 8px;text-align:center;font-weight:700;color:#555;white-space:nowrap">'+f.label+'</th>';
+  });
+  html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#0D1B2A;white-space:nowrap">Total</th>';
+  html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#C62828;white-space:nowrap">Dolor</th>';
+  html+='</tr></thead><tbody>';
+
+  rows.forEach(function(r){
+    html+='<tr style="border-bottom:0.5px solid #eee">';
+    html+='<td style="padding:7px 12px;font-weight:600;color:#0D1B2A;white-space:nowrap;position:sticky;left:0;background:#fff">'+r.name+'</td>';
+    layout.fields.forEach(function(f){
+      var v=(r.fields&&r.fields[f.key])||0; var mx=f.max||5;
+      html+='<td style="padding:7px 8px;text-align:center;font-weight:800;color:'+colMetric(v,mx)+';background:'+bgMetric(v,mx)+'">'+(v||'–')+'</td>';
+    });
+    html+='<td style="padding:7px 10px;text-align:center;font-weight:800;color:'+colTotal(r)+'">'+Math.round(r.readiness||0)+'<span style="font-size:9px;color:#aaa">/'+maxTotal+'</span></td>';
+    if(r.dolor==='Si'){
+      var zona=r.dolorZona||'Sí';
+      var tiempo=r.dolorTiempo||(r.fields&&r.fields._dolorTiempo)||'';
+      html+='<td style="padding:7px 10px;text-align:center"><span style="background:#E24B4A18;border:1px solid #E24B4A55;color:#C62828;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;white-space:nowrap">⚠️ '+zona+(tiempo?' · '+tiempo:'')+'</span></td>';
+    } else {
+      html+='<td style="padding:7px 10px;text-align:center;color:#9ccc65;font-weight:700">✓</td>';
+    }
+    html+='</tr>';
+  });
+
+  // Fila promedio
+  html+='<tr style="border-top:2px solid #e0e0e0;background:#f8faff">';
+  html+='<td style="padding:8px 12px;font-weight:800;color:#0D1B2A;position:sticky;left:0;background:#f8faff">Promedio</td>';
+  layout.fields.forEach(function(f){
+    var mx=f.max||5; var v=avg[f.key];
+    html+='<td style="padding:8px 8px;text-align:center;font-weight:800;color:'+colMetric(v,mx)+'">'+(v?v.toFixed(1):'–')+'</td>';
+  });
+  html+='<td style="padding:8px 10px;text-align:center;font-weight:800;color:'+colTotal({readiness:avgTotal})+'">'+Math.round(avgTotal)+'</td>';
+  html+='<td style="padding:8px 10px;text-align:center;color:#888;font-size:10px">'+(nDolor||0)+' con dolor</td>';
+  html+='</tr>';
+
+  html+='</tbody></table></div>';
+  // Leyenda de colores
+  html+='<div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 16px;background:#fafafa;border-top:1px solid #eee;font-size:10px;color:#666">';
+  html+='<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#1D9E75;vertical-align:middle"></span> Óptimo (≥80%)</span>';
+  html+='<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#8BC34A;vertical-align:middle"></span> Bueno (≥60%)</span>';
+  html+='<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#EF9F27;vertical-align:middle"></span> Alerta (≥40%)</span>';
+  html+='<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#E24B4A;vertical-align:middle"></span> Bajo (&lt;40%)</span>';
+  html+='</div>';
+  html+='</div>';
+  out.innerHTML=html;
+}
+window.cargaRenderWellnessDia=cargaRenderWellnessDia;
 
 // ═══════════════════════════════════════════════════════════════
 // Estado de la subpestaña Wellness & PSE: vista de equipo o individual
