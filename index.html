@@ -15105,6 +15105,14 @@ document.addEventListener('DOMContentLoaded',function(){
 <!-- ── VISTA CARGA ── -->
 <div id="view-carga" style="display:none">
 
+<!-- Carga presencial del jugador (kiosko): botones prominentes arriba -->
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;background:linear-gradient(135deg,#0D1B2A,#1a2f4a);border-radius:10px">
+  <div style="font-size:12px;font-weight:700;color:#fff;margin-right:4px">📲 Carga del jugador:</div>
+  <button class="btn" onclick="cargaSelfEntry('wellness')" style="font-size:13px;padding:9px 18px;background:#1D9E75;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Cargá tu Wellness</button>
+  <button class="btn" onclick="cargaSelfEntry('pse')" style="font-size:13px;padding:9px 18px;background:#D85A30;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Cargá tu PSE</button>
+  <span style="font-size:10px;color:#9fb3c8;margin-left:auto">Pasale la tablet al plantel · cada uno elige su nombre y completa</span>
+</div>
+
 <!-- Import panels (collapsible) -->
 <details id="carga-imp-det" style="margin-bottom:10px">
 <summary>📥 Importar datos — Wellness y PSE individual</summary>
@@ -15130,7 +15138,6 @@ document.addEventListener('DOMContentLoaded',function(){
         <button class="btn bg" onclick="cargaImportWellness()" style="font-size:11px;padding:5px 16px">✓ Importar</button>
         <button class="btn" onclick="cargaOpenLayoutEditor('wellness')" style="font-size:11px;padding:5px 10px;background:#e8efff;color:#0C447C;border:1px solid #b3ccf5">⚙️ Columnas</button>
         <button class="btn" onclick="cargaOpenManualEntry('wellness')" style="font-size:11px;padding:5px 10px;background:#f0fff8;color:#1D9E75;border:1px solid #1D9E7555">✏️ Carga manual</button>
-        <button class="btn" onclick="cargaSelfEntry('wellness')" style="font-size:11px;padding:5px 10px;background:#1D9E75;color:#fff;border:1px solid #1D9E75;font-weight:700">📲 Cargá tu Wellness</button>
         <button class="btn bc" onclick="cargaClearData('wellness')" style="font-size:11px;padding:5px 10px;color:#888" title="Vacía el cuadro de importar (no toca los datos ya cargados)">🧹 Limpiar form</button>
         <span id="carga-wellness-msg" style="font-size:11px;font-weight:600"></span>
       </div>
@@ -15153,7 +15160,6 @@ document.addEventListener('DOMContentLoaded',function(){
         <button class="btn bg" onclick="cargaImportPSE()" style="font-size:11px;padding:5px 16px">✓ Importar</button>
         <button class="btn" onclick="cargaOpenLayoutEditor('pse')" style="font-size:11px;padding:5px 10px;background:#e8efff;color:#0C447C;border:1px solid #b3ccf5">⚙️ Columnas</button>
         <button class="btn" onclick="cargaOpenManualEntry('pse')" style="font-size:11px;padding:5px 10px;background:#f0fff8;color:#1D9E75;border:1px solid #1D9E7555">✏️ Carga manual</button>
-        <button class="btn" onclick="cargaSelfEntry('pse')" style="font-size:11px;padding:5px 10px;background:#1D9E75;color:#fff;border:1px solid #1D9E75;font-weight:700">📲 Cargá tu PSE</button>
         <button class="btn bc" onclick="cargaClearData('pse')" style="font-size:11px;padding:5px 10px;color:#888" title="Vacía el cuadro de importar (no toca los datos ya cargados)">🧹 Limpiar form</button>
         <span id="carga-pse-msg" style="font-size:11px;font-weight:600"></span>
       </div>
