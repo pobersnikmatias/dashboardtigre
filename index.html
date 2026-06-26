@@ -15130,6 +15130,7 @@ document.addEventListener('DOMContentLoaded',function(){
         <button class="btn bg" onclick="cargaImportWellness()" style="font-size:11px;padding:5px 16px">✓ Importar</button>
         <button class="btn" onclick="cargaOpenLayoutEditor('wellness')" style="font-size:11px;padding:5px 10px;background:#e8efff;color:#0C447C;border:1px solid #b3ccf5">⚙️ Columnas</button>
         <button class="btn" onclick="cargaOpenManualEntry('wellness')" style="font-size:11px;padding:5px 10px;background:#f0fff8;color:#1D9E75;border:1px solid #1D9E7555">✏️ Carga manual</button>
+        <button class="btn" onclick="cargaSelfEntry('wellness')" style="font-size:11px;padding:5px 10px;background:#1D9E75;color:#fff;border:1px solid #1D9E75;font-weight:700">📲 Cargá tu Wellness</button>
         <button class="btn bc" onclick="cargaClearData('wellness')" style="font-size:11px;padding:5px 10px;color:#888" title="Vacía el cuadro de importar (no toca los datos ya cargados)">🧹 Limpiar form</button>
         <span id="carga-wellness-msg" style="font-size:11px;font-weight:600"></span>
       </div>
@@ -15152,6 +15153,7 @@ document.addEventListener('DOMContentLoaded',function(){
         <button class="btn bg" onclick="cargaImportPSE()" style="font-size:11px;padding:5px 16px">✓ Importar</button>
         <button class="btn" onclick="cargaOpenLayoutEditor('pse')" style="font-size:11px;padding:5px 10px;background:#e8efff;color:#0C447C;border:1px solid #b3ccf5">⚙️ Columnas</button>
         <button class="btn" onclick="cargaOpenManualEntry('pse')" style="font-size:11px;padding:5px 10px;background:#f0fff8;color:#1D9E75;border:1px solid #1D9E7555">✏️ Carga manual</button>
+        <button class="btn" onclick="cargaSelfEntry('pse')" style="font-size:11px;padding:5px 10px;background:#1D9E75;color:#fff;border:1px solid #1D9E75;font-weight:700">📲 Cargá tu PSE</button>
         <button class="btn bc" onclick="cargaClearData('pse')" style="font-size:11px;padding:5px 10px;color:#888" title="Vacía el cuadro de importar (no toca los datos ya cargados)">🧹 Limpiar form</button>
         <span id="carga-pse-msg" style="font-size:11px;font-weight:600"></span>
       </div>
@@ -21395,6 +21397,283 @@ function cargaManualSave(type){
   }
 }
 window.cargaManualSave=cargaManualSave;
+
+// ══════════════════════════════════════════════════════════════════════════
+// CARGA INDIVIDUAL DEL JUGADOR (kiosko presencial en tablet/celular)
+// "Cargá tu Wellness" y "Cargá tu PSE": el jugador elige su nombre, completa
+// con deslizables (wellness 1-5) o botones Borg (PSE 1-10), confirma con
+// "Enviar". Fecha = hoy por defecto. Si pisa un dato existente, queda el último.
+// ══════════════════════════════════════════════════════════════════════════
+var _cargaSelfState = { type:null, name:null, date:null, vals:{}, dolor:false, dolorZona:'', dolorTiempo:'', pse:null };
+
+function cargaSelfPlayerNames(){
+  var nameSet={};
+  Object.values(PLAYER_PROFILES||{}).forEach(function(p){if(p.name)nameSet[p.name]=true;});
+  (MATCHES||[]).forEach(function(m){(m.players||[]).forEach(function(p){if(p.name)nameSet[p.name]=true;});});
+  (MICROCICLO||[]).forEach(function(s){(s.players||[]).forEach(function(p){if(p.name)nameSet[p.name]=true;});});
+  (WELLNESS_DATA||[]).forEach(function(r){if(r.name)nameSet[r.name]=true;});
+  (PSE_DATA||[]).forEach(function(r){if(r.name)nameSet[r.name]=true;});
+  return Object.keys(nameSet).sort(function(a,b){return a.localeCompare(b,'es');});
+}
+
+function cargaSelfEntry(type){
+  var existing=document.getElementById('carga-self-modal');
+  if(existing) existing.remove();
+  var today=new Date().toISOString().slice(0,10);
+  _cargaSelfState={ type:type, name:null, date:today, vals:{}, dolor:false, dolorZona:'', dolorTiempo:'', pse:null };
+
+  var isWell=type==='wellness';
+  var accent=isWell?'#1D9E75':'#D85A30';
+
+  var modal=document.createElement('div');
+  modal.id='carga-self-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(13,27,42,0.92);z-index:11000;display:flex;align-items:flex-start;justify-content:center;padding:0;overflow-y:auto';
+
+  modal.innerHTML=
+    '<div style="background:#fff;max-width:560px;width:100%;min-height:100vh;display:flex;flex-direction:column">'+
+      '<div style="padding:16px 20px;background:'+accent+';display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:3">'+
+        '<div style="font-size:18px;font-weight:800;color:#fff">'+(isWell?'📲 Cargá tu Wellness':'📲 Cargá tu PSE')+'</div>'+
+        '<button onclick="cargaSelfClose()" style="background:#ffffff33;border:none;color:#fff;border-radius:6px;padding:6px 14px;font-size:16px;cursor:pointer;font-weight:700">✕</button>'+
+      '</div>'+
+      '<div id="carga-self-body" style="padding:18px 20px;flex:1"></div>'+
+    '</div>';
+  document.body.appendChild(modal);
+  cargaSelfRenderStep1();
+}
+window.cargaSelfEntry=cargaSelfEntry;
+
+function cargaSelfClose(){
+  var m=document.getElementById('carga-self-modal');
+  if(m)m.remove();
+}
+window.cargaSelfClose=cargaSelfClose;
+
+// Paso 1: elegir nombre + confirmar fecha
+function cargaSelfRenderStep1(){
+  var body=document.getElementById('carga-self-body');
+  if(!body)return;
+  var names=cargaSelfPlayerNames();
+  var accent=_cargaSelfState.type==='wellness'?'#1D9E75':'#D85A30';
+  var opts=names.map(function(n){return '<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>';}).join('');
+  body.innerHTML=
+    '<div style="font-size:13px;color:#555;margin-bottom:14px">Elegí tu nombre y confirmá la fecha de hoy.</div>'+
+    '<label style="display:block;font-size:13px;font-weight:700;color:#0D1B2A;margin-bottom:6px">Jugador</label>'+
+    '<select id="carga-self-name" style="width:100%;padding:13px 12px;font-size:16px;border:2px solid #ddd;border-radius:9px;background:#fff;margin-bottom:16px">'+
+      '<option value="">— Seleccioná tu nombre —</option>'+opts+
+    '</select>'+
+    '<label style="display:block;font-size:13px;font-weight:700;color:#0D1B2A;margin-bottom:6px">Fecha</label>'+
+    '<input type="date" id="carga-self-date" value="'+_cargaSelfState.date+'" style="width:100%;padding:13px 12px;font-size:16px;border:2px solid #ddd;border-radius:9px;background:#fff;margin-bottom:22px">'+
+    '<button onclick="cargaSelfStep1Next()" style="width:100%;padding:15px;font-size:16px;font-weight:800;color:#fff;background:'+accent+';border:none;border-radius:10px;cursor:pointer">Continuar →</button>';
+}
+
+function cargaSelfStep1Next(){
+  var name=document.getElementById('carga-self-name').value;
+  var date=document.getElementById('carga-self-date').value;
+  if(!name){alert('Elegí tu nombre.');return;}
+  if(!date){alert('Elegí la fecha.');return;}
+  _cargaSelfState.name=name;
+  _cargaSelfState.date=date;
+  if(_cargaSelfState.type==='wellness') cargaSelfRenderWellness();
+  else cargaSelfRenderPse();
+}
+window.cargaSelfStep1Next=cargaSelfStep1Next;
+
+// ── WELLNESS: deslizables 1-5 por métrica + dolor ──
+function cargaSelfRenderWellness(){
+  var body=document.getElementById('carga-self-body');
+  if(!body)return;
+  var layout=WELLNESS_LAYOUT||cargaDefaultWellnessLayout();
+  var accent='#1D9E75';
+  var sliders=layout.fields.map(function(f){
+    var max=f.max||5;
+    return '<div style="margin-bottom:20px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+        '<span style="font-size:15px;font-weight:700;color:#0D1B2A">'+f.label+'</span>'+
+        '<span id="csw-val-'+f.key+'" style="font-size:18px;font-weight:800;color:#bbb;min-width:30px;text-align:center">–</span>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px">'+
+        [1,2,3,4,5].slice(0,max).map(function(v){
+          return '<button type="button" onclick="cargaSelfSetWell(\''+f.key+'\','+v+')" id="csw-'+f.key+'-'+v+'" '+
+            'style="flex:1;padding:14px 0;font-size:16px;font-weight:700;border:2px solid #ddd;background:#fff;color:#888;border-radius:9px;cursor:pointer;transition:all .12s">'+v+'</button>';
+        }).join('')+
+      '</div>'+
+      '<div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-top:3px"><span>Muy mal</span><span>Excelente</span></div>'+
+    '</div>';
+  }).join('');
+
+  body.innerHTML=
+    '<div style="font-size:13px;color:#555;margin-bottom:6px"><strong>'+_cargaSelfState.name+'</strong> · '+_cargaSelfState.date+'</div>'+
+    '<div style="font-size:11px;color:#888;margin-bottom:18px">Deslizá / tocá un valor del 1 (muy mal) al 5 (excelente) en cada ítem.</div>'+
+    sliders+
+    // Dolor
+    '<div style="border-top:1px solid #eee;padding-top:16px;margin-top:4px">'+
+      '<div style="font-size:15px;font-weight:700;color:#0D1B2A;margin-bottom:10px">¿Tenés dolor?</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:12px">'+
+        '<button type="button" id="csw-dolor-no" onclick="cargaSelfSetDolor(false)" style="flex:1;padding:13px;font-size:15px;font-weight:700;border:2px solid '+accent+';background:'+accent+';color:#fff;border-radius:9px;cursor:pointer">No</button>'+
+        '<button type="button" id="csw-dolor-si" onclick="cargaSelfSetDolor(true)" style="flex:1;padding:13px;font-size:15px;font-weight:700;border:2px solid #ddd;background:#fff;color:#888;border-radius:9px;cursor:pointer">Sí</button>'+
+      '</div>'+
+      '<div id="csw-dolor-detail" style="display:none">'+
+        '<label style="display:block;font-size:12px;font-weight:600;color:#444;margin-bottom:5px">¿Dónde?</label>'+
+        '<input type="text" id="csw-dolor-zona" placeholder="Ej: isquiotibial derecho" style="width:100%;padding:11px;font-size:14px;border:2px solid #ddd;border-radius:8px;margin-bottom:12px">'+
+        '<label style="display:block;font-size:12px;font-weight:600;color:#444;margin-bottom:5px">¿Hace cuánto?</label>'+
+        '<input type="text" id="csw-dolor-tiempo" placeholder="Ej: 2 días" style="width:100%;padding:11px;font-size:14px;border:2px solid #ddd;border-radius:8px;margin-bottom:6px">'+
+      '</div>'+
+    '</div>'+
+    '<div id="carga-self-send-wrap" style="margin-top:22px"></div>'+
+    '<div style="height:20px"></div>';
+  cargaSelfUpdateWellSend();
+}
+
+function cargaSelfSetWell(key,v){
+  _cargaSelfState.vals[key]=v;
+  var layout=WELLNESS_LAYOUT||cargaDefaultWellnessLayout();
+  var max=(layout.fields.find(function(f){return f.key===key;})||{}).max||5;
+  for(var i=1;i<=max;i++){
+    var b=document.getElementById('csw-'+key+'-'+i);
+    if(!b)continue;
+    if(i===v){ b.style.background='#1D9E75'; b.style.color='#fff'; b.style.borderColor='#1D9E75'; }
+    else { b.style.background='#fff'; b.style.color='#888'; b.style.borderColor='#ddd'; }
+  }
+  var lbl=document.getElementById('csw-val-'+key);
+  if(lbl){ lbl.textContent=v; lbl.style.color='#1D9E75'; }
+  cargaSelfUpdateWellSend();
+}
+window.cargaSelfSetWell=cargaSelfSetWell;
+
+function cargaSelfSetDolor(has){
+  _cargaSelfState.dolor=has;
+  var bNo=document.getElementById('csw-dolor-no'), bSi=document.getElementById('csw-dolor-si');
+  var det=document.getElementById('csw-dolor-detail');
+  if(has){
+    bSi.style.background='#E24B4A'; bSi.style.color='#fff'; bSi.style.borderColor='#E24B4A';
+    bNo.style.background='#fff'; bNo.style.color='#888'; bNo.style.borderColor='#ddd';
+    if(det)det.style.display='block';
+  } else {
+    bNo.style.background='#1D9E75'; bNo.style.color='#fff'; bNo.style.borderColor='#1D9E75';
+    bSi.style.background='#fff'; bSi.style.color='#888'; bSi.style.borderColor='#ddd';
+    if(det)det.style.display='none';
+  }
+  cargaSelfUpdateWellSend();
+}
+window.cargaSelfSetDolor=cargaSelfSetDolor;
+
+// El botón "Enviar" sólo aparece cuando están todas las métricas completas
+function cargaSelfUpdateWellSend(){
+  var wrap=document.getElementById('carga-self-send-wrap');
+  if(!wrap)return;
+  var layout=WELLNESS_LAYOUT||cargaDefaultWellnessLayout();
+  var allDone=layout.fields.every(function(f){return _cargaSelfState.vals[f.key]>0;});
+  if(allDone){
+    wrap.innerHTML='<button onclick="cargaSelfSubmitWellness()" style="width:100%;padding:16px;font-size:17px;font-weight:800;color:#fff;background:#1D9E75;border:none;border-radius:11px;cursor:pointer;box-shadow:0 4px 14px #1D9E7555">✓ Enviar</button>';
+  } else {
+    var faltan=layout.fields.filter(function(f){return !(_cargaSelfState.vals[f.key]>0);}).length;
+    wrap.innerHTML='<div style="text-align:center;font-size:12px;color:#aaa;padding:14px;border:2px dashed #ddd;border-radius:10px">Completá las '+faltan+' métrica(s) restante(s) para enviar</div>';
+  }
+}
+
+function cargaSelfSubmitWellness(){
+  var s=_cargaSelfState;
+  var layout=WELLNESS_LAYOUT||cargaDefaultWellnessLayout();
+  var fields={};
+  layout.fields.forEach(function(f){ fields[f.key]=s.vals[f.key]||0; });
+  var readiness=Object.values(fields).reduce(function(a,b){return a+b;},0);
+  var maxR=layout.fields.reduce(function(a,f){return a+(f.max||5);},0);
+  var dolorZona='', dolorTiempo='';
+  if(s.dolor){
+    var z=document.getElementById('csw-dolor-zona'); dolorZona=z?(z.value||'').trim():'';
+    var t=document.getElementById('csw-dolor-tiempo'); dolorTiempo=t?(t.value||'').trim():'';
+  }
+  // Guardar dolorTiempo dentro de fields para que viaje a Supabase (JSONB) sin nueva columna
+  if(dolorTiempo) fields._dolorTiempo=dolorTiempo;
+  var rec={name:s.name,date:s.date,fields:fields,readiness:readiness,maxReadiness:maxR,
+           disponibilidad:'Disponible',dolor:s.dolor?'Si':'No',dolorZona:dolorZona,dolorTiempo:dolorTiempo};
+  var key=s.name+'__'+s.date;
+  var exIdx=WELLNESS_DATA.findIndex(function(r){return r.name+'__'+(cargaParseDate(r.date)||r.date)===key;});
+  if(exIdx>=0) WELLNESS_DATA[exIdx]=Object.assign({},WELLNESS_DATA[exIdx],rec); // pisar → queda el último
+  else WELLNESS_DATA.push(rec);
+  saveData();
+  cargaSelfShowDone('wellness');
+}
+window.cargaSelfSubmitWellness=cargaSelfSubmitWellness;
+
+// ── PSE: botones Borg 1-10 ──
+function cargaSelfRenderPse(){
+  var body=document.getElementById('carga-self-body');
+  if(!body)return;
+  var borg={
+    1:'Muy muy suave',2:'Muy suave',3:'Suave',4:'Moderado',5:'Algo duro',
+    6:'Duro',7:'Muy duro',8:'Muy muy duro',9:'Casi máximo',10:'Máximo esfuerzo'
+  };
+  var btns=[1,2,3,4,5,6,7,8,9,10].map(function(v){
+    var col = v<=3?'#1D9E75' : v<=6?'#EF9F27' : v<=8?'#E8772E' : '#E24B4A';
+    return '<button type="button" onclick="cargaSelfSetPse('+v+')" id="csp-'+v+'" '+
+      'style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;margin-bottom:7px;font-size:15px;font-weight:700;'+
+      'border:2px solid #eee;background:#fff;color:#0D1B2A;border-radius:10px;cursor:pointer;text-align:left;transition:all .12s">'+
+      '<span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;background:'+col+';color:#fff;font-size:16px;font-weight:800;flex-shrink:0">'+v+'</span>'+
+      '<span style="font-size:13px;font-weight:600;color:#555">'+borg[v]+'</span>'+
+    '</button>';
+  }).join('');
+  body.innerHTML=
+    '<div style="font-size:13px;color:#555;margin-bottom:6px"><strong>'+_cargaSelfState.name+'</strong> · '+_cargaSelfState.date+'</div>'+
+    '<div style="font-size:13px;font-weight:700;color:#0D1B2A;margin-bottom:4px">¿Qué tan dura sentiste la sesión?</div>'+
+    '<div style="font-size:11px;color:#888;margin-bottom:16px">Escala de Borg (1 = muy suave · 10 = máximo esfuerzo). Tocá un número.</div>'+
+    btns+
+    '<div id="carga-self-send-wrap" style="margin-top:18px"></div>'+
+    '<div style="height:20px"></div>';
+  cargaSelfUpdatePseSend();
+}
+
+function cargaSelfSetPse(v){
+  _cargaSelfState.pse=v;
+  for(var i=1;i<=10;i++){
+    var b=document.getElementById('csp-'+i);
+    if(!b)continue;
+    if(i===v){ b.style.borderColor='#0D1B2A'; b.style.background='#0D1B2A'; b.querySelector('span:last-child').style.color='#fff'; }
+    else { b.style.borderColor='#eee'; b.style.background='#fff'; b.querySelector('span:last-child').style.color='#555'; }
+  }
+  cargaSelfUpdatePseSend();
+}
+window.cargaSelfSetPse=cargaSelfSetPse;
+
+function cargaSelfUpdatePseSend(){
+  var wrap=document.getElementById('carga-self-send-wrap');
+  if(!wrap)return;
+  if(_cargaSelfState.pse>0){
+    wrap.innerHTML='<button onclick="cargaSelfSubmitPse()" style="width:100%;padding:16px;font-size:17px;font-weight:800;color:#fff;background:#D85A30;border:none;border-radius:11px;cursor:pointer;box-shadow:0 4px 14px #D85A3055">✓ Enviar</button>';
+  } else {
+    wrap.innerHTML='<div style="text-align:center;font-size:12px;color:#aaa;padding:14px;border:2px dashed #ddd;border-radius:10px">Elegí un valor para enviar</div>';
+  }
+}
+
+function cargaSelfSubmitPse(){
+  var s=_cargaSelfState;
+  var layout=PSE_LAYOUT||cargaDefaultPseLayout();
+  var mainField=layout.mainField||(layout.fields[0]&&layout.fields[0].key)||'cardio';
+  var fields={}; fields[mainField]=s.pse;
+  var rec={name:s.name,date:s.date,pse:s.pse,fields:fields,week:'',day:''};
+  var key=s.name+'__'+s.date;
+  var pIdx=PSE_DATA.findIndex(function(r){return r.name+'__'+r.date===key;});
+  if(pIdx>=0) PSE_DATA[pIdx]=Object.assign({},PSE_DATA[pIdx],rec); // pisar → queda el último
+  else PSE_DATA.push(rec);
+  saveData();
+  cargaSelfShowDone('pse');
+}
+window.cargaSelfSubmitPse=cargaSelfSubmitPse;
+
+// Pantalla de confirmación + opción de cargar otro jugador
+function cargaSelfShowDone(type){
+  var body=document.getElementById('carga-self-body');
+  if(!body)return;
+  var accent=type==='wellness'?'#1D9E75':'#D85A30';
+  body.innerHTML=
+    '<div style="text-align:center;padding:40px 10px">'+
+      '<div style="font-size:64px;margin-bottom:10px">✅</div>'+
+      '<div style="font-size:20px;font-weight:800;color:#0D1B2A;margin-bottom:6px">¡Guardado!</div>'+
+      '<div style="font-size:14px;color:#666;margin-bottom:30px"><strong>'+_cargaSelfState.name+'</strong> — '+(type==='wellness'?'Wellness':'PSE')+' del '+_cargaSelfState.date+'</div>'+
+      '<button onclick="cargaSelfEntry(\''+type+'\')" style="width:100%;padding:15px;font-size:16px;font-weight:800;color:#fff;background:'+accent+';border:none;border-radius:10px;cursor:pointer;margin-bottom:10px">➕ Cargar otro jugador</button>'+
+      '<button onclick="cargaSelfClose();if(typeof cargaRender===\'function\')cargaRender()" style="width:100%;padding:13px;font-size:14px;font-weight:600;color:#666;background:#fff;border:1px solid #ccc;border-radius:10px;cursor:pointer">Cerrar</button>'+
+    '</div>';
+}
 
 // ── NAME MATCHING: CSV names ↔ club profile names ─────────────────────────
 // Survey CSVs often have slightly different player names than PLAYER_PROFILES
@@ -27649,11 +27928,14 @@ function sbWellnessFetchAll(){
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbWellnessToPayload(r){
+  var f = r.fields || {};
+  // Asegurar que el "hace cuánto" del dolor viaje en el JSONB fields
+  if(r.dolorTiempo && !f._dolorTiempo) { f = Object.assign({}, f, {_dolorTiempo:r.dolorTiempo}); }
   return {
     name: r.name || '',
     date: _sbValidDate(r.date),
     readiness: (r.readiness!=null && !isNaN(r.readiness)) ? r.readiness : null,
-    fields: r.fields || {},
+    fields: f,
     dolor: r.dolor || null,
     dolor_zona: r.dolorZona || r.dolor_zona || null,
     week: r.week || null,
@@ -27663,13 +27945,15 @@ function _sbWellnessToPayload(r){
   };
 }
 function _sbWellnessFromRow(row){
+  var f = row.fields || {};
   return {
     name: row.name,
     date: row.date,
     readiness: row.readiness,
-    fields: row.fields || {},
+    fields: f,
     dolor: row.dolor || '',
     dolorZona: row.dolor_zona || '',
+    dolorTiempo: f._dolorTiempo || '',
     week: row.week || '',
     day: row.day || ''
   };
