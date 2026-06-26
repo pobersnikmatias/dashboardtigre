@@ -26628,12 +26628,24 @@ function mobRenderGroup(){
   var prevDate=allDates.length>=2?allDates[allDates.length-2]:null;
   var prevDateLabel=prevDate?_mobDateLabel(prevDate):'';
 
+  // Fechas (orden cronológico) donde una métrica tiene al menos un dato en algún lado.
+  function _mobMetricDates(metricKey){
+    return allDates.filter(function(d){
+      return pKeys.some(function(pk){
+        var entry=byPlayer[pk].find(function(e){return e.date===d;});
+        return entry && (entry[metricKey].L!=null || entry[metricKey].R!=null);
+      });
+    });
+  }
+
   function countAtDateSide(metricKey, side, date){
     var counts={ok:0,mid:0,bad:0,na:0};
     var lists ={ok:[],mid:[],bad:[],na:[]};
+    if(!date) return {counts:counts, lists:lists};
     pKeys.forEach(function(pk){
       var entry=byPlayer[pk].find(function(e){return e.date===date;});
       var v=entry?entry[metricKey][side]:null;
+      if(v==null) return; // no contar a quien no fue evaluado en esta métrica ese día
       var c=mobClassify(metricKey,v);
       counts[c]++; lists[c].push(pName(pk));
     });
@@ -26672,15 +26684,22 @@ function mobRenderGroup(){
     html+='</div></div>';
 
     // ── Bloque 2: DISTRIBUCIÓN (chips) por lado con delta vs eval anterior ──
+    // Usa la última fecha en que ESTA métrica fue evaluada (no la global), así
+    // una métrica que no se midió el último día no aparece toda en gris.
+    var mDates=_mobMetricDates(m.k);
+    var mLastDate=mDates.length?mDates[mDates.length-1]:null;
+    var mPrevDate=mDates.length>=2?mDates[mDates.length-2]:null;
+    var mLastLabel=mLastDate?_mobDateLabel(mLastDate):'—';
+    var mPrevLabel=mPrevDate?_mobDateLabel(mPrevDate):'';
     html+='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px">'+
       '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">'+
         '<div style="font-size:10px;font-weight:800;color:#0D1B2A;text-transform:uppercase;letter-spacing:0.3px">🚦 Distribución última eval.</div>'+
-        '<div style="font-size:8px;color:#aaa">'+lastDateLabel+(prevDate?' vs '+prevDateLabel:'')+'</div>'+
+        '<div style="font-size:8px;color:#aaa">'+mLastLabel+(mPrevDate?' vs '+mPrevLabel:'')+'</div>'+
       '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
     [{side:'L',lbl:'Izquierda'},{side:'R',lbl:'Derecha'}].forEach(function(s){
-      var last=countAtDateSide(m.k, s.side, lastDate);
-      var prev=prevDate?countAtDateSide(m.k, s.side, prevDate):null;
+      var last=countAtDateSide(m.k, s.side, mLastDate);
+      var prev=mPrevDate?countAtDateSide(m.k, s.side, mPrevDate):null;
       function chip(lbl,key,bg,bd,tx){
         var n=last.counts[key];
         var tooltip=last.lists[key].length?(last.lists[key].join(', ')):'';
@@ -26705,17 +26724,16 @@ function mobRenderGroup(){
       }
       html+='<div>'+
         '<div style="font-size:9px;color:#304483;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px">'+s.lbl+'</div>'+
-        '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px">'+
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">'+
           chip('OK','ok','#1D9E7522','#1D9E7566','#085041')+
           chip('Alerta','mid','#EF9F2722','#EF9F2766','#7a4a00')+
           chip('Bajo','bad','#E24B4A22','#E24B4A66','#791F1F')+
-          chip('NE','na','#f5f5f5','#ddd','#888')+
         '</div>'+
       '</div>';
     });
     html+='</div>';
-    if(prevDate){
-      html+='<div style="font-size:8px;color:#888;margin-top:6px;text-align:right">Delta = cambio de jugadores vs <strong>'+prevDateLabel+'</strong></div>';
+    if(mPrevDate){
+      html+='<div style="font-size:8px;color:#888;margin-top:6px;text-align:right">Delta = cambio de jugadores vs <strong>'+mPrevLabel+'</strong></div>';
     }
     html+='</div>';
 
@@ -26723,15 +26741,30 @@ function mobRenderGroup(){
   });
 
   // ── Histórico: barras apiladas por fecha — separado por lado ──
+  // Solo se grafican las fechas donde la métrica tiene al menos un registro real
+  // (no-null) en ese lado. Así, si un día sólo se evaluó tobillo, no aparecen
+  // barras grises "sin evaluar" para cadena posterior / rotaciones.
+  function _mobDatesWithData(metricKey, side){
+    return allDates.filter(function(d){
+      return pKeys.some(function(pk){
+        var entry=byPlayer[pk].find(function(e){return e.date===d;});
+        return entry && entry[metricKey][side]!=null;
+      });
+    });
+  }
   function classifyByDateAllSide(metricKey, side){
-    return allDates.map(function(d){
+    var dates=_mobDatesWithData(metricKey, side);
+    return dates.map(function(d){
       var c={ok:0,mid:0,bad:0,na:0};
+      var evaluatedTotal=0;
       pKeys.forEach(function(pk){
         var entry=byPlayer[pk].find(function(e){return e.date===d;});
         var v=entry?entry[metricKey][side]:null;
+        if(v==null) return; // no contar a quien no fue evaluado en esta métrica ese día
         c[mobClassify(metricKey,v)]++;
+        evaluatedTotal++;
       });
-      return {date:d, label:_mobDateLabel(d), ok:c.ok, mid:c.mid, bad:c.bad, na:c.na, total:pKeys.length};
+      return {date:d, label:_mobDateLabel(d), ok:c.ok, mid:c.mid, bad:c.bad, na:0, total:evaluatedTotal};
     });
   }
   function stackedBarsHtml(title,hist){
@@ -26773,13 +26806,15 @@ function mobRenderGroup(){
     '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#1D9E75;border-radius:2px;display:inline-block"></span> OK</span>'+
     '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#EF9F27;border-radius:2px;display:inline-block"></span> Alerta</span>'+
     '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#E24B4A;border-radius:2px;display:inline-block"></span> Bajo</span>'+
-    '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#e0e0e0;border-radius:2px;display:inline-block"></span> Sin evaluar</span>'+
   '</div>';
   metrics.forEach(function(m){
+    var histL=classifyByDateAllSide(m.k,'L');
+    var histR=classifyByDateAllSide(m.k,'R');
+    if(!histL.length && !histR.length) return; // métrica nunca evaluada → no mostrar
     html+='<div style="font-size:10px;font-weight:700;color:#0D1B2A;margin-bottom:4px;margin-top:6px">'+m.lbl+'</div>';
     html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px;margin-bottom:10px">';
-    html+='<div style="background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px">'+stackedBarsHtml(m.lbl+' · Izquierda', classifyByDateAllSide(m.k,'L'))+'</div>';
-    html+='<div style="background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px">'+stackedBarsHtml(m.lbl+' · Derecha', classifyByDateAllSide(m.k,'R'))+'</div>';
+    if(histL.length) html+='<div style="background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px">'+stackedBarsHtml(m.lbl+' · Izquierda', histL)+'</div>';
+    if(histR.length) html+='<div style="background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px">'+stackedBarsHtml(m.lbl+' · Derecha', histR)+'</div>';
     html+='</div>';
   });
 
@@ -26957,7 +26992,7 @@ function mobRenderPlayer(){
   html+='</tbody></table></div>';
 
   // Tabla raw con eliminar
-  html+='<details style="margin-bottom:14px"><summary style="font-size:10px;font-weight:700;color:#888;cursor:pointer">🕑 Ver registros individuales ('+serie.length+')</summary>';
+  html+='<details open style="margin-bottom:14px"><summary style="font-size:10px;font-weight:700;color:#888;cursor:pointer">🗑 Registros individuales — tocá la papelera para borrar una evaluación ('+serie.length+')</summary>';
   html+='<div style="overflow-x:auto;margin-top:8px"><table style="width:100%;border-collapse:collapse;font-size:10px;min-width:560px"><thead><tr style="background:#f5f7fa">'+
     '<th style="padding:5px 8px;text-align:left;border-bottom:1px solid #ddd">Fecha</th>'+
     '<th style="padding:5px 6px;text-align:center;border-bottom:1px solid #ddd">CP I/D</th>'+
@@ -26974,7 +27009,7 @@ function mobRenderPlayer(){
       '<td style="padding:4px 6px;text-align:center;color:#444;border-bottom:0.5px solid #f0f0f0">'+pair(e.ri)+'</td>'+
       '<td style="padding:4px 6px;text-align:center;color:#444;border-bottom:0.5px solid #f0f0f0">'+pair(e.re)+'</td>'+
       '<td style="padding:4px 6px;text-align:center;color:#444;border-bottom:0.5px solid #f0f0f0">'+pair(e.tob)+'</td>'+
-      '<td style="padding:4px 4px;text-align:center;border-bottom:0.5px solid #f0f0f0"><button onclick="mobDelete(\''+_mobSelectedPlayer+'\',\''+e.date+'\')" style="border:none;background:none;color:#ccc;cursor:pointer;font-size:11px">🗑</button></td>'+
+      '<td style="padding:4px 4px;text-align:center;border-bottom:0.5px solid #f0f0f0"><button onclick="mobDelete(\''+_mobSelectedPlayer+'\',\''+e.date+'\')" title="Eliminar esta evaluación" style="border:1px solid #E24B4A44;background:#fff;color:#E24B4A;cursor:pointer;font-size:11px;border-radius:4px;padding:2px 7px">🗑</button></td>'+
     '</tr>';
   });
   html+='</tbody></table></div></details>';
