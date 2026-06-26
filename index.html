@@ -99,6 +99,30 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 .cat-inline:focus{outline:none;border-color:#3B4D88;background:#fff}
 .mc-tot-row td{background:#f0f2f5;font-weight:700;font-size:10px}
 .mc-ratio{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700}
+/* Inputs del kiosko de carga del jugador: evitar que el <input type=date>
+   se desborde en móvil/tablet (WebKit le da un ancho intrínseco propio). */
+#carga-self-modal input,
+#carga-self-modal select{
+  -webkit-appearance:none;
+  appearance:none;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+#carga-self-modal input[type="date"]{
+  display:block;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+}
+#carga-self-modal input[type="date"]::-webkit-date-and-time-value{
+  text-align:left;
+  margin:0;
+}
+#carga-self-modal input[type="date"]::-webkit-calendar-picker-indicator{
+  margin-left:auto;
+  flex-shrink:0;
+}
 /* Perfil de competencia — gráficos: por defecto (PC e impresión) el gráfico
    llena su columna y se ve completo. El scroll horizontal con min-width solo
    se activa dentro del media query móvil. */
@@ -21437,12 +21461,12 @@ function cargaSelfEntry(type){
   modal.style.cssText='position:fixed;inset:0;background:rgba(13,27,42,0.92);z-index:11000;display:flex;align-items:flex-start;justify-content:center;padding:0;overflow-y:auto';
 
   modal.innerHTML=
-    '<div style="background:#fff;max-width:560px;width:100%;min-height:100vh;display:flex;flex-direction:column">'+
-      '<div style="padding:16px 20px;background:'+accent+';display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:3">'+
+    '<div style="background:#fff;max-width:560px;width:100%;min-height:100vh;display:flex;flex-direction:column;box-sizing:border-box;overflow-x:hidden">'+
+      '<div style="padding:16px 20px;background:'+accent+';display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:3;box-sizing:border-box">'+
         '<div style="font-size:18px;font-weight:800;color:#fff">'+(isWell?'📲 Cargá tu Wellness':'📲 Cargá tu PSE')+'</div>'+
         '<button onclick="cargaSelfClose()" style="background:#ffffff33;border:none;color:#fff;border-radius:6px;padding:6px 14px;font-size:16px;cursor:pointer;font-weight:700">✕</button>'+
       '</div>'+
-      '<div id="carga-self-body" style="padding:18px 20px;flex:1"></div>'+
+      '<div id="carga-self-body" style="padding:18px 20px;flex:1;box-sizing:border-box;overflow-x:hidden"></div>'+
     '</div>';
   document.body.appendChild(modal);
   cargaSelfRenderStep1();
