@@ -28884,8 +28884,12 @@ function sbUpsertOneDrill(d){
     var payload = _sbDrillToPayload(d);
     if(!payload) return;
     sbClient.from('drills_exercises').upsert(payload, { onConflict: 'id' }).then(function(res){
-      if(res.error) console.error('[Supabase] Upsert ejercicio combinado error:', res.error);
-      else console.log('[Supabase] Ejercicio combinado guardado en la nube (id ' + payload.id + ')');
+      if(res.error){
+        console.error('[Supabase] NO se pudo guardar el ejercicio id '+payload.id+' →', res.error.message||res.error, res.error);
+        console.error('[Supabase] (queda guardado localmente; revisá que la tabla drills_exercises exista, que la columna id sea PRIMARY KEY/UNIQUE, y las políticas RLS de INSERT/UPDATE)');
+      } else {
+        console.log('[Supabase] Ejercicio guardado en la nube (id ' + payload.id + ')');
+      }
     });
   }catch(e){ console.warn('sbUpsertOneDrill error:', e); }
 }
@@ -29012,31 +29016,34 @@ sbLoadInitialData = function(){
     if(typeof sbLoadingSet==='function') sbLoadingSet(96, 'Cargando ejercicios y partidos…', _sbGetLoadingCounts());
     return sbDrillsFetchAll();
   }).then(function(rows){
-    if(typeof D!=='undefined' && rows && rows.length){
-      // Tombstones: ids que el usuario borró localmente. No revivirlos desde la nube,
-      // y reintentar borrarlos en Supabase por si el delete anterior no llegó.
+    if(typeof D!=='undefined'){
+      var nCloud = rows ? rows.length : 0;
+      // Tombstones: ids que el usuario borró localmente. No revivirlos desde la nube.
       var tomb = [];
       try{ tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]'); }catch(e){}
       var tombSet = {};
-      tomb.forEach(function(t){ tombSet[t]=true; });
+      tomb.forEach(function(t){ tombSet[Number(t)]=true; });
       var keys = {};
-      rows.forEach(function(row){
+      (rows||[]).forEach(function(row){
         if(tombSet[Number(row.id)]){
-          // Estaba borrado localmente pero sigue en la nube → borrarlo de nuevo
           if(typeof sbClient!=='undefined' && sbClient && sbCurrentUser){
             sbClient.from('drills_exercises').delete().eq('id', Number(row.id)).eq('categoria', SB_CATEGORIA).then(function(){});
           }
-          return; // no incorporarlo a D
+          return;
         }
-        keys[row.id] = _sbDrillFromRow(row);
+        keys[Number(row.id)] = _sbDrillFromRow(row);
       });
-      var localOnly = D.filter(function(d){ return !(d.id in keys) && !tombSet[Number(d.id)]; });
+      // Preservar SIEMPRE los ejercicios que están en local pero no en la nube
+      // (combinaciones/ejercicios nuevos cuyo sync a Supabase falló o no llegó).
+      var localOnly = D.filter(function(d){ return !(Number(d.id) in keys) && !tombSet[Number(d.id)]; });
+      console.log('[Supabase] Drills — en la nube: '+Object.keys(keys).length+' · sólo locales (preservados): '+localOnly.length+(localOnly.length?' → ids '+localOnly.map(function(d){return d.id;}).join(','):'')+(tomb.length?' · borrados ignorados: '+tomb.length:''));
       D.length = 0;
       Object.values(keys).forEach(function(d){ D.push(d); });
       localOnly.forEach(function(d){ D.push(d); });
-      console.log('[Supabase] Cargados ' + Object.keys(keys).length + ' drills_exercises.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':'') + (tomb.length?' ['+tomb.length+' borrados ignorados]':''));
-    } else {
-      console.log('[Supabase] No hay drills_exercises en Supabase todavía.');
+      // Reintentar subir a la nube los que quedaron sólo en local (best-effort)
+      if(localOnly.length && typeof sbUpsertOneDrill==='function'){
+        localOnly.forEach(function(d){ sbUpsertOneDrill(d); });
+      }
     }
     return sbMatchesFetchAll();
   }).then(function(rows){
@@ -29127,7 +29134,11 @@ var SB_SETTINGS_KEYS = [
   'MOB_COL_MAP',
   'FIX_FIXTURE',
   'FIX_PLANILLAS',
-  'RESI_TESTS'
+  'RESI_TESTS',
+  'CATS',
+  'CATN',
+  'BC',
+  'CS'
 ];
 
 // Devuelve el valor actual de la variable global con ese nombre (o undefined).
