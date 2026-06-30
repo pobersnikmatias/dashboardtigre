@@ -15211,7 +15211,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
   <div style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto">
     <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:#3B4D88;color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid #3B4D88">💚 Wellness &amp; PSE</button>
-    <button id="carga-view-dia" onclick="cargaSetView('dia')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🌅 Wellness del día</button>
+    <button id="carga-view-dia" onclick="cargaSetView('dia')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🌅 Wellness y PSE del día</button>
     <button id="carga-view-cuadrante" onclick="cargaSetView('cuadrante')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">📊 Cuadrante</button>
   </div>
 </div>
@@ -22515,9 +22515,13 @@ window.cargaRender=cargaRender;
 var _cargaDiaDate = null;  // fecha seleccionada (ISO)
 
 function _cargaWellDiaDates(){
-  // Fechas únicas con datos de wellness, normalizadas a ISO, ordenadas desc
+  // Fechas únicas con datos de wellness O de PSE, normalizadas a ISO, ordenadas desc
   var set={};
   (WELLNESS_DATA||[]).forEach(function(r){
+    var iso=(typeof cargaParseDate==='function' && cargaParseDate(r.date))||r.date;
+    if(iso) set[iso]=true;
+  });
+  (PSE_DATA||[]).forEach(function(r){
     var iso=(typeof cargaParseDate==='function' && cargaParseDate(r.date))||r.date;
     if(iso) set[iso]=true;
   });
@@ -22534,21 +22538,35 @@ function cargaRenderWellnessDia(){
 
   if(!dates.length){
     out.innerHTML='<div style="padding:30px;text-align:center;color:#aaa"><div style="font-size:28px;margin-bottom:8px">🌅</div>'+
-      '<div style="font-size:13px;font-weight:600;color:#555">Todavía no hay datos de wellness cargados</div>'+
-      '<div style="font-size:11px;color:#aaa;margin-top:5px">Usá "📲 Cargá tu Wellness" o importá un CSV grupal</div></div>';
+      '<div style="font-size:13px;font-weight:600;color:#555">Todavía no hay datos de wellness ni PSE cargados</div>'+
+      '<div style="font-size:11px;color:#aaa;margin-top:5px">Usá "📲 Cargá tu Wellness/PSE", la carga manual o importá un CSV</div></div>';
     return;
   }
   if(!_cargaDiaDate || dates.indexOf(_cargaDiaDate)<0) _cargaDiaDate=dates[0]; // más reciente
 
-  // Registros de esa fecha (último por jugador si hay duplicados)
+  // Registros de wellness de esa fecha (último por jugador si hay duplicados)
   var byName={};
   (WELLNESS_DATA||[]).forEach(function(r){
     var iso=(typeof cargaParseDate==='function' && cargaParseDate(r.date))||r.date;
     if(iso!==_cargaDiaDate) return;
     byName[r.name]=r; // si se repite, queda el último del array
   });
-  var rows=Object.keys(byName).sort(function(a,b){return a.localeCompare(b,'es');}).map(function(n){return byName[n];});
+  // PSE de esa fecha por jugador (último si hay duplicados)
+  var pseByName={};
+  (PSE_DATA||[]).forEach(function(r){
+    var iso=(typeof cargaParseDate==='function' && cargaParseDate(r.date))||r.date;
+    if(iso!==_cargaDiaDate) return;
+    pseByName[r.name]=r;
+  });
+  // Unir nombres: cualquiera que tenga wellness O pse ese día
+  var allNames={};
+  Object.keys(byName).forEach(function(n){allNames[n]=true;});
+  Object.keys(pseByName).forEach(function(n){allNames[n]=true;});
+  var rows=Object.keys(allNames).sort(function(a,b){return a.localeCompare(b,'es');}).map(function(n){return byName[n]||{name:n,fields:{},readiness:0,dolor:'',_wellMissing:true};});
   var maxTotal=layout.fields.reduce(function(a,f){return a+(f.max||5);},0);
+
+  // Color de PSE (escala Borg 1-10)
+  function colPse(v){ if(v==null)return '#bbb'; return v<=3?'#1D9E75':v<=6?'#EF9F27':v<=8?'#E8772E':'#E24B4A'; }
 
   // Selector de fecha (botones rápidos + input date)
   var dateBtns=dates.slice(0,8).map(function(d){
@@ -22562,28 +22580,38 @@ function cargaRenderWellnessDia(){
   function bgMetric(v,mx){var p=mx>0?v/mx:0;return p>=0.8?'#e8f8f0':p>=0.6?'#f1f8e9':p>=0.4?'#fff8e1':'#fdeaea';}
   function colTotal(r){var p=maxTotal>0?r.readiness/maxTotal:0;return p>=0.8?'#1D9E75':p>=0.6?'#EF9F27':'#E24B4A';}
 
-  // Promedios del grupo por métrica
+  // Promedios del grupo por métrica (solo sobre quienes tienen wellness)
+  var wellRows=rows.filter(function(r){return !r._wellMissing;});
   var avg={}; layout.fields.forEach(function(f){
-    var vals=rows.map(function(r){return (r.fields&&r.fields[f.key])||0;}).filter(function(v){return v>0;});
+    var vals=wellRows.map(function(r){return (r.fields&&r.fields[f.key])||0;}).filter(function(v){return v>0;});
     avg[f.key]=vals.length?vals.reduce(function(a,b){return a+b;},0)/vals.length:0;
   });
-  var avgTotal=rows.length?rows.reduce(function(a,r){return a+(r.readiness||0);},0)/rows.length:0;
-  var nDolor=rows.filter(function(r){return r.dolor==='Si';}).length;
+  var avgTotal=wellRows.length?wellRows.reduce(function(a,r){return a+(r.readiness||0);},0)/wellRows.length:0;
+  var nDolor=wellRows.filter(function(r){return r.dolor==='Si';}).length;
 
   var html='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">';
   // Header con selector
   html+='<div style="background:#0D1B2A;padding:12px 16px">';
   html+='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">';
-  html+='<div style="color:#fff;font-size:14px;font-weight:800">🌅 ¿Cómo amaneció el grupo?</div>';
+  html+='<div style="color:#fff;font-size:14px;font-weight:800">🌅 ¿Cómo amaneció el grupo? <span style="font-size:11px;font-weight:500;color:#9fb3c8">— Wellness y PSE</span></div>';
   html+='<label style="font-size:11px;color:#9fb3c8;display:flex;align-items:center;gap:6px">Otra fecha: <input type="date" value="'+_cargaDiaDate+'" onchange="cargaDiaSetDate(this.value)" style="font-size:11px;padding:4px 7px;border:none;border-radius:5px"></label>';
   html+='</div>';
   html+='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">'+dateBtns+'</div>';
+  // Carga grupal de tiempo de trabajo (para UA sin GPS)
+  html+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #ffffff22">'+
+    '<span style="font-size:11px;color:#9fb3c8;font-weight:600">⏱️ Tiempo de trabajo grupal:</span>'+
+    '<input type="number" id="carga-dia-groupmin" min="0" step="1" placeholder="min" style="width:70px;padding:5px 7px;border:none;border-radius:5px;font-size:12px;text-align:center">'+
+    '<button onclick="cargaDiaApplyGroupMin()" style="padding:5px 12px;border:none;border-radius:5px;background:#9C59D1;color:#fff;font-size:11px;font-weight:700;cursor:pointer">Aplicar a todos</button>'+
+    '<span style="font-size:10px;color:#7fd4a8;font-weight:600" id="carga-dia-min-msg"></span>'+
+    '<span style="font-size:9px;color:#7088a0">UA = PSE × minutos</span>'+
+  '</div>';
   html+='</div>';
 
   // Resumen
   html+='<div style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#f8faff;border-bottom:1px solid #eef2f8">';
   html+='<div style="font-size:11px;color:#555"><strong>'+rows.length+'</strong> jugadores</div>';
-  html+='<div style="font-size:11px;color:'+colTotal({readiness:avgTotal})+'">Promedio grupo: <strong>'+Math.round(avgTotal)+'/'+maxTotal+'</strong></div>';
+  html+='<div style="font-size:11px;color:'+colTotal({readiness:avgTotal})+'">Promedio wellness: <strong>'+Math.round(avgTotal)+'/'+maxTotal+'</strong></div>';
+  html+='<div style="font-size:11px;color:#D85A30"><strong>'+Object.keys(pseByName).length+'</strong> con PSE</div>';
   if(nDolor>0) html+='<div style="font-size:11px;color:#C62828">⚠️ <strong>'+nDolor+'</strong> con dolor</div>';
   html+='</div>';
 
@@ -22596,22 +22624,56 @@ function cargaRenderWellnessDia(){
   });
   html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#0D1B2A;white-space:nowrap">Total</th>';
   html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#C62828;white-space:nowrap">Dolor</th>';
+  html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#D85A30;white-space:nowrap">PSE</th>';
+  html+='<th style="padding:8px 8px;text-align:center;font-weight:700;color:#555;white-space:nowrap">Min</th>';
+  html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#9C59D1;white-space:nowrap">UA</th>';
   html+='</tr></thead><tbody>';
 
   rows.forEach(function(r){
+    var wellMissing=r._wellMissing;
     html+='<tr style="border-bottom:0.5px solid #eee">';
     html+='<td style="padding:7px 12px;font-weight:600;color:#0D1B2A;white-space:nowrap;position:sticky;left:0;background:#fff">'+r.name+'</td>';
     layout.fields.forEach(function(f){
+      if(wellMissing){ html+='<td style="padding:7px 8px;text-align:center;color:#ddd">–</td>'; return; }
       var v=(r.fields&&r.fields[f.key])||0; var mx=f.max||5;
       html+='<td style="padding:7px 8px;text-align:center;font-weight:800;color:'+colMetric(v,mx)+';background:'+bgMetric(v,mx)+'">'+(v||'–')+'</td>';
     });
-    html+='<td style="padding:7px 10px;text-align:center;font-weight:800;color:'+colTotal(r)+'">'+Math.round(r.readiness||0)+'<span style="font-size:9px;color:#aaa">/'+maxTotal+'</span></td>';
-    if(r.dolor==='Si'){
-      var zona=r.dolorZona||'Sí';
-      var tiempo=r.dolorTiempo||(r.fields&&r.fields._dolorTiempo)||'';
-      html+='<td style="padding:7px 10px;text-align:center"><span style="background:#E24B4A18;border:1px solid #E24B4A55;color:#C62828;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;white-space:nowrap">⚠️ '+zona+(tiempo?' · '+tiempo:'')+'</span></td>';
+    if(wellMissing){
+      html+='<td style="padding:7px 10px;text-align:center;color:#ddd">–</td>';
+      html+='<td style="padding:7px 10px;text-align:center;color:#ddd">–</td>';
     } else {
-      html+='<td style="padding:7px 10px;text-align:center;color:#9ccc65;font-weight:700">✓</td>';
+      html+='<td style="padding:7px 10px;text-align:center;font-weight:800;color:'+colTotal(r)+'">'+Math.round(r.readiness||0)+'<span style="font-size:9px;color:#aaa">/'+maxTotal+'</span></td>';
+      if(r.dolor==='Si'){
+        var zona=r.dolorZona||'Sí';
+        var tiempo=r.dolorTiempo||(r.fields&&r.fields._dolorTiempo)||'';
+        html+='<td style="padding:7px 10px;text-align:center"><span style="background:#E24B4A18;border:1px solid #E24B4A55;color:#C62828;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;white-space:nowrap">⚠️ '+zona+(tiempo?' · '+tiempo:'')+'</span></td>';
+      } else {
+        html+='<td style="padding:7px 10px;text-align:center;color:#9ccc65;font-weight:700">✓</td>';
+      }
+    }
+    // Columna PSE (vacía si no respondió)
+    var pr=pseByName[r.name];
+    var pv=(pr&&pr.pse!=null)?pr.pse:null;
+    if(pv!=null){
+      html+='<td style="padding:7px 10px;text-align:center"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;border-radius:6px;background:'+colPse(pv)+';color:#fff;font-size:12px;font-weight:800">'+pv+'</span></td>';
+    } else {
+      html+='<td style="padding:7px 10px;text-align:center;color:#ddd">–</td>';
+    }
+    // Columna Min (editable, solo si hay PSE ese día)
+    var minVal=(pr&&pr.min!=null)?pr.min:'';
+    if(pv!=null){
+      html+='<td style="padding:5px 6px;text-align:center"><input type="number" min="0" step="1" value="'+minVal+'" placeholder="—" '+
+        'onchange="cargaSetPseMin(\''+r.name.replace(/'/g,"\\'")+'\',\''+_cargaDiaDate+'\',this.value);cargaRenderWellnessDia()" '+
+        'style="width:54px;padding:5px 4px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center"></td>';
+    } else {
+      html+='<td style="padding:7px 8px;text-align:center;color:#ddd">–</td>';
+    }
+    // Columna UA = PSE × Min
+    var uaVal=(pv!=null && pr && pr.min>0)?Math.round(pv*pr.min):null;
+    if(uaVal!=null){
+      html+='<td style="padding:7px 10px;text-align:center;font-weight:800;color:#9C59D1">'+uaVal.toLocaleString('es-AR')+'</td>';
+    } else {
+      html+='<td style="padding:7px 10px;text-align:center;color:#ddd">–</td>';
     }
     html+='</tr>';
   });
@@ -22625,6 +22687,19 @@ function cargaRenderWellnessDia(){
   });
   html+='<td style="padding:8px 10px;text-align:center;font-weight:800;color:'+colTotal({readiness:avgTotal})+'">'+Math.round(avgTotal)+'</td>';
   html+='<td style="padding:8px 10px;text-align:center;color:#888;font-size:10px">'+(nDolor||0)+' con dolor</td>';
+  (function(){
+    var pvals=Object.keys(pseByName).map(function(n){return pseByName[n].pse;}).filter(function(v){return v!=null&&!isNaN(v);});
+    var pavg=pvals.length?pvals.reduce(function(a,b){return a+b;},0)/pvals.length:null;
+    html+='<td style="padding:8px 10px;text-align:center;font-weight:800;color:'+(pavg!=null?colPse(pavg):'#888')+'">'+(pavg!=null?pavg.toFixed(1):'–')+'</td>';
+    // Min promedio
+    var mvals=Object.keys(pseByName).map(function(n){return pseByName[n].min;}).filter(function(v){return v!=null&&v>0;});
+    var mavg=mvals.length?mvals.reduce(function(a,b){return a+b;},0)/mvals.length:null;
+    html+='<td style="padding:8px 8px;text-align:center;color:#888;font-size:10px">'+(mavg!=null?Math.round(mavg):'–')+'</td>';
+    // UA promedio
+    var uavals=Object.keys(pseByName).map(function(n){var p=pseByName[n];return (p.pse!=null&&p.min>0)?p.pse*p.min:null;}).filter(function(v){return v!=null;});
+    var uaavg=uavals.length?uavals.reduce(function(a,b){return a+b;},0)/uavals.length:null;
+    html+='<td style="padding:8px 10px;text-align:center;font-weight:800;color:#9C59D1">'+(uaavg!=null?Math.round(uaavg).toLocaleString('es-AR'):'–')+'</td>';
+  })();
   html+='</tr>';
 
   html+='</tbody></table></div>';
@@ -22639,6 +22714,55 @@ function cargaRenderWellnessDia(){
   out.innerHTML=html;
 }
 window.cargaRenderWellnessDia=cargaRenderWellnessDia;
+
+// ── Tiempo de trabajo (minutos) para UA sin GPS ──────────────────────────
+// Asigna minutos de trabajo a un registro de PSE (por jugador+fecha). UA = PSE × min.
+function cargaSetPseMin(name, dateIso, mins){
+  var m = parseFloat(mins);
+  if(isNaN(m) || m<0) m = 0;
+  var rec = (PSE_DATA||[]).find(function(r){
+    var iso=(cargaParseDate(r.date)||r.date);
+    return r.name===name && iso===dateIso;
+  });
+  if(rec){
+    rec.min = m>0 ? m : null;
+    if(!rec.fields) rec.fields={};
+    if(m>0) rec.fields._min = m; else delete rec.fields._min;
+  }
+  saveData();
+}
+window.cargaSetPseMin = cargaSetPseMin;
+
+// Aplica los mismos minutos a TODOS los que tienen PSE en esa fecha (carga grupal).
+function cargaSetPseMinGroup(dateIso, mins){
+  var m = parseFloat(mins);
+  if(isNaN(m) || m<0){ alert('Ingresá un tiempo válido en minutos.'); return; }
+  var n=0;
+  (PSE_DATA||[]).forEach(function(r){
+    var iso=(cargaParseDate(r.date)||r.date);
+    if(iso===dateIso && r.pse!=null){
+      r.min=m>0?m:null;
+      if(!r.fields) r.fields={};
+      if(m>0) r.fields._min=m; else delete r.fields._min;
+      n++;
+    }
+  });
+  saveData();
+  if(typeof cargaRenderWellnessDia==='function') cargaRenderWellnessDia();
+  return n;
+}
+window.cargaSetPseMinGroup = cargaSetPseMinGroup;
+
+function cargaDiaApplyGroupMin(){
+  var inp=document.getElementById('carga-dia-groupmin');
+  if(!inp) return;
+  var n=cargaSetPseMinGroup(_cargaDiaDate, inp.value);
+  if(n!=null){
+    var msg=document.getElementById('carga-dia-min-msg');
+    if(msg){ msg.textContent='✓ '+inp.value+' min aplicados a '+n+' jugador(es).'; setTimeout(function(){msg.textContent='';},3500); }
+  }
+}
+window.cargaDiaApplyGroupMin = cargaDiaApplyGroupMin;
 
 // ═══════════════════════════════════════════════════════════════
 // Estado de la subpestaña Wellness & PSE: vista de equipo o individual
@@ -23257,17 +23381,17 @@ function cargaPlayerSRPE(nameL, week, weekSessions){
   var total=0, hasAny=false;
   weekSessions.forEach(function(s){
     var gp=(s.players||[]).find(function(pp){return pp.name&&cargaNormName(pp.name)===nameL;});
-    if(!gp)return;
-    var mins=gp.tot_dur||0;
-    if(mins<=0)return;
-    // Buscar PSE individual primero
     var sd=s.fecha||s.date||'';
+    // Buscar PSE individual primero
     var pseRec=PSE_DATA.find(function(r){
       if(cargaNormName(r.name)!==nameL)return false;
       if(sd && r.date===sd)return true;
       if(r.week===week && r.day===s.day)return true;
       return false;
     });
+    // Minutos: primero GPS (tot_dur), si no hay, los minutos manuales del PSE
+    var mins = (gp && gp.tot_dur>0) ? gp.tot_dur : ((pseRec && pseRec.min>0) ? pseRec.min : 0);
+    if(mins<=0)return;
     var pseInd = pseRec ? pseRec.pse : null;
     // Fallback: PSE de equipo de la sesión (si está)
     var pseTeam = (s.pse!=null && !isNaN(s.pse)) ? s.pse : null;
@@ -23276,6 +23400,24 @@ function cargaPlayerSRPE(nameL, week, weekSessions){
       total+=pseUsed*mins;
       hasAny=true;
     }
+  });
+  return hasAny?total:null;
+}
+
+// sRPE/UA puramente desde PSE_DATA (sin depender del microciclo GPS).
+// Suma PSE × minutos de trabajo de cada registro de PSE del jugador en esa semana.
+function cargaPlayerSRPEFromPSE(nameL, week){
+  var total=0, hasAny=false;
+  (PSE_DATA||[]).forEach(function(r){
+    if(cargaNormName(r.name)!==nameL)return;
+    // Pertenece a la semana si week coincide, o si su fecha cae en el rango de la semana MC
+    var belongs = false;
+    if(r.week && r.week===week) belongs=true;
+    else if(!r.week && week==='__sin'){ belongs=true; }
+    if(!belongs)return;
+    var mins = (r.min>0)?r.min:0;
+    if(mins<=0 || r.pse==null)return;
+    total += r.pse*mins; hasAny=true;
   });
   return hasAny?total:null;
 }
@@ -28168,11 +28310,14 @@ function sbPseFetchAll(){
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbPseToPayload(r){
+  var f = r.fields || {};
+  // Guardar minutos de trabajo en el JSONB para calcular UA sin GPS
+  if(r.min!=null && !isNaN(r.min) && (f._min==null)) { f = Object.assign({}, f, {_min:r.min}); }
   return {
     name: r.name || '',
     date: _sbValidDate(r.date),
     pse: (r.pse!=null && !isNaN(r.pse)) ? r.pse : 0,
-    fields: r.fields || {},
+    fields: f,
     week: r.week || '',   // parte del UNIQUE, no puede ser null
     day: r.day || '',     // parte del UNIQUE, no puede ser null
     categoria: SB_CATEGORIA,
@@ -28180,11 +28325,13 @@ function _sbPseToPayload(r){
   };
 }
 function _sbPseFromRow(row){
+  var f = row.fields || {};
   return {
     name: row.name,
     date: row.date,
     pse: row.pse,
-    fields: row.fields || {},
+    fields: f,
+    min: (f._min!=null && !isNaN(f._min)) ? f._min : null,
     week: row.week || '',
     day: row.day || ''
   };
