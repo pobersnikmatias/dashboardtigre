@@ -22947,7 +22947,7 @@ window.cargaRenderWellPse = cargaRenderWellPse;
 var _cargaWPIndView = 'dia';        // 'dia' | 'semana'
 var _cargaWPIndWeek = null;          // semana seleccionada en vista día
 var _cargaWPIndWMetric = null;       // métrica de wellness activa
-var _cargaWPIndPMetric = 'pse';      // 'pse' | 'ua'
+var _cargaWPIndPMetric = 'ua';      // 'pse' | 'ua'  — arranca en UA (evolución de carga interna)
 
 function cargaWPIndSetView(v){ _cargaWPIndView = v; cargaRender(); }
 window.cargaWPIndSetView = cargaWPIndSetView;
@@ -23300,45 +23300,6 @@ function cargaRenderWellPseIndividual(playerName){
     }
   } else {
     html += '<div style="padding:16px;text-align:center;color:#aaa;background:#fafafa;border-radius:6px;font-size:11px">Sin datos para mostrar.</div>';
-  }
-
-  // ─── Tabla directa por fecha: PSE · Min (editable) · UA ───
-  // Independiente del microciclo, para calcular UA con PSE + tiempo de trabajo aunque no haya GPS.
-  var pByDate = pRecs.slice().filter(function(r){return r.pse!=null;}).sort(function(a,b){
-    var da=(cargaParseDate(a.date)||a.date), db=(cargaParseDate(b.date)||b.date);
-    return da<db?1:da>db?-1:0; // más reciente primero
-  });
-  if(pByDate.length){
-    var safeName = playerName.replace(/'/g,"\\'");
-    html += '<div style="margin-top:14px"><div style="font-size:11px;font-weight:700;color:#0D1B2A;margin-bottom:6px">📋 Detalle por fecha — cargá los minutos para obtener la UA</div>';
-    html += '<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:11px;min-width:320px">';
-    html += '<thead><tr style="background:#f5f7fa">'+
-      '<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #ddd;color:#555">Fecha</th>'+
-      '<th style="padding:6px 8px;text-align:center;border-bottom:1px solid #ddd;color:#D85A30">PSE</th>'+
-      '<th style="padding:6px 8px;text-align:center;border-bottom:1px solid #ddd;color:#555">Min</th>'+
-      '<th style="padding:6px 10px;text-align:center;border-bottom:1px solid #ddd;color:#9C59D1">UA</th>'+
-    '</tr></thead><tbody>';
-    pByDate.forEach(function(r){
-      var iso=(cargaParseDate(r.date)||r.date);
-      var lbl=(function(){var p=(''+iso).split('-');return p.length===3?(p[2]+'/'+p[1]+'/'+p[0].slice(2)):iso;})();
-      var colPse=r.pse<=3?'#1D9E75':r.pse<=6?'#EF9F27':r.pse<=8?'#E8772E':'#E24B4A';
-      var ua=(r.min>0)?Math.round(r.pse*r.min):null;
-      html+='<tr style="border-bottom:0.5px solid #f0f0f0">'+
-        '<td style="padding:5px 10px;color:#555;white-space:nowrap">'+lbl+'</td>'+
-        '<td style="padding:5px 8px;text-align:center"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:5px;background:'+colPse+';color:#fff;font-size:11px;font-weight:800">'+r.pse+'</span></td>'+
-        '<td style="padding:4px 6px;text-align:center"><input type="number" min="0" step="1" value="'+(r.min!=null?r.min:'')+'" placeholder="—" '+
-          'onchange="cargaSetPseMin(\''+safeName+'\',\''+iso+'\',this.value);cargaRender()" '+
-          'style="width:54px;padding:4px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center"></td>'+
-        '<td style="padding:5px 10px;text-align:center;font-weight:800;color:'+(ua!=null?'#9C59D1':'#ccc')+'">'+(ua!=null?ua.toLocaleString('es-AR'):'–')+'</td>'+
-      '</tr>';
-    });
-    // Total UA
-    var totUA=pByDate.reduce(function(a,r){return a+((r.min>0)?r.pse*r.min:0);},0);
-    html+='<tr style="border-top:2px solid #ddd;background:#faf7ff">'+
-      '<td style="padding:6px 10px;font-weight:800;color:#0D1B2A" colspan="3">UA total</td>'+
-      '<td style="padding:6px 10px;text-align:center;font-weight:800;color:#9C59D1">'+(totUA>0?Math.round(totUA).toLocaleString('es-AR'):'–')+'</td>'+
-    '</tr>';
-    html += '</tbody></table></div></div>';
   }
 
   html += '</div>'; // cierre cuadro PSE
@@ -24549,10 +24510,12 @@ function _cargaBuildPSEMatrix(week){
       var pseTeam = (sess.pse!=null && !isNaN(sess.pse)) ? sess.pse : null;
       var pseUsed = (pse!=null) ? pse : (inGPS && pseTeam!=null ? pseTeam : null);
       var pseSource = (pse!=null) ? 'individual' : (pseUsed!=null ? 'team' : 'none');
+      // Minutos: GPS si existen, si no los minutos manuales cargados en el PSE (tiempo de trabajo).
+      if(minutes<=0 && pseRec && pseRec.min>0) minutes = pseRec.min;
       var ua = (pseUsed!=null && minutes>0) ? pseUsed*minutes : null;
       var status;
       if(!inGPS && pse==null) status='absent';
-      else if(!inGPS && pse!=null) status='missing-gps';
+      else if(!inGPS && pse!=null) status = (ua!=null ? 'ok' : 'missing-gps'); // con minutos manuales ya no es "s/GPS"
       else if(inGPS && pseUsed==null) status='missing-pse';
       else status='ok';
       row.sessions.push({day:sd.day, date:sd.date, sortOrder:sd.sortOrder, pse:pse, pseTeam:pseTeam, pseUsed:pseUsed, pseSource:pseSource, minutes:minutes, ua:ua, status:status, inGPS:inGPS, _pseRec:pseRec});
@@ -29175,16 +29138,38 @@ function sbScheduleTanda2bSync(){
   if(_sbTanda2bSyncTimer) clearTimeout(_sbTanda2bSyncTimer);
   _sbTanda2bSyncTimer = setTimeout(function(){
     _sbTanda2bSyncTimer = null;
-    // D
-    if(typeof D!=='undefined' && Array.isArray(D) && D.length){
+    // D — sincronización REAL (no solo upsert): borra de la nube lo que ya no está
+    // en D y sube lo actual. Esto evita que ejercicios borrados/combinados reaparezcan
+    // por carreras entre el delete individual y el upsert masivo.
+    if(typeof D!=='undefined' && Array.isArray(D)){
       var dPayload = D.map(_sbDrillToPayload).filter(function(p){return p && p.id!=null;});
-      if(dPayload.length){
-        console.log('[Supabase] Sync drills_exercises (' + dPayload.length + ')');
-        sbClient.from('drills_exercises').upsert(dPayload, { onConflict: 'id' }).then(function(res){
-          if(res.error) console.error('[Supabase] Sync drills_exercises error:', res.error);
-          else console.log('[Supabase] Sync drills_exercises OK');
-        });
-      }
+      var localIds = {};
+      dPayload.forEach(function(p){ localIds[Number(p.id)] = true; });
+      // 1) Traer los ids que hay en la nube para esta categoría
+      sbClient.from('drills_exercises').select('id').eq('categoria', SB_CATEGORIA).then(function(res){
+        var cloudIds = (res && res.data) ? res.data.map(function(r){return Number(r.id);}) : [];
+        // 2) Borrar de la nube los que ya no existen localmente
+        var toDelete = cloudIds.filter(function(id){ return !localIds[id]; });
+        // Salvaguarda: no borrar en masa si D local está vacío o quedó sospechosamente
+        // chico frente a la nube (posible carga incompleta). Evita perder la biblioteca.
+        var safeToDelete = (dPayload.length > 0) && (toDelete.length <= Math.max(10, Math.ceil(cloudIds.length*0.25)));
+        if(toDelete.length && safeToDelete){
+          console.log('[Supabase] Reconciliación drills: borrando ' + toDelete.length + ' que ya no están en local ('+toDelete.join(',')+')');
+          sbClient.from('drills_exercises').delete().eq('categoria', SB_CATEGORIA).in('id', toDelete).then(function(dres){
+            if(dres.error) console.error('[Supabase] Error borrando drills obsoletos:', dres.error);
+          });
+        } else if(toDelete.length){
+          console.warn('[Supabase] Reconciliación drills OMITIDA por seguridad ('+toDelete.length+' a borrar de '+cloudIds.length+' en nube, local='+dPayload.length+'). No se borró nada para no perder datos.');
+        }
+        // 3) Subir el estado actual
+        if(dPayload.length){
+          console.log('[Supabase] Sync drills_exercises (' + dPayload.length + ')');
+          sbClient.from('drills_exercises').upsert(dPayload, { onConflict: 'id' }).then(function(r2){
+            if(r2.error) console.error('[Supabase] Sync drills_exercises error:', r2.error);
+            else console.log('[Supabase] Sync drills_exercises OK');
+          });
+        }
+      });
     }
     // MATCHES
     if(typeof MATCHES!=='undefined' && Array.isArray(MATCHES) && MATCHES.length){
