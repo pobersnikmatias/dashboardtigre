@@ -29033,6 +29033,9 @@ function sbUpsertOneDrill(d){
         var tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]');
         var fi = tomb.indexOf(idN);
         if(fi>-1){ tomb.splice(fi,1); localStorage.setItem('drills_deleted', JSON.stringify(tomb)); }
+        // Marcar como PENDIENTE de confirmación en la nube (se preserva si no sube)
+        var pend = JSON.parse(localStorage.getItem('drills_pending')||'[]');
+        if(pend.indexOf(idN)<0){ pend.push(idN); localStorage.setItem('drills_pending', JSON.stringify(pend)); }
       }
     }catch(e){}
     if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return;
@@ -29044,11 +29047,29 @@ function sbUpsertOneDrill(d){
         console.error('[Supabase] (queda guardado localmente; revisá que la tabla drills_exercises exista, que la columna id sea PRIMARY KEY/UNIQUE, y las políticas RLS de INSERT/UPDATE)');
       } else {
         console.log('[Supabase] Ejercicio guardado en la nube (id ' + payload.id + ')');
+        // Confirmado en la nube → quitar de pendientes
+        try{
+          var p2 = JSON.parse(localStorage.getItem('drills_pending')||'[]');
+          var pi = p2.indexOf(Number(payload.id));
+          if(pi>-1){ p2.splice(pi,1); localStorage.setItem('drills_pending', JSON.stringify(p2)); }
+        }catch(e){}
       }
     });
   }catch(e){ console.warn('sbUpsertOneDrill error:', e); }
 }
 window.sbUpsertOneDrill = sbUpsertOneDrill;
+
+// Utilidad de limpieza (correr desde consola: limpiarEstadoEjerciciosLocal()).
+// Vacía las listas de pendientes y borrados locales para arrancar de cero con
+// la nube como fuente de verdad. Útil si quedó basura de sesiones con bugs viejos.
+window.limpiarEstadoEjerciciosLocal = function(){
+  try{
+    localStorage.setItem('drills_pending', '[]');
+    localStorage.setItem('drills_deleted', '[]');
+    console.log('[Limpieza] Listas de pendientes y borrados vaciadas. Recargá la página: la nube quedará como fuente de verdad.');
+    return true;
+  }catch(e){ console.warn('No se pudo limpiar:', e); return false; }
+};
 // Borra UN ejercicio de Supabase de inmediato. Se usa al combinar y elegir
 // "eliminar originales": sin esto, los originales siguen en la nube y reaparecen
 // (separados) al volver a iniciar sesión, aunque se hayan borrado localmente.
@@ -29166,7 +29187,11 @@ function sbScheduleTanda2bSync(){
           console.log('[Supabase] Sync drills_exercises (' + dPayload.length + ')');
           sbClient.from('drills_exercises').upsert(dPayload, { onConflict: 'id' }).then(function(r2){
             if(r2.error) console.error('[Supabase] Sync drills_exercises error:', r2.error);
-            else console.log('[Supabase] Sync drills_exercises OK');
+            else {
+              console.log('[Supabase] Sync drills_exercises OK');
+              // Todo D subió correctamente → ya no hay pendientes
+              try{ localStorage.setItem('drills_pending', '[]'); }catch(e){}
+            }
           });
         }
       });
@@ -29200,6 +29225,13 @@ sbLoadInitialData = function(){
       try{ tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]'); }catch(e){}
       var tombSet = {};
       tomb.forEach(function(t){ tombSet[Number(t)]=true; });
+      // Pendientes: ejercicios creados/combinados recién que quizá no llegaron a subir.
+      // SOLO estos se preservan si no están en la nube. Todo lo demás: la nube manda,
+      // así no se resucita basura vieja de localStorage.
+      var pend = [];
+      try{ pend = JSON.parse(localStorage.getItem('drills_pending')||'[]'); }catch(e){}
+      var pendSet = {};
+      pend.forEach(function(t){ pendSet[Number(t)]=true; });
       var keys = {};
       (rows||[]).forEach(function(row){
         if(tombSet[Number(row.id)]){
@@ -29210,14 +29242,18 @@ sbLoadInitialData = function(){
         }
         keys[Number(row.id)] = _sbDrillFromRow(row);
       });
-      // Preservar SIEMPRE los ejercicios que están en local pero no en la nube
-      // (combinaciones/ejercicios nuevos cuyo sync a Supabase falló o no llegó).
-      var localOnly = D.filter(function(d){ return !(Number(d.id) in keys) && !tombSet[Number(d.id)]; });
-      console.log('[Supabase] Drills — en la nube: '+Object.keys(keys).length+' · sólo locales (preservados): '+localOnly.length+(localOnly.length?' → ids '+localOnly.map(function(d){return d.id;}).join(','):'')+(tomb.length?' · borrados ignorados: '+tomb.length:''));
+      // Preservar sólo los PENDIENTES que no están en la nube (no cualquier local viejo)
+      var localOnly = D.filter(function(d){
+        return !(Number(d.id) in keys) && !tombSet[Number(d.id)] && pendSet[Number(d.id)];
+      });
+      var descartados = D.filter(function(d){
+        return !(Number(d.id) in keys) && !tombSet[Number(d.id)] && !pendSet[Number(d.id)];
+      }).length;
+      console.log('[Supabase] Drills — en la nube: '+Object.keys(keys).length+' · pendientes preservados: '+localOnly.length+(localOnly.length?' → ids '+localOnly.map(function(d){return d.id;}).join(','):'')+(descartados?' · locales viejos descartados (la nube manda): '+descartados:'')+(tomb.length?' · borrados ignorados: '+tomb.length:''));
       D.length = 0;
       Object.values(keys).forEach(function(d){ D.push(d); });
       localOnly.forEach(function(d){ D.push(d); });
-      // Reintentar subir a la nube los que quedaron sólo en local (best-effort)
+      // Subir a la nube los pendientes que faltaban
       if(localOnly.length && typeof sbUpsertOneDrill==='function'){
         localOnly.forEach(function(d){ sbUpsertOneDrill(d); });
       }
