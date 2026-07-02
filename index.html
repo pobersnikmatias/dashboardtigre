@@ -244,7 +244,7 @@ body.sb-show{visibility:visible}
     max-width:100vw!important;
   }
   /* Los contenedores de vista no deben exceder el ancho de pantalla */
-  #view-fixture, #view-plan, #view-carga, #view-profiles, #view-players,
+  #view-hoy, #view-fixture, #view-plan, #view-carga, #view-profiles, #view-players,
   #view-gym, #view-train, #view-micro, #view-match,
   #fix-content-fixture, #fix-content-equipo, #fix-content-jugadores,
   #fix-content-gps, #fix-content-tareas{
@@ -755,6 +755,7 @@ body.sb-show{visibility:visible}
   </div>
   <!-- Lista de opciones -->
   <div style="flex:1;overflow-y:auto;padding:6px 0">
+    <button class="mobile-nav-item" onclick="setMainView('hoy')" data-view="hoy"><span class="mn-icon">🏠</span><span class="mn-label">Hoy</span></button>
     <button class="mobile-nav-item" onclick="setMainView('fixture')" data-view="fixture"><span class="mn-icon">⚽</span><span class="mn-label">Equipo</span></button>
     <button class="mobile-nav-item" onclick="setMainView('plan')" data-view="plan"><span class="mn-icon">🗓️</span><span class="mn-label">Planificación</span></button>
     <button class="mobile-nav-item" onclick="setMainView('carga')" data-view="carga"><span class="mn-icon">📊</span><span class="mn-label">Carga interna</span></button>
@@ -766,7 +767,8 @@ body.sb-show{visibility:visible}
 
 <!-- NAVEGACIÓN PRINCIPAL (desktop) -->
 <div id="main-nav-desktop" class="desktop-only" style="display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e0e0e0;padding-bottom:0;flex-wrap:wrap">
-  <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid #3B4D88;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#3B4D88;cursor:pointer">&#9917; Equipo</button>
+  <button id="nav-hoy" onclick="setMainView('hoy')" style="padding:7px 18px;border:none;border-bottom:2px solid #1E2A52;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#1E2A52;cursor:pointer">🏠 Hoy</button>
+  <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">&#9917; Equipo</button>
   <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
   <button id="nav-carga" onclick="setMainView('carga')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📊 Carga interna</button>
   <button id="nav-profiles" onclick="setMainView('profiles')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👤 Perfiles</button>
@@ -3720,10 +3722,10 @@ const MATCH_METRICS=[
 
 // Navegación principal
 let mainView='fixture';
-var _SMV_COLORS={train:'#3B4D88',match:'#3B4D88',players:'#1D9E75',micro:'#3B4D88',plan:'#EF9F27',profiles:'#9C59D1',gym:'#D85A30',fixture:'#1D9E75',carga:'#9C59D1'};
+var _SMV_COLORS={hoy:'#1E2A52',train:'#3B4D88',match:'#3B4D88',players:'#1D9E75',micro:'#3B4D88',plan:'#EF9F27',profiles:'#9C59D1',gym:'#D85A30',fixture:'#1D9E75',carga:'#9C59D1'};
 function setMainView(v){
   mainView=v;
-  ['train','match','players','micro','plan','profiles','gym','fixture','carga'].forEach(function(vv){
+  ['hoy','train','match','players','micro','plan','profiles','gym','fixture','carga'].forEach(function(vv){
     var el=document.getElementById('view-'+vv);
     if(el)el.style.display=v===vv?'':'none';
     var btn=document.getElementById('nav-'+vv);
@@ -3732,6 +3734,7 @@ function setMainView(v){
     btn.style.borderBottom=v===vv?'2px solid '+(_SMV_COLORS[vv]||'#3B4D88'):'2px solid transparent';
   });
   // 'match' ya no tiene botón en el nav principal — ahora vive dentro de fixture como subtab GPS
+  if(v==='hoy'){if(typeof hoyRender==='function')hoyRender();}
   if(v==='micro'){mcRebuildWeekSel();if(typeof mcRebuildLoadMetricSelector==='function')mcRebuildLoadMetricSelector();mcRenderWeek();mcRenderLoad();mcRenderBandConfig();mcEstInit();}
   if(v==='profiles'){if(typeof renderProfilesTable==='function')renderProfilesTable();}
   if(v==='players'){if(typeof plRebuild==='function')plRebuild();}
@@ -15018,6 +15021,45 @@ document.addEventListener('DOMContentLoaded',function(){
 </div><!-- end view-gym -->
 
 <!-- VISTA FIXTURE -->
+<!-- ═══════════════════════════════════════════════════════════════
+     VISTA HOY — pantalla de inicio operativa del día
+     Semáforo de disponibilidad (wellness + ACWR + estado médico),
+     alertas, sesión planificada de hoy y check-in del plantel.
+     Render 100% por JS (hoyRender). No toca datos de otras vistas;
+     solo los lee. Estado propio: HOY_FLAGS (localStorage hoyFlags_v1).
+     ═══════════════════════════════════════════════════════════════ -->
+<style>
+#view-hoy .hoy-grid{display:grid;grid-template-columns:1.25fr .85fr;gap:14px;align-items:start}
+#view-hoy .hoy-card{background:#fff;border:1px solid #e4e6ec;border-radius:12px;padding:14px 16px;box-shadow:0 4px 14px rgba(20,30,60,.05)}
+#view-hoy .hoy-card h3{font-size:12px;font-weight:800;color:#3B4D88;text-transform:uppercase;letter-spacing:.05em;margin:0 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#view-hoy .hoy-count{font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;border:1px solid}
+#view-hoy .hoy-count.g{color:#1D9E75;border-color:#1D9E7566;background:#edfaf3}
+#view-hoy .hoy-count.y{color:#9A6A1B;border-color:#E8A13C88;background:#fdf3e2}
+#view-hoy .hoy-count.r{color:#D9534F;border-color:#D9534F66;background:#fdeeee}
+#view-hoy .hoy-count.n{color:#888;border-color:#ddd;background:#f5f5f5}
+#view-hoy .hoy-sem{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:7px}
+#view-hoy .hoy-pl{border:1px solid #ddd;border-radius:9px;padding:7px 6px 6px;text-align:center;cursor:pointer;background:#fafafa;transition:transform .08s}
+#view-hoy .hoy-pl:active{transform:scale(.96)}
+#view-hoy .hoy-pl b{display:block;font-size:11.5px;color:#0D1B2A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#view-hoy .hoy-pl small{display:block;font-size:8.5px;color:#888;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#view-hoy .hoy-pl.g{background:#edfaf3;border-color:#1D9E7555}
+#view-hoy .hoy-pl.y{background:#fdf3e2;border-color:#E8A13C77}
+#view-hoy .hoy-pl.r{background:#fdeeee;border-color:#D9534F66}
+#view-hoy .hoy-alert{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px dashed #e8e8e8;font-size:12px;color:#444;line-height:1.4}
+#view-hoy .hoy-alert:first-of-type{border-top:none;padding-top:2px}
+#view-hoy .hoy-alert .ic{flex-shrink:0;width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px}
+#view-hoy .hoy-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:1px dashed #eee;font-size:12px}
+#view-hoy .hoy-row:first-of-type{border-top:none}
+#view-hoy .hoy-kpis{display:flex;gap:8px;margin-top:10px}
+#view-hoy .hoy-kpis>div{flex:1;background:#f6f7fa;border:1px solid #e4e6ec;border-radius:9px;padding:7px 8px;text-align:center}
+#view-hoy .hoy-kpis b{display:block;font-size:16px;color:#1E2A52}
+#view-hoy .hoy-kpis small{font-size:8.5px;color:#888}
+#view-hoy .hoy-btn{border:none;border-radius:9px;padding:10px 14px;font-size:12px;font-weight:800;cursor:pointer;color:#fff}
+#view-hoy .hoy-chipmd{font-size:10px;font-weight:800;background:#1E2A52;color:#fff;padding:3px 10px;border-radius:7px;letter-spacing:.04em}
+@media(max-width:900px){#view-hoy .hoy-grid{grid-template-columns:1fr}}
+</style>
+<div id="view-hoy" style="display:none"></div>
+
 <div id="view-fixture">
 
 <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -30605,6 +30647,7 @@ window.mobileCloseDrawer = mobileCloseDrawer;
 
 // Mapa de vistas → títulos para el header móvil
 var _mobileViewTitles = {
+  hoy: '🏠 Hoy',
   fixture: '⚽ Equipo',
   plan: '🗓️ Planificación',
   carga: '📊 Carga interna',
@@ -30642,7 +30685,7 @@ if(typeof window.setMainView === 'function'){
 // Al cargar, marcar el item inicial (Equipo) como activo en el drawer
 document.addEventListener('DOMContentLoaded', function(){
   try{
-    var firstItem = document.querySelector('.mobile-nav-item[data-view="fixture"]');
+    var firstItem = document.querySelector('.mobile-nav-item[data-view="hoy"]');
     if(firstItem) firstItem.classList.add('active');
   }catch(e){}
 });
@@ -31208,5 +31251,344 @@ window.planNewExSave = planNewExSave;
 
 </script>
 
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// VISTA "HOY" — Semáforo de disponibilidad + sesión del día + alertas
+// ---------------------------------------------------------------------------
+// Solo LEE los datos existentes (WELLNESS_DATA, PSE_DATA, MICROCICLO,
+// PLAN_WEEKS, FIX_FIXTURE, PLAYER_PROFILES). Estado propio: HOY_FLAGS
+// (estado médico manual por jugador) persistido en localStorage 'hoyFlags_v1'.
+//
+// Semáforo (por jugador):
+//   ROJO     → flag médico/kinesio · no disponible en wellness · ACWR > 1.50
+//              · 2+ condiciones amarillas juntas
+//   AMARILLO → flag diferenciado · dolor muscular hoy · algún ítem wellness ≤ 2
+//              · readiness < 60% · ACWR 1.31–1.50 · ACWR < 0.80 (subcarga)
+//   VERDE    → check-in de hoy sin señales
+//   GRIS     → sin check-in de hoy (sin datos ≠ disponible)
+// ACWR: media diaria aguda (7 d) / crónica (28 d) de sRPE (PSE × min, Foster).
+// Requiere ≥ 4 días con carga en los últimos 28 para mostrarse; si no, "s/d".
+// ═══════════════════════════════════════════════════════════════════════════
+var HOY_FLAGS = {};
+try{ HOY_FLAGS = JSON.parse(localStorage.getItem('hoyFlags_v1')||'{}') || {}; }catch(e){ HOY_FLAGS = {}; }
+function hoySaveFlags(){ try{ localStorage.setItem('hoyFlags_v1', JSON.stringify(HOY_FLAGS)); }catch(e){} }
+
+// Fecha local (no UTC): a la noche en ART toISOString ya marca mañana.
+function hoyLocalISO(d){
+  d = d || new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function hoyNorm(s){ return (typeof cargaNormName==='function') ? cargaNormName(s) : (s||'').toLowerCase().trim(); }
+function hoyPDate(d){ return (typeof cargaParseDate==='function') ? cargaParseDate(d) : String(d||'').slice(0,10); }
+function hoyShortName(n){
+  var parts=(n||'').trim().split(/\s+/);
+  if(parts.length<=1) return n||'';
+  return parts[0].charAt(0)+'. '+parts.slice(1).join(' ');
+}
+
+// ── Plantel: mismos nombres que usa el kiosco ──
+function hoyRoster(){
+  if(typeof cargaSelfPlayerNames==='function') return cargaSelfPlayerNames();
+  var set={};
+  Object.values(typeof PLAYER_PROFILES!=='undefined'?PLAYER_PROFILES:{}).forEach(function(p){ if(p&&p.name) set[p.name]=true; });
+  (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){ (s.players||[]).forEach(function(p){ if(p.name) set[p.name]=true; }); });
+  (typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:[]).forEach(function(r){ if(r.name) set[r.name]=true; });
+  (typeof PSE_DATA!=='undefined'?PSE_DATA:[]).forEach(function(r){ if(r.name) set[r.name]=true; });
+  return Object.keys(set).sort(function(a,b){ return a.localeCompare(b,'es'); });
+}
+
+// ── Wellness de hoy de un jugador (o null) ──
+function hoyWellnessToday(nameL, today){
+  var rec=null;
+  (WELLNESS_DATA||[]).forEach(function(r){
+    if(hoyNorm(r.name)!==nameL) return;
+    if(hoyPDate(r.date)===today) rec=r; // si hay varios queda el último
+  });
+  return rec;
+}
+
+// ── Carga diaria sRPE (AU) por jugador en una fecha ──
+// 1º sesiones GPS del microciclo de esa fecha (min: tot_dur > min del PSE),
+// PSE individual de esa fecha o PSE de equipo de la sesión como fallback.
+// 2º registros PSE de esa fecha sin sesión GPS asociada (usa r.min si existe).
+function hoyDailyAU(nameL, dateISO){
+  var au=0, has=false;
+  var pseRecs=(PSE_DATA||[]).filter(function(r){ return hoyNorm(r.name)===nameL && hoyPDate(r.date)===dateISO; });
+  var sessions=(MICROCICLO||[]).filter(function(s){ return hoyPDate(s.fecha||s.date)===dateISO; });
+  var usedPse={};
+  sessions.forEach(function(s){
+    var gp=(s.players||[]).find(function(pp){ return pp.name && hoyNorm(pp.name)===nameL; });
+    var pr=pseRecs.length?pseRecs[0]:null;
+    var mins=(gp&&gp.tot_dur>0)?gp.tot_dur:((pr&&pr.min>0)?pr.min:0);
+    if(mins<=0) return;
+    var pse=(pr&&pr.pse!=null)?pr.pse:((s.pse!=null&&!isNaN(s.pse))?s.pse:null);
+    if(pse==null) return;
+    au+=pse*mins; has=true;
+    if(pr) usedPse[hoyPDate(pr.date)]=true;
+  });
+  if(!sessions.length){
+    pseRecs.forEach(function(r){
+      if(r.min>0 && r.pse!=null){ au+=r.pse*r.min; has=true; }
+    });
+  }
+  return has?au:null;
+}
+
+// ── ACWR (agudo 7d / crónico 28d, medias diarias) ──
+function hoyACWR(nameL, todayISO){
+  var base=new Date(todayISO+'T12:00:00');
+  var sum7=0, sum28=0, daysWith=0;
+  for(var i=0;i<28;i++){
+    var d=new Date(base); d.setDate(d.getDate()-i);
+    var iso=hoyLocalISO(d);
+    var au=hoyDailyAU(nameL, iso);
+    if(au!=null && au>0){ sum28+=au; daysWith++; if(i<7) sum7+=au; }
+  }
+  if(daysWith<4 || sum28<=0) return null;              // datos insuficientes
+  var acute=sum7/7, chronic=sum28/28;
+  if(chronic<=0) return null;
+  return {ratio:acute/chronic, acute:Math.round(acute), chronic:Math.round(chronic), days:daysWith};
+}
+
+// ── Estado del semáforo de un jugador ──
+function hoyPlayerStatus(name, todayISO){
+  var nameL=hoyNorm(name);
+  var reasons=[], level='green', ambers=0;
+  var flag=HOY_FLAGS[nameL];
+
+  if(flag && (flag.flag==='medico')){
+    level='red'; reasons.push({t:'red', txt:'Estado médico/kinesio'+(flag.note?': '+flag.note:'')});
+  } else if(flag && flag.flag==='dif'){
+    ambers++; reasons.push({t:'amber', txt:'Trabajo diferenciado'+(flag.note?': '+flag.note:'')});
+  }
+
+  var w=hoyWellnessToday(nameL, todayISO);
+  if(w){
+    if(w.disponibilidad && hoyNorm(w.disponibilidad)!=='disponible' && w.disponibilidad!==''){
+      level='red'; reasons.push({t:'red', txt:'Wellness: '+w.disponibilidad});
+    }
+    if(w.dolor==='Si'){
+      ambers++;
+      reasons.push({t:'amber', txt:'Dolor muscular'+(w.dolorZona?' — '+w.dolorZona:'')+(w.dolorTiempo?' ('+w.dolorTiempo+')':'')});
+    }
+    var layout=(typeof WELLNESS_LAYOUT!=='undefined'&&WELLNESS_LAYOUT)?WELLNESS_LAYOUT:(typeof cargaDefaultWellnessLayout==='function'?cargaDefaultWellnessLayout():{fields:[]});
+    var lows=[];
+    (layout.fields||[]).forEach(function(f){
+      var v=w.fields?w.fields[f.key]:null;
+      if(v!=null && v>0 && v<=2) lows.push(f.label+' '+v);
+    });
+    if(lows.length){ ambers++; reasons.push({t:'amber', txt:'Ítems bajos: '+lows.join(', ')}); }
+    var maxR=w.maxReadiness || (layout.fields||[]).reduce(function(a,f){return a+(f.max||5);},0) || 20;
+    var rd=(w.readiness!=null)?w.readiness:null;
+    if(rd!=null && maxR>0 && (rd/maxR)<0.6){ ambers++; reasons.push({t:'amber', txt:'Readiness '+rd+'/'+maxR}); }
+  }
+
+  var ac=hoyACWR(nameL, todayISO);
+  if(ac){
+    var r=ac.ratio;
+    if(r>1.5){ level='red'; reasons.push({t:'red', txt:'ACWR '+r.toFixed(2)+' — pico de carga (agudo '+ac.acute+' vs crónico '+ac.chronic+' AU/día)'}); }
+    else if(r>1.3){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+' — carga en ascenso'}); }
+    else if(r<0.8){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+' — subcarga, cuidar el reingreso'}); }
+  }
+
+  if(level!=='red'){
+    if(ambers>=2) level='red';
+    else if(ambers===1) level='amber';
+    else if(!w) level='none';                 // sin check-in y sin señales
+  }
+  return {name:name, nameL:nameL, level:level, reasons:reasons, wellness:w, acwr:ac, flag:flag||null};
+}
+
+// ── Sesión de hoy desde la última planificación semanal ──
+function hoyTodaysPlan(){
+  if(!(typeof PLAN_WEEKS!=='undefined') || !PLAN_WEEKS.length) return null;
+  var sorted=PLAN_WEEKS.slice().sort(function(a,b){ return (b.created||'').localeCompare(a.created||''); });
+  var week=sorted[0];
+  var dow=new Date().getDay();                       // 0=Dom .. 6=Sáb
+  var labels=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  var todayLbl=labels[dow];
+  var day=(week.days||[]).find(function(d){ return d.label===todayLbl; });
+  if(!day) return {week:week, day:null, todayLbl:todayLbl};
+  var items=[];
+  var blocks=day.blocks||[];
+  blocks.forEach(function(b){
+    (b.exercises||[]).forEach(function(it){
+      var ex=(typeof planResolveEx==='function')?planResolveEx(it):null;
+      items.push({name:(ex&&ex.n)?ex.n:'Ejercicio', mins:it.mins||0, parallel:!!b.parallel});
+    });
+  });
+  var sum=(typeof planSumDay==='function')?planSumDay(day):{totalMins:items.reduce(function(a,i){return a+i.mins;},0)};
+  return {week:week, day:day, items:items, sum:sum, todayLbl:todayLbl};
+}
+
+// ── Próximo partido (primer fixture sin resultado) ──
+function hoyNextMatch(){
+  if(typeof FIX_FIXTURE==='undefined' || !FIX_FIXTURE.length) return null;
+  return FIX_FIXTURE.find(function(m){ return !m.resultado; }) || null;
+}
+
+// ── RENDER PRINCIPAL ──
+function hoyRender(){
+  var root=document.getElementById('view-hoy'); if(!root) return;
+  var today=hoyLocalISO();
+  var roster=hoyRoster();
+  var statuses=roster.map(function(n){ return hoyPlayerStatus(n, today); });
+
+  var nG=statuses.filter(function(s){return s.level==='green';}).length;
+  var nY=statuses.filter(function(s){return s.level==='amber';}).length;
+  var nR=statuses.filter(function(s){return s.level==='red';}).length;
+  var nN=statuses.filter(function(s){return s.level==='none';}).length;
+  var withWellness=statuses.filter(function(s){return !!s.wellness;}).length;
+
+  var plan=hoyTodaysPlan();
+  var next=hoyNextMatch();
+  var fmt=new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+  fmt=fmt.charAt(0).toUpperCase()+fmt.slice(1);
+  var mdLbl=(plan&&plan.day&&plan.day.mdLabel)?plan.day.mdLabel:'';
+
+  // ── Semáforo (orden: rojo, amarillo, sin datos, verde) ──
+  var order={red:0, amber:1, none:2, green:3};
+  var semHtml=statuses.slice().sort(function(a,b){
+    return (order[a.level]-order[b.level]) || a.name.localeCompare(b.name,'es');
+  }).map(function(s,i){
+    var cls=s.level==='red'?'r':(s.level==='amber'?'y':(s.level==='green'?'g':''));
+    var dot=s.level==='red'?'🔴':(s.level==='amber'?'🟡':(s.level==='green'?'🟢':'⚪'));
+    var sub=s.level==='none'?'sin check-in':(s.reasons.length?(s.reasons[0].txt):'OK');
+    return '<div class="hoy-pl '+cls+'" onclick="hoyOpenPlayer('+i+')" data-hoy-idx="'+i+'" title="'+s.name.replace(/"/g,'&quot;')+'">'+
+      '<b>'+dot+' '+hoyShortName(s.name)+'</b><small>'+sub+'</small></div>';
+  }).join('');
+  // Guardar orden para el modal
+  window._hoySorted=statuses.slice().sort(function(a,b){ return (order[a.level]-order[b.level]) || a.name.localeCompare(b.name,'es'); });
+
+  // ── Alertas: motivos rojos primero, después amarillos (máx 8) ──
+  var alerts=[];
+  window._hoySorted.forEach(function(s){
+    s.reasons.forEach(function(r){ alerts.push({name:s.name, t:r.t, txt:r.txt}); });
+  });
+  alerts.sort(function(a,b){ return (a.t==='red'?0:1)-(b.t==='red'?0:1); });
+  var alertsHtml=alerts.slice(0,8).map(function(a){
+    var bg=a.t==='red'?'#fdeeee':'#fdf3e2', ic=a.t==='red'?'🔴':'🟡';
+    return '<div class="hoy-alert"><div class="ic" style="background:'+bg+'">'+ic+'</div><div><b>'+hoyShortName(a.name)+'</b> — '+a.txt+'</div></div>';
+  }).join('');
+  if(nN>0) alertsHtml+='<div class="hoy-alert"><div class="ic" style="background:#f2f2f2">⚪</div><div><b>'+nN+' jugador'+(nN===1?'':'es')+'</b> todavía sin check-in de wellness hoy.</div></div>';
+  if(!alertsHtml) alertsHtml='<div style="font-size:12px;color:#1D9E75;padding:6px 0">✓ Sin alertas: plantel completo en verde.</div>';
+
+  // ── Sesión de hoy ──
+  var sesHtml;
+  if(plan && plan.day && plan.items && plan.items.length){
+    sesHtml=plan.items.map(function(it,i){
+      return '<div class="hoy-row"><span>'+(i+1)+' · '+it.name+(it.parallel?' <span style="font-size:9px;color:#9C59D1">∥</span>':'')+'</span><b>'+it.mins+'\'</b></div>';
+    }).join('');
+    var tm=plan.sum&&plan.sum.totalMins?Math.round(plan.sum.totalMins):plan.items.reduce(function(a,i){return a+i.mins;},0);
+    var mts=plan.sum&&plan.sum.mts?Math.round(plan.sum.mts):null;
+    sesHtml+='<div class="hoy-kpis">'+
+      '<div><b>'+tm+'\'</b><small>minutos planificados</small></div>'+
+      (mts!=null?'<div><b>'+mts.toLocaleString('es-AR')+'</b><small>m estimados (biblioteca)</small></div>':'')+
+      '<div><b>'+plan.items.length+'</b><small>ejercicios</small></div>'+
+    '</div>'+
+    '<div style="margin-top:10px;text-align:right"><button class="hoy-btn" style="background:#EF9F27" onclick="setMainView(\'plan\')">Abrir planificación →</button></div>';
+  } else if(plan && plan.week){
+    sesHtml='<div style="font-size:12px;color:#888;padding:8px 0">La semana "'+(plan.week.name||'actual')+'" no tiene ejercicios cargados para '+plan.todayLbl+'.</div>'+
+      '<button class="hoy-btn" style="background:#EF9F27" onclick="setMainView(\'plan\')">Planificar el día →</button>';
+  } else {
+    sesHtml='<div style="font-size:12px;color:#888;padding:8px 0">No hay planificación semanal creada todavía.</div>'+
+      '<button class="hoy-btn" style="background:#EF9F27" onclick="setMainView(\'plan\')">Crear semana →</button>';
+  }
+
+  root.innerHTML=
+    '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">'+
+      '<div style="font-size:19px;font-weight:800;color:#0D1B2A">🏠 '+fmt+'</div>'+
+      (mdLbl?'<span class="hoy-chipmd">'+mdLbl+'</span>':'')+
+      (next?'<span style="font-size:11px;color:#666">Próximo: <b>vs '+next.rival+'</b> ('+next.cond+', F'+next.n+')</span>':'')+
+      '<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="hoy-btn" style="background:#1D9E75" onclick="cargaSelfEntry(\'wellness\')">📲 Wellness</button>'+
+        '<button class="hoy-btn" style="background:#D85A30" onclick="cargaSelfEntry(\'pse\')">📲 PSE</button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="hoy-grid">'+
+      '<div style="display:flex;flex-direction:column;gap:14px">'+
+        '<div class="hoy-card">'+
+          '<h3>🚦 Disponibilidad del plantel'+
+            '<span style="margin-left:auto;display:flex;gap:5px">'+
+              '<span class="hoy-count g">'+nG+' OK</span><span class="hoy-count y">'+nY+'</span>'+
+              '<span class="hoy-count r">'+nR+'</span><span class="hoy-count n">'+nN+' s/checkin</span>'+
+            '</span></h3>'+
+          (statuses.length?('<div class="hoy-sem">'+semHtml+'</div>'):'<div style="font-size:12px;color:#888">Sin jugadores registrados todavía. Se toman de perfiles, GPS y wellness.</div>')+
+          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Verde/amarillo/rojo = wellness de hoy + ACWR (sRPE 7d/28d, Foster) + estado médico manual. Tocá un jugador para ver el detalle o marcar su estado.</div>'+
+        '</div>'+
+        '<div class="hoy-card"><h3>⚠️ Alertas de hoy</h3>'+alertsHtml+'</div>'+
+      '</div>'+
+      '<div style="display:flex;flex-direction:column;gap:14px">'+
+        '<div class="hoy-card"><h3>⚽ Sesión de hoy'+(plan&&plan.week&&plan.week.name?'<span style="margin-left:auto;font-size:9px;color:#aaa;font-weight:600;text-transform:none">'+plan.week.name+'</span>':'')+'</h3>'+sesHtml+'</div>'+
+        '<div class="hoy-card"><h3>📲 Check-in de hoy</h3>'+
+          '<div style="display:flex;align-items:center;gap:12px">'+
+            '<div style="font-size:26px;font-weight:800;color:'+(withWellness>=roster.length&&roster.length?'#1D9E75':'#E8A13C')+'">'+withWellness+'<span style="font-size:13px;color:#aaa">/'+roster.length+'</span></div>'+
+            '<div style="font-size:11px;color:#666;line-height:1.4">jugadores respondieron el wellness.<br>El kiosco pisa duplicados: queda el último envío.</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+}
+window.hoyRender=hoyRender;
+
+// ── Detalle de jugador + estado médico manual ──
+function hoyOpenPlayer(idx){
+  var s=(window._hoySorted||[])[idx]; if(!s) return;
+  var old=document.getElementById('hoy-modal'); if(old) old.remove();
+  var reasons=s.reasons.length
+    ? s.reasons.map(function(r){ return '<div class="hoy-alert"><div class="ic" style="background:'+(r.t==='red'?'#fdeeee':'#fdf3e2')+'">'+(r.t==='red'?'🔴':'🟡')+'</div><div>'+r.txt+'</div></div>'; }).join('')
+    : '<div style="font-size:12px;color:'+(s.wellness?'#1D9E75':'#888')+';padding:4px 0">'+(s.wellness?'✓ Sin señales de riesgo hoy.':'Sin check-in de wellness hoy.')+'</div>';
+  var ac=s.acwr?('<div class="hoy-row"><span>ACWR (7d/28d)</span><b>'+s.acwr.ratio.toFixed(2)+'</b></div>'+
+                 '<div class="hoy-row"><span>Carga aguda / crónica</span><b>'+s.acwr.acute+' / '+s.acwr.chronic+' AU·día</b></div>')
+               :'<div class="hoy-row"><span>ACWR</span><b style="color:#aaa">s/d (menos de 4 días con carga en 28d)</b></div>';
+  var f=s.flag||{};
+  function btn(val,lbl,color){
+    var on=(f.flag===val)||(!f.flag&&val==='apto');
+    return '<button onclick="hoySetFlag(\''+s.nameL.replace(/'/g,"\\'")+'\',\''+val+'\')" style="flex:1;padding:9px 4px;font-size:11px;font-weight:800;border-radius:8px;cursor:pointer;border:2px solid '+(on?color:'#ddd')+';background:'+(on?color:'#fff')+';color:'+(on?'#fff':'#666')+'">'+lbl+'</button>';
+  }
+  var m=document.createElement('div');
+  m.id='hoy-modal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(13,27,42,.7);z-index:10500;display:flex;align-items:center;justify-content:center;padding:16px';
+  m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:420px;width:100%;max-height:88vh;overflow-y:auto;padding:18px 20px" onclick="event.stopPropagation()">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+      '<div style="font-size:16px;font-weight:800;color:#0D1B2A">'+(s.level==='red'?'🔴':(s.level==='amber'?'🟡':(s.level==='green'?'🟢':'⚪')))+' '+s.name+'</div>'+
+      '<button onclick="document.getElementById(\'hoy-modal\').remove()" style="background:#f0f0f0;border:none;border-radius:6px;padding:5px 12px;font-size:14px;cursor:pointer;font-weight:700">✕</button>'+
+    '</div>'+reasons+ac+
+    '<div style="font-size:11px;font-weight:800;color:#3B4D88;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 8px">Estado del CT para hoy</div>'+
+    '<div style="display:flex;gap:6px">'+btn('apto','✓ Apto','#1D9E75')+btn('dif','Diferenciado','#E8A13C')+btn('medico','Kinesio / Médico','#D9534F')+'</div>'+
+    '<input id="hoy-flag-note" placeholder="Nota (opcional): zona, indicación…" value="'+((f.note||'').replace(/"/g,'&quot;'))+'" '+
+      'onchange="hoySetFlagNote(\''+s.nameL.replace(/'/g,"\\'")+'\',this.value)" '+
+      'style="width:100%;box-sizing:border-box;margin-top:8px;padding:9px 10px;font-size:12px;border:1px solid #ddd;border-radius:8px">'+
+    '<div style="font-size:9.5px;color:#aaa;margin-top:8px">El estado manual pesa sobre el semáforo: Kinesio/Médico = rojo · Diferenciado = amarillo. Queda guardado hasta que lo cambies.</div>'+
+  '</div>';
+  m.onclick=function(){ m.remove(); };
+  document.body.appendChild(m);
+}
+window.hoyOpenPlayer=hoyOpenPlayer;
+
+function hoySetFlag(nameL, val){
+  if(val==='apto'){ delete HOY_FLAGS[nameL]; }
+  else{
+    HOY_FLAGS[nameL]=HOY_FLAGS[nameL]||{};
+    HOY_FLAGS[nameL].flag=val;
+    HOY_FLAGS[nameL].date=hoyLocalISO();
+  }
+  hoySaveFlags();
+  var mm=document.getElementById('hoy-modal'); if(mm) mm.remove();
+  hoyRender();
+}
+window.hoySetFlag=hoySetFlag;
+
+function hoySetFlagNote(nameL, note){
+  if(HOY_FLAGS[nameL]){ HOY_FLAGS[nameL].note=(note||'').trim(); hoySaveFlags(); }
+}
+window.hoySetFlagNote=hoySetFlagNote;
+
+// Arranque: Hoy es la pantalla de inicio. Registrado al final → corre después
+// de que loadData() ya restauró todo (loadData es síncrono al parsear).
+document.addEventListener('DOMContentLoaded', function(){
+  try{ setMainView('hoy'); }catch(e){ console.warn('hoy boot:', e); }
+});
+</script>
 </body>
 </html>
