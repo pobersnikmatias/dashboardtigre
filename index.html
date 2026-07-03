@@ -31326,7 +31326,30 @@ if(typeof _xdOrigPaint==='function'){
 
 // ── ESTADO DEL EDITOR ──
 var X={open:false,shapes:[],bg:'plain',hist:[],redo:[],tool:'select',color:'red',
-      sel:-1,drag:null,dirty:false,onSave:null,title:''};
+      sel:-1,drag:null,dirty:false,onSave:null,title:'',
+      frames:[[]],cur:0,playing:false,playRAF:null};
+
+// Compromete el frame actual (los shapes en edición) a su slot
+function xdCommit(){ X.frames[X.cur]=JSON.parse(JSON.stringify(X.shapes)); }
+
+// Interpolación entre dos listas de shapes (por índice + tipo; ease in-out)
+function xdEase(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+function xdLerpShapes(a,b,t){
+  t=xdEase(Math.max(0,Math.min(1,t)));
+  var n=Math.max(a.length,b.length), out=[];
+  for(var i=0;i<n;i++){
+    var sa=a[i], sb=b[i];
+    if(sa&&sb&&sa.type===sb.type){
+      var c=JSON.parse(JSON.stringify(t<0.5?sa:sb));
+      ['x','y','x1','y1','x2','y2','w','h','r','angle'].forEach(function(k){
+        if(typeof sa[k]==='number'&&typeof sb[k]==='number') c[k]=sa[k]+(sb[k]-sa[k])*t;
+      });
+      out.push(c);
+    } else if(t<0.5&&sa){ out.push(sa); }
+    else if(t>=0.5&&sb){ out.push(sb); }
+  }
+  return out;
+}
 
 function xdSnap(){ X.hist.push(JSON.stringify(X.shapes)); if(X.hist.length>80)X.hist.shift(); X.redo=[]; X.dirty=true; }
 function xdUndo(){ if(!X.hist.length)return; X.redo.push(JSON.stringify(X.shapes)); X.shapes=JSON.parse(X.hist.pop()); X.sel=-1; xdRender(); }
@@ -31421,6 +31444,7 @@ function xdRender(){
   svg.innerHTML='<defs><filter id="xd-halo" x="-30%" y="-30%" width="160%" height="160%">'+
     '<feDropShadow dx="0" dy="0" stdDeviation="3.2" flood-color="#FFE45C" flood-opacity="1"/></filter></defs>'+body;
   xdCtxBar();
+  xdSeqBar();
   var u=document.getElementById('xd2-undo'); if(u)u.style.opacity=X.hist.length?'1':'0.35';
   var r=document.getElementById('xd2-redo'); if(r)r.style.opacity=X.redo.length?'1':'0.35';
 }
@@ -31486,6 +31510,7 @@ var XD_STAMPS={
 var XD_DRAGS={'arrow-run':'run','arrow-pass':'pass','arrow-drib':'drib','arrow-shot':'shot','line':null,'zone':'zone'};
 
 function xdDown(e){
+  if(X.playing)return;
   if(e.target.closest&&e.target.closest('.xd2-cbtn'))return;
   e.preventDefault();
   var p=xdPos(e), t=X.tool;
@@ -31621,12 +31646,19 @@ window.xd2ExportPNG=function(){
 window.xd2Open=function(data,onSave,opts){
   opts=opts||{};
   X.shapes=[]; X.bg='plain'; X.hist=[]; X.redo=[]; X.sel=-1; X.drag=null; X.dirty=false;
+  X.frames=[[]]; X.cur=0; xd2StopPlay();
   X.onSave=onSave||null; X.title=opts.title||'Ejercicio';
   var legacyImg=false;
   if(data){
     if(String(data).slice(0,10)==='data:image'){ legacyImg=true; }
-    else{ try{ var d=JSON.parse(data); if(Array.isArray(d)){X.shapes=d;} else {X.shapes=d.shapes||[]; X.bg=d.bg||'plain';} }catch(e){} }
+    else{ try{
+      var d=JSON.parse(data);
+      if(Array.isArray(d)){X.shapes=d;}
+      else {X.shapes=d.shapes||[]; X.bg=d.bg||'plain';
+            if(Array.isArray(d.seq)&&d.seq.length) X.frames=[JSON.parse(JSON.stringify(X.shapes))].concat(d.seq.map(function(f){return JSON.parse(JSON.stringify(f));}));}
+    }catch(e){} }
   }
+  if(X.frames.length===1) X.frames=[JSON.parse(JSON.stringify(X.shapes))];
   xdBuildModal();
   window.xd2SetTool('select'); window.xd2SetColor(X.color); window.xd2SetBg(X.bg);
   xdRender();
@@ -31637,14 +31669,174 @@ window.xd2Open=function(data,onSave,opts){
 };
 window.xd2Close=function(force){
   if(X.dirty&&!force&&!confirm('Hay cambios sin guardar. ¿Salir igual?'))return;
+  xd2StopPlay();
   var m=document.getElementById('xd2-modal'); if(m)m.remove();
   X.onSave=null; X.dirty=false;
 };
 window.xd2Save=function(){
-  var json=(X.shapes.length||X.bg!=='plain')?JSON.stringify({shapes:X.shapes,bg:X.bg}):null;
+  xd2StopPlay(); xdCommit();
+  var f1=X.frames[0]||[];
+  var hasContent=f1.length||X.bg!=='plain'||X.frames.length>1;
+  var json=null;
+  if(hasContent){
+    var o={shapes:f1,bg:X.bg};
+    if(X.frames.length>1) o.seq=X.frames.slice(1);
+    json=JSON.stringify(o);
+  }
   if(typeof X.onSave==='function')X.onSave(json);
   X.dirty=false;
   xd2Close(true);
+};
+
+// ── SECUENCIA DE MOMENTOS ──
+var XD2_MAX_FRAMES=6;
+window.xd2SeqGo=function(k){
+  if(X.playing)xd2StopPlay();
+  if(k===X.cur||k<0||k>=X.frames.length)return;
+  xdCommit();
+  X.cur=k;
+  X.shapes=JSON.parse(JSON.stringify(X.frames[k]));
+  X.sel=-1; X.hist=[]; X.redo=[];
+  xdRender();
+};
+window.xd2SeqAdd=function(){
+  if(X.playing)xd2StopPlay();
+  if(X.frames.length>=XD2_MAX_FRAMES){ alert('Máximo '+XD2_MAX_FRAMES+' momentos.'); return; }
+  xdCommit();
+  // El momento nuevo nace como copia del actual: movés solo lo que cambia
+  X.frames.splice(X.cur+1,0,JSON.parse(JSON.stringify(X.shapes)));
+  X.cur=X.cur+1;
+  X.shapes=JSON.parse(JSON.stringify(X.frames[X.cur]));
+  X.sel=-1; X.hist=[]; X.redo=[]; X.dirty=true;
+  xdRender();
+};
+window.xd2SeqDel=function(){
+  if(X.frames.length<=1)return;
+  if(!confirm('¿Eliminar el momento '+(X.cur+1)+'?'))return;
+  if(X.playing)xd2StopPlay();
+  X.frames.splice(X.cur,1);
+  X.cur=Math.max(0,X.cur-1);
+  X.shapes=JSON.parse(JSON.stringify(X.frames[X.cur]));
+  X.sel=-1; X.hist=[]; X.redo=[]; X.dirty=true;
+  xdRender();
+};
+
+// Barra de secuencia (se refresca en cada render)
+function xdSeqBar(){
+  var bar=document.getElementById('xd2-seq'); if(!bar)return;
+  var chips=X.frames.map(function(f,i){
+    var on=(i===X.cur);
+    return '<button class="xd2-schip'+(on?' on':'')+'" onclick="xd2SeqGo('+i+')">'+(i+1)+
+      (on&&X.frames.length>1?'<span onclick="event.stopPropagation();xd2SeqDel()" style="margin-left:6px;opacity:.8;font-weight:400">✕</span>':'')+'</button>';
+  }).join('');
+  var canAnim=X.frames.length>1;
+  bar.innerHTML=
+    '<span style="font-size:9px;font-weight:800;color:#8FA1C0;letter-spacing:.08em;flex-shrink:0">SECUENCIA</span>'+chips+
+    '<button class="xd2-schip" onclick="xd2SeqAdd()" title="Agregar momento (copia el actual)">＋</button>'+
+    '<span style="flex:1"></span>'+
+    '<button class="xd2-sbtn" onclick="xd2Play()" '+(canAnim?'':'disabled style="opacity:.4"')+'>'+(X.playing?'■ Parar':'▶ Reproducir')+'</button>'+
+    '<button class="xd2-sbtn" onclick="xd2ExportGIF()" '+(canAnim?'':'disabled style="opacity:.4"')+' title="Exportar GIF animado para WhatsApp">🎞 GIF</button>';
+}
+
+// ── REPRODUCCIÓN (en el SVG del editor o de la pizarra) ──
+var XD2_TRANS_MS=900, XD2_HOLD_MS=500;
+function xdPlayInto(svgEl,frames,bg,onEnd){
+  var seq=[], i;
+  for(i=0;i<frames.length;i++){
+    seq.push({type:'hold',f:frames[i]});
+    if(i<frames.length-1)seq.push({type:'trans',a:frames[i],b:frames[i+1]});
+  }
+  var idx=0, t0=null, raf=null, stopped=false;
+  function draw(shapes){
+    svgEl.innerHTML=xdSvgBg(bg)+shapes.map(function(s){return xdSvgShape(s,-1);}).join('');
+  }
+  function step(ts){
+    if(stopped)return;
+    if(t0===null)t0=ts;
+    var st=seq[idx], dur=(st.type==='hold')?XD2_HOLD_MS:XD2_TRANS_MS;
+    var t=(ts-t0)/dur;
+    if(t>=1){ idx++; t0=ts;
+      if(idx>=seq.length){ draw(frames[frames.length-1]); if(onEnd)onEnd(); return; }
+      st=seq[idx]; t=0;
+    }
+    draw(st.type==='hold'?st.f:xdLerpShapes(st.a,st.b,t));
+    raf=requestAnimationFrame(step);
+  }
+  raf=requestAnimationFrame(step);
+  return function(){ stopped=true; if(raf)cancelAnimationFrame(raf); };
+}
+window.xd2Play=function(){
+  if(X.playing){ xd2StopPlay(); return; }
+  if(X.frames.length<2)return;
+  xdCommit();
+  var svg=document.getElementById('xd2-svg'); if(!svg)return;
+  X.playing=true; X.sel=-1; xdSeqBar();
+  X.playRAF=xdPlayInto(svg,X.frames,X.bg,function(){ X.playing=false; xdRender(); });
+};
+function xd2StopPlay(){
+  if(X.playRAF){ try{X.playRAF();}catch(e){} X.playRAF=null; }
+  if(X.playing){ X.playing=false; xdRender(); }
+}
+window.xd2StopPlay=xd2StopPlay;
+
+// ── EXPORT GIF (gif.js desde cdnjs; worker vía blob para GitHub Pages) ──
+var _xdGifLib=null;
+function xdLoadGifLib(cb,fail){
+  if(_xdGifLib){ cb(_xdGifLib); return; }
+  var s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js';
+  s.onload=function(){
+    fetch('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js')
+      .then(function(r){return r.blob();})
+      .then(function(b){ _xdGifLib={GIF:window.GIF,worker:URL.createObjectURL(b)}; cb(_xdGifLib); })
+      .catch(fail);
+  };
+  s.onerror=fail;
+  document.head.appendChild(s);
+}
+window.xd2ExportGIF=function(){
+  if(X.frames.length<2){ alert('Agregá al menos 2 momentos para animar (botón ＋ de la secuencia).'); return; }
+  xd2StopPlay(); xdCommit();
+  var hint=document.getElementById('xd2-hint');
+  function say(t){ if(hint)hint.textContent=t; }
+  say('Preparando GIF…');
+  xdLoadGifLib(function(lib){
+    try{
+      var SC=2, W=XD2_W*SC, H=XD2_H*SC;
+      var gif=new lib.GIF({workers:2,quality:8,width:W,height:H,workerScript:lib.worker});
+      var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+      var ctx=cv.getContext('2d');
+      function paint(shapes){
+        ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,W,H); ctx.scale(SC,SC);
+        if(typeof drwDrawBg==='function')drwDrawBg(ctx,XD2_W,XD2_H,X.bg);
+        shapes.forEach(function(s){ window.drwPaintShape(ctx,s,-1,false,true); });
+      }
+      var STEPS=11, F_MS=80, HOLD_N=7;
+      for(var k=0;k<X.frames.length;k++){
+        paint(X.frames[k]);
+        gif.addFrame(ctx,{copy:true,delay:F_MS*HOLD_N});
+        if(k<X.frames.length-1){
+          for(var st=1;st<=STEPS;st++){
+            paint(xdLerpShapes(X.frames[k],X.frames[k+1],st/(STEPS+1)));
+            gif.addFrame(ctx,{copy:true,delay:F_MS});
+          }
+        }
+      }
+      gif.on('progress',function(p){ say('Generando GIF… '+Math.round(p*100)+'%'); });
+      gif.on('finished',function(blob){
+        say('');
+        var a=document.createElement('a');
+        a.download=(X.title||'ejercicio').replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g,'').trim().replace(/\s+/g,'_')+'.gif';
+        a.href=URL.createObjectURL(blob);
+        a.click();
+        setTimeout(function(){ URL.revokeObjectURL(a.href); },5000);
+      });
+      gif.render();
+    }catch(e){ say(''); alert('No se pudo generar el GIF: '+e.message); }
+  },function(){
+    say('');
+    alert('No se pudo cargar el generador de GIF (¿sin conexión?). El PNG del momento actual sí está disponible.');
+  });
 };
 
 // ── UI DEL MODAL ──
@@ -31673,6 +31865,10 @@ function xdBuildModal(){
   '#xd2-modal .xd2-ctx{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:none;gap:6px;background:#0D1B2A;border:1px solid rgba(255,255,255,0.2);border-radius:11px;padding:6px 8px;box-shadow:0 6px 24px rgba(0,0,0,0.5)}'+
   '#xd2-modal .xd2-cbtn{border:1px solid rgba(255,255,255,0.25);background:#1D2C47;color:#E8EEF9;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}'+
   '#xd2-modal .xd2-foot{padding:5px 12px 8px;text-align:center;font-size:9.5px;color:#6B7A96;flex-shrink:0}'+
+  '#xd2-modal .xd2-seqbar{display:flex;gap:6px;align-items:center;padding:7px 12px;background:#0D1B2A;flex-shrink:0;overflow-x:auto}'+
+  '#xd2-modal .xd2-schip{min-width:38px;height:34px;border:1px solid rgba(255,255,255,0.22);border-radius:9px;background:#1D2C47;color:#C9D4E8;font-size:13px;font-weight:800;cursor:pointer;flex-shrink:0;padding:0 8px}'+
+  '#xd2-modal .xd2-schip.on{background:#FFE45C;border-color:#FFE45C;color:#20293B}'+
+  '#xd2-modal .xd2-sbtn{height:34px;border:1px solid rgba(255,255,255,0.22);border-radius:9px;background:#1D2C47;color:#fff;font-size:11.5px;font-weight:800;cursor:pointer;padding:0 14px;flex-shrink:0}'+
   '</style>'+
   '<div class="xd2-top">'+
     '<span style="font-size:16px">🎨</span><b>'+xdEsc(X.title)+'</b>'+
@@ -31732,6 +31928,7 @@ function xdBuildModal(){
     '<svg id="xd2-svg" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="aspect-ratio:480/300;width:min(100%,calc((100dvh - 210px)*1.6))"></svg>'+
     '<div class="xd2-ctx" id="xd2-ctx"></div>'+
   '</div>'+
+  '<div class="xd2-seqbar" id="xd2-seq"></div>'+
   '<div class="xd2-foot">Elegí un elemento y tocá la cancha para ponerlo · Flechas y zonas: arrastrá · MOVER: tocá y arrastrá cualquier elemento · La zona pide medidas al soltarla</div>';
   document.body.appendChild(m);
   var svg=document.getElementById('xd2-svg');
@@ -31826,28 +32023,43 @@ window.fXd2Clear=function(){
 
 // ═══ MODO PIZARRA (visor a pantalla completa para tablet, solo lectura) ═══
 window.xd2BoardOpen=function(data,title){
-  var old=document.getElementById('xd2-board'); if(old)old.remove();
+  var old=document.getElementById('xd2-board'); if(old){ if(old._stop)try{old._stop();}catch(e){} old.remove(); }
   var inner='', isImg=data&&String(data).slice(0,10)==='data:image';
+  var frames=null, bg='plain';
   if(isImg){
     inner='<img src="'+data+'" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:10px">';
   } else {
-    var shapes=[],bg='plain';
-    try{ var d=JSON.parse(data||'null'); if(d){ if(Array.isArray(d)){shapes=d;} else {shapes=d.shapes||[]; bg=d.bg||'plain';} } }catch(e){}
-    if(!shapes.length&&bg==='plain'){ alert('Este ejercicio no tiene diagrama.'); return; }
+    var shapes=[];
+    try{ var d=JSON.parse(data||'null'); if(d){ if(Array.isArray(d)){shapes=d;} else {shapes=d.shapes||[]; bg=d.bg||'plain'; if(Array.isArray(d.seq)&&d.seq.length)frames=[shapes].concat(d.seq);} } }catch(e){}
+    if(!shapes.length&&bg==='plain'&&!frames){ alert('Este ejercicio no tiene diagrama.'); return; }
     var svgBody=xdSvgBg(bg)+shapes.map(function(s){return xdSvgShape(s,-1);}).join('');
-    inner='<svg viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="width:min(100%,calc((100dvh - 90px)*1.6));aspect-ratio:480/300;background:#3d8c2f;border-radius:12px;box-shadow:0 14px 60px rgba(0,0,0,0.6)">'+svgBody+'</svg>';
+    inner='<svg id="xd2-board-svg" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="width:min(100%,calc((100dvh - 90px)*1.6));aspect-ratio:480/300;background:#3d8c2f;border-radius:12px;box-shadow:0 14px 60px rgba(0,0,0,0.6)">'+svgBody+'</svg>';
   }
   var m=document.createElement('div');
   m.id='xd2-board';
   m.style.cssText='position:fixed;inset:0;z-index:12500;background:#0A0F18;display:flex;flex-direction:column';
   m.innerHTML=
     '<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;flex-shrink:0">'+
-      '<span style="font-size:17px">⛶</span>'+
+      '<span style="font-size:17px">\u26f6</span>'+
       '<b style="color:#fff;font-size:15px;font-family:system-ui,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+xdEsc(title||'Ejercicio')+'</b>'+
-      '<button onclick="document.getElementById(\'xd2-board\').remove()" style="border:none;background:#2A3A58;color:#fff;border-radius:9px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer">✕ Cerrar</button>'+
+      (frames?'<button id="xd2-board-play" style="border:none;background:#1D9E75;color:#fff;border-radius:9px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer">\u25b6 Reproducir</button>':'')+
+      '<button onclick="var b=document.getElementById(\'xd2-board\');if(b){if(b._stop){try{b._stop()}catch(e){}}b.remove()}" style="border:none;background:#2A3A58;color:#fff;border-radius:9px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer">\u2715 Cerrar</button>'+
     '</div>'+
-    '<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:6px 14px 16px;min-height:0" onclick="document.getElementById(\'xd2-board\').remove()">'+inner+'</div>';
+    '<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:6px 14px 16px;min-height:0" '+(frames?'':'onclick="var b=document.getElementById(\'xd2-board\');if(b)b.remove()"')+'>'+inner+'</div>';
   document.body.appendChild(m);
+  if(frames){
+    var svg=document.getElementById('xd2-board-svg');
+    var btn=document.getElementById('xd2-board-play');
+    var playBoard=function(){
+      if(m._stop){ try{m._stop();}catch(e){} }
+      btn.textContent='\u25a0 Parar';
+      var stop=xdPlayInto(svg,frames,bg,function(){ m._stop=null; btn.textContent='\u25b6 Repetir'; });
+      m._stop=function(){ stop(); m._stop=null; btn.textContent='\u25b6 Reproducir';
+        svg.innerHTML=xdSvgBg(bg)+frames[0].map(function(s){return xdSvgShape(s,-1);}).join(''); };
+    };
+    btn.onclick=function(){ if(m._stop){ m._stop(); } else { playBoard(); } };
+    setTimeout(playBoard,450); // auto-play al abrir la pizarra
+  }
 };
 window.xd2BoardFromForm=function(){
   var nameEl=document.getElementById('f-n');
