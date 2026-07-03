@@ -31864,8 +31864,8 @@ function xdBuildModal(){
   '#xd2-modal svg{background:#3d8c2f;border-radius:10px;touch-action:none;user-select:none;-webkit-user-select:none;max-width:100%;max-height:100%;box-shadow:0 10px 40px rgba(0,0,0,0.5)}'+
   '#xd2-modal .xd2-ctx{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:none;gap:6px;background:#0D1B2A;border:1px solid rgba(255,255,255,0.2);border-radius:11px;padding:6px 8px;box-shadow:0 6px 24px rgba(0,0,0,0.5)}'+
   '#xd2-modal .xd2-cbtn{border:1px solid rgba(255,255,255,0.25);background:#1D2C47;color:#E8EEF9;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}'+
-  '#xd2-modal .xd2-foot{padding:5px 12px 8px;text-align:center;font-size:9.5px;color:#6B7A96;flex-shrink:0}'+
-  '#xd2-modal .xd2-seqbar{display:flex;gap:6px;align-items:center;padding:7px 12px;background:#0D1B2A;flex-shrink:0;overflow-x:auto}'+
+  '#xd2-modal .xd2-foot{padding:5px 12px calc(8px + env(safe-area-inset-bottom,0px));text-align:center;font-size:9.5px;color:#6B7A96;flex-shrink:0}'+
+  '#xd2-modal .xd2-seqbar{display:flex;gap:6px;align-items:center;padding:7px 12px;background:#0D1B2A;border-top:1px solid rgba(255,255,255,0.08);flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch}'+
   '#xd2-modal .xd2-schip{min-width:38px;height:34px;border:1px solid rgba(255,255,255,0.22);border-radius:9px;background:#1D2C47;color:#C9D4E8;font-size:13px;font-weight:800;cursor:pointer;flex-shrink:0;padding:0 8px}'+
   '#xd2-modal .xd2-schip.on{background:#FFE45C;border-color:#FFE45C;color:#20293B}'+
   '#xd2-modal .xd2-sbtn{height:34px;border:1px solid rgba(255,255,255,0.22);border-radius:9px;background:#1D2C47;color:#fff;font-size:11.5px;font-weight:800;cursor:pointer;padding:0 14px;flex-shrink:0}'+
@@ -31924,11 +31924,11 @@ function xdBuildModal(){
       '<button class="xd2-tbtn" onclick="xd2Clear()">🗑<small>LIMPIAR</small></button>'+
     '</div>'+
   '</div>'+
+  '<div class="xd2-seqbar" id="xd2-seq"></div>'+
   '<div class="xd2-stage">'+
-    '<svg id="xd2-svg" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="aspect-ratio:480/300;width:min(100%,calc((100dvh - 210px)*1.6))"></svg>'+
+    '<svg id="xd2-svg" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="display:block"></svg>'+
     '<div class="xd2-ctx" id="xd2-ctx"></div>'+
   '</div>'+
-  '<div class="xd2-seqbar" id="xd2-seq"></div>'+
   '<div class="xd2-foot">Elegí un elemento y tocá la cancha para ponerlo · Flechas y zonas: arrastrá · MOVER: tocá y arrastrá cualquier elemento · La zona pide medidas al soltarla</div>';
   document.body.appendChild(m);
   var svg=document.getElementById('xd2-svg');
@@ -31936,7 +31936,25 @@ function xdBuildModal(){
   svg.addEventListener('pointermove',xdMove);
   svg.addEventListener('pointerup',xdUp);
   svg.addEventListener('pointercancel',xdUp);
+  setTimeout(xdFitAll,0); setTimeout(xdFitAll,180);
 }
+
+// Ajuste de tamaño del SVG por JS (a prueba de Safari/iPad: sin dvh ni aspect-ratio)
+function xdFitSvg(svgId,stageEl){
+  var svg=document.getElementById(svgId); if(!svg||!stageEl)return;
+  var w=Math.max(120,stageEl.clientWidth-12), h=Math.max(80,stageEl.clientHeight-12);
+  var sc=Math.min(w/XD2_W,h/XD2_H);
+  svg.style.width=Math.floor(XD2_W*sc)+'px';
+  svg.style.height=Math.floor(XD2_H*sc)+'px';
+}
+function xdFitAll(){
+  var m=document.getElementById('xd2-modal');
+  if(m){ var st=m.querySelector('.xd2-stage'); xdFitSvg('xd2-svg',st); }
+  var b=document.getElementById('xd2-board');
+  if(b){ var bs=document.getElementById('xd2-board-svg'); if(bs&&bs.parentNode)xdFitSvg('xd2-board-svg',bs.parentNode); }
+}
+window.addEventListener('resize',xdFitAll);
+window.addEventListener('orientationchange',function(){ setTimeout(xdFitAll,250); });
 
 // Teclado (solo con el modal abierto)
 document.addEventListener('keydown',function(e){
@@ -32033,7 +32051,7 @@ window.xd2BoardOpen=function(data,title){
     try{ var d=JSON.parse(data||'null'); if(d){ if(Array.isArray(d)){shapes=d;} else {shapes=d.shapes||[]; bg=d.bg||'plain'; if(Array.isArray(d.seq)&&d.seq.length)frames=[shapes].concat(d.seq);} } }catch(e){}
     if(!shapes.length&&bg==='plain'&&!frames){ alert('Este ejercicio no tiene diagrama.'); return; }
     var svgBody=xdSvgBg(bg)+shapes.map(function(s){return xdSvgShape(s,-1);}).join('');
-    inner='<svg id="xd2-board-svg" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="width:min(100%,calc((100dvh - 90px)*1.6));aspect-ratio:480/300;background:#3d8c2f;border-radius:12px;box-shadow:0 14px 60px rgba(0,0,0,0.6)">'+svgBody+'</svg>';
+    inner='<svg id="xd2-board-svg" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="display:block;background:#3d8c2f;border-radius:12px;box-shadow:0 14px 60px rgba(0,0,0,0.6)">'+svgBody+'</svg>';
   }
   var m=document.createElement('div');
   m.id='xd2-board';
@@ -32045,8 +32063,9 @@ window.xd2BoardOpen=function(data,title){
       (frames?'<button id="xd2-board-play" style="border:none;background:#1D9E75;color:#fff;border-radius:9px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer">\u25b6 Reproducir</button>':'')+
       '<button onclick="var b=document.getElementById(\'xd2-board\');if(b){if(b._stop){try{b._stop()}catch(e){}}b.remove()}" style="border:none;background:#2A3A58;color:#fff;border-radius:9px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer">\u2715 Cerrar</button>'+
     '</div>'+
-    '<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:6px 14px 16px;min-height:0" '+(frames?'':'onclick="var b=document.getElementById(\'xd2-board\');if(b)b.remove()"')+'>'+inner+'</div>';
+    '<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:6px 14px calc(16px + env(safe-area-inset-bottom,0px));min-height:0" '+(frames?'':'onclick="var b=document.getElementById(\'xd2-board\');if(b)b.remove()"')+'>'+inner+'</div>';
   document.body.appendChild(m);
+  setTimeout(xdFitAll,0); setTimeout(xdFitAll,180);
   if(frames){
     var svg=document.getElementById('xd2-board-svg');
     var btn=document.getElementById('xd2-board-play');
