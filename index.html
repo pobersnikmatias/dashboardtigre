@@ -14995,6 +14995,7 @@ document.addEventListener('DOMContentLoaded',function(){
 #view-hoy .hoy-count.y{color:#9A6A1B;border-color:#E8A13C88;background:#fdf3e2}
 #view-hoy .hoy-count.r{color:#D9534F;border-color:#D9534F66;background:#fdeeee}
 #view-hoy .hoy-count.n{color:#888;border-color:#ddd;background:#f5f5f5}
+#view-hoy .hoy-count.o{color:#3B4D88;border-color:#3B4D8855;background:#eef1f8}
 #view-hoy .hoy-sem{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:7px}
 #view-hoy .hoy-pl{border:1px solid #ddd;border-radius:9px;padding:7px 6px 6px;text-align:center;cursor:pointer;background:#fafafa;transition:transform .08s}
 #view-hoy .hoy-pl:active{transform:scale(.96)}
@@ -15003,6 +15004,8 @@ document.addEventListener('DOMContentLoaded',function(){
 #view-hoy .hoy-pl.g{background:#edfaf3;border-color:#1D9E7555}
 #view-hoy .hoy-pl.y{background:#fdf3e2;border-color:#E8A13C77}
 #view-hoy .hoy-pl.r{background:#fdeeee;border-color:#D9534F66}
+#view-hoy .hoy-pl.o{background:#f0f2f7;border-color:#c7cede;opacity:0.75}
+#view-hoy .hoy-pl.o-les{background:#faf0f0;border-color:#dcb9b9}
 #view-hoy .hoy-alert{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px dashed #e8e8e8;font-size:12px;color:#444;line-height:1.4}
 #view-hoy .hoy-alert:first-of-type{border-top:none;padding-top:2px}
 #view-hoy .hoy-alert .ic{flex-shrink:0;width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px}
@@ -31364,6 +31367,16 @@ function xdSvgArrowHead(x1,y1,x2,y2,col){
   var a=Math.atan2(y2-y1,x2-x1),hs=11;
   return '<polygon points="'+x2+','+y2+' '+(x2-hs*Math.cos(a-0.38))+','+(y2-hs*Math.sin(a-0.38))+' '+(x2-hs*Math.cos(a+0.38))+','+(y2-hs*Math.sin(a+0.38))+'" fill="'+col+'"/>';
 }
+function xdSvgBall(x,y,r){
+  function pent(cx,cy,pr){
+    var pts=[];
+    for(var i=0;i<5;i++){var a=i*Math.PI*2/5-Math.PI/2;pts.push((cx+Math.cos(a)*pr).toFixed(1)+','+(cy+Math.sin(a)*pr).toFixed(1));}
+    return '<polygon points="'+pts.join(' ')+'" fill="#111"/>';
+  }
+  var g='<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="#fff" stroke="#888" stroke-width="1"/>'+pent(x,y,r*0.38);
+  for(var i=0;i<5;i++){var a=i*Math.PI*2/5-Math.PI/2;g+=pent(x+Math.cos(a)*r*0.63,y+Math.sin(a)*r*0.63,r*0.3);}
+  return g;
+}
 function xdSvgShape(s,i){
   var sel=(i>=0 && i===X.sel), col=xdCol(s.color), g='';
   var halo=sel?' filter="url(#xd-halo)"':'';
@@ -31374,8 +31387,7 @@ function xdSvgShape(s,i){
   } else if(s.type==='cone'){
     g='<polygon points="'+s.x+','+(s.y-9)+' '+(s.x+8)+','+(s.y+7)+' '+(s.x-8)+','+(s.y+7)+'" fill="#FF8A3C" stroke="#C05A16" stroke-width="1.5"/>';
   } else if(s.type==='ball'){
-    g='<circle cx="'+s.x+'" cy="'+s.y+'" r="'+(s.r||11)+'" fill="#fff" stroke="#888" stroke-width="1"/>'+
-      '<circle cx="'+s.x+'" cy="'+s.y+'" r="'+((s.r||11)*0.38)+'" fill="#111"/>';
+    g=xdSvgBall(s.x,s.y,s.r||11);
   } else if(s.type==='goal'){
     var w=s.w||44,h=s.h||22,ang=(s.angle||0)*180/Math.PI;
     g='<g transform="translate('+s.x+' '+s.y+') rotate('+ang+')">'+
@@ -31410,6 +31422,13 @@ function xdSvgShape(s,i){
       g='<line x1="'+s.x1+'" y1="'+s.y1+'" x2="'+s.x2+'" y2="'+s.y2+'" stroke="'+col+'" stroke-width="2.5"'+dash+'/>';
     }
     g+=xdSvgArrowHead(s.x1,s.y1,s.x2,s.y2,col);
+  }
+  if(s.lock&&i>=0){
+    var lx,ly;
+    if(s.type==='line'||s.type==='arrow'){lx=(s.x1+s.x2)/2;ly=(s.y1+s.y2)/2-8;}
+    else if(s.type==='zone'||s.type==='rect'){lx=s.x+10;ly=s.y+14;}
+    else {lx=s.x+12;ly=s.y-10;}
+    g+='<text x="'+lx+'" y="'+ly+'" font-size="10" opacity="0.85">\ud83d\udd12</text>';
   }
   return '<g data-i="'+i+'"'+halo+'>'+g+'</g>';
 }
@@ -31463,6 +31482,7 @@ function xdCtxBar(){
   if(s.type==='zone'||s.type==='text') extra='<button class="xd2-cbtn" onclick="xd2EditLabel()">✎ Rótulo</button>';
   if(s.type==='goal'||s.type==='minigoal'||s.type==='rect') extra='<button class="xd2-cbtn" onclick="xd2Rotate()">↻ 90°</button>';
   bar.innerHTML=extra+
+    '<button class="xd2-cbtn" onclick="xd2Lock()">🔒 Bloquear</button>'+
     '<button class="xd2-cbtn" onclick="xd2Dup()">⧉ Duplicar</button>'+
     '<button class="xd2-cbtn" style="color:#E24B4A;border-color:#E24B4A66" onclick="xd2Del()">🗑 Eliminar</button>';
 }
@@ -31474,9 +31494,11 @@ function xdDistSeg(px,py,x1,y1,x2,y2){
   var t=Math.max(0,Math.min(1,((px-x1)*dx+(py-y1)*dy)/l2));
   return Math.hypot(px-(x1+t*dx),py-(y1+t*dy));
 }
-function xdHit(x,y){
+function xdHit(x,y,mode){
   for(var i=X.shapes.length-1;i>=0;i--){
     var s=X.shapes[i];
+    if(mode==='unlock'){ if(!s.lock)continue; }
+    else if(s.lock)continue;
     if(s.type==='player'&&Math.hypot(x-s.x,y-s.y)<=16)return i;
     if(s.type==='cone'&&Math.hypot(x-s.x,y-s.y)<=13)return i;
     if(s.type==='ball'&&Math.hypot(x-s.x,y-s.y)<=(s.r||11)+4)return i;
@@ -31531,6 +31553,12 @@ function xdDown(e){
   if(t==='erase'){
     var hi=xdHit(p.x,p.y);
     if(hi>=0){ xdSnap(); X.shapes.splice(hi,1); X.sel=-1; xdRender(); }
+    return;
+  }
+  if(t==='unlock'){
+    var li=xdHit(p.x,p.y,'unlock');
+    if(li>=0){ xdSnap(); X.shapes[li].lock=false; X.sel=li; window.xd2SetTool('select'); }
+    xdRender();
     return;
   }
   // select / mover
@@ -31608,6 +31636,10 @@ window.xd2SetBg=function(b){
 window.xd2Undo=xdUndo; window.xd2Redo=xdRedo;
 window.xd2Clear=function(){ if(!X.shapes.length)return; if(!confirm('¿Borrar todo el dibujo?'))return; xdSnap(); X.shapes=[]; X.sel=-1; xdRender(); };
 window.xd2Del=function(){ if(X.sel<0)return; xdSnap(); X.shapes.splice(X.sel,1); X.sel=-1; xdRender(); };
+window.xd2Lock=function(){
+  var s=X.shapes[X.sel]; if(!s)return;
+  xdSnap(); s.lock=true; X.sel=-1; xdRender();
+};
 window.xd2Dup=function(){
   var s=X.shapes[X.sel]; if(!s)return;
   xdSnap();
@@ -31884,6 +31916,7 @@ function xdBuildModal(){
     '<div class="xd2-grp">'+
       '<button class="xd2-tbtn" data-t="select" onclick="xd2SetTool(\'select\')">↖<small>MOVER</small></button>'+
       '<button class="xd2-tbtn" data-t="erase" onclick="xd2SetTool(\'erase\')">🧽<small>BORRAR</small></button>'+
+      '<button class="xd2-tbtn" data-t="unlock" onclick="xd2SetTool(\'unlock\')">🔓<small>DESBLOQ.</small></button>'+
     '</div>'+
     '<div class="xd2-grp">'+
       '<button class="xd2-tbtn" data-t="player-a" onclick="xd2SetTool(\'player-a\')"><span style="display:inline-block;width:18px;height:18px;border-radius:50%;background:#2D6CDF;border:2px solid #fff"></span><small>EQUIPO A</small></button>'+
@@ -32156,6 +32189,22 @@ var HOY_FLAGS = {};
 try{ HOY_FLAGS = JSON.parse(localStorage.getItem('hoyFlags_v1')||'{}') || {}; }catch(e){ HOY_FLAGS = {}; }
 function hoySaveFlags(){ try{ localStorage.setItem('hoyFlags_v1', JSON.stringify(HOY_FLAGS)); }catch(e){} }
 
+// Configuración de la pestaña Hoy (persistente)
+var HOY_CFG={useACWR:true, acwrHigh:1.5, acwrWarn:1.3, lowWarn:false};
+try{ var _hc=JSON.parse(localStorage.getItem('hoyCfg_v1')||'null'); if(_hc)HOY_CFG=Object.assign(HOY_CFG,_hc); }catch(e){}
+function hoySaveCfg(){ try{ localStorage.setItem('hoyCfg_v1', JSON.stringify(HOY_CFG)); }catch(e){} }
+
+// Perfiles indexados por nombre normalizado (la clave real conserva acentos)
+function hoyProfileByNorm(){
+  var map={};
+  var pp=(typeof PLAYER_PROFILES!=='undefined')?PLAYER_PROFILES:{};
+  Object.keys(pp).forEach(function(k){
+    var p=pp[k]; if(p&&p.name)map[hoyNorm(p.name)]=p;
+  });
+  return map;
+}
+var HOY_ESTADOS={lesion:{lbl:'🚑 Lesión',cls:'o-les'}, reserva:{lbl:'🔵 Reserva',cls:'o-res'}, primera:{lbl:'🟡 Primera',cls:'o-pri'}};
+
 // Fecha local (no UTC): a la noche en ART toISOString ya marca mañana.
 function hoyLocalISO(d){
   d = d || new Date();
@@ -32234,10 +32283,19 @@ function hoyACWR(nameL, todayISO){
 }
 
 // ── Estado del semáforo de un jugador ──
-function hoyPlayerStatus(name, todayISO){
+function hoyPlayerStatus(name, todayISO, profMap){
   var nameL=hoyNorm(name);
   var reasons=[], level='green', ambers=0;
   var flag=HOY_FLAGS[nameL];
+
+  // 1º manda el estado del perfil: Primera / Reserva / Lesión = no disponible hoy
+  var prof=(profMap||hoyProfileByNorm())[nameL];
+  var est=prof&&prof.estado?prof.estado:'disponible';
+  if(HOY_ESTADOS[est]){
+    return {name:name, nameL:nameL, level:'out', out:est,
+            reasons:[{t:'out', txt:HOY_ESTADOS[est].lbl+' (estado en Perfiles)'}],
+            wellness:null, acwr:null, flag:flag||null};
+  }
 
   if(flag && (flag.flag==='medico')){
     level='red'; reasons.push({t:'red', txt:'Estado médico/kinesio'+(flag.note?': '+flag.note:'')});
@@ -32247,9 +32305,6 @@ function hoyPlayerStatus(name, todayISO){
 
   var w=hoyWellnessToday(nameL, todayISO);
   if(w){
-    if(w.disponibilidad && hoyNorm(w.disponibilidad)!=='disponible' && w.disponibilidad!==''){
-      level='red'; reasons.push({t:'red', txt:'Wellness: '+w.disponibilidad});
-    }
     if(w.dolor==='Si'){
       ambers++;
       reasons.push({t:'amber', txt:'Dolor muscular'+(w.dolorZona?' — '+w.dolorZona:'')+(w.dolorTiempo?' ('+w.dolorTiempo+')':'')});
@@ -32266,12 +32321,12 @@ function hoyPlayerStatus(name, todayISO){
     if(rd!=null && maxR>0 && (rd/maxR)<0.6){ ambers++; reasons.push({t:'amber', txt:'Readiness '+rd+'/'+maxR}); }
   }
 
-  var ac=hoyACWR(nameL, todayISO);
+  var ac=HOY_CFG.useACWR?hoyACWR(nameL, todayISO):null;
   if(ac){
     var r=ac.ratio;
-    if(r>1.5){ level='red'; reasons.push({t:'red', txt:'ACWR '+r.toFixed(2)+' — pico de carga (agudo '+ac.acute+' vs crónico '+ac.chronic+' AU/día)'}); }
-    else if(r>1.3){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+' — carga en ascenso'}); }
-    else if(r<0.8){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+' — subcarga, cuidar el reingreso'}); }
+    if(r>HOY_CFG.acwrHigh){ level='red'; reasons.push({t:'red', txt:'ACWR '+r.toFixed(2)+' — pico de carga (agudo '+ac.acute+' vs crónico '+ac.chronic+' AU/día)'}); }
+    else if(r>HOY_CFG.acwrWarn){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+' — carga en ascenso'}); }
+    else if(HOY_CFG.lowWarn&&r<0.8){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+' — subcarga, cuidar el reingreso'}); }
   }
 
   if(level!=='red'){
@@ -32315,13 +32370,16 @@ function hoyRender(){
   var root=document.getElementById('view-hoy'); if(!root) return;
   var today=hoyLocalISO();
   var roster=hoyRoster();
-  var statuses=roster.map(function(n){ return hoyPlayerStatus(n, today); });
+  var profMap=hoyProfileByNorm();
+  var statuses=roster.map(function(n){ return hoyPlayerStatus(n, today, profMap); });
 
   var nG=statuses.filter(function(s){return s.level==='green';}).length;
   var nY=statuses.filter(function(s){return s.level==='amber';}).length;
   var nR=statuses.filter(function(s){return s.level==='red';}).length;
   var nN=statuses.filter(function(s){return s.level==='none';}).length;
-  var withWellness=statuses.filter(function(s){return !!s.wellness;}).length;
+  var nO=statuses.filter(function(s){return s.level==='out';}).length;
+  var activos=statuses.filter(function(s){return s.level!=='out';});
+  var withWellness=activos.filter(function(s){return !!s.wellness;}).length;
 
   var plan=hoyTodaysPlan();
   var next=hoyNextMatch();
@@ -32330,13 +32388,14 @@ function hoyRender(){
   var mdLbl=(plan&&plan.day&&plan.day.mdLabel)?plan.day.mdLabel:'';
 
   // ── Semáforo (orden: rojo, amarillo, sin datos, verde) ──
-  var order={red:0, amber:1, none:2, green:3};
+  var order={red:0, amber:1, none:2, green:3, out:4};
   var semHtml=statuses.slice().sort(function(a,b){
     return (order[a.level]-order[b.level]) || a.name.localeCompare(b.name,'es');
   }).map(function(s,i){
-    var cls=s.level==='red'?'r':(s.level==='amber'?'y':(s.level==='green'?'g':''));
-    var dot=s.level==='red'?'🔴':(s.level==='amber'?'🟡':(s.level==='green'?'🟢':'⚪'));
-    var sub=s.level==='none'?'sin check-in':(s.reasons.length?(s.reasons[0].txt):'OK');
+    var cls=s.level==='red'?'r':(s.level==='amber'?'y':(s.level==='green'?'g':(s.level==='out'?('o '+(HOY_ESTADOS[s.out]?HOY_ESTADOS[s.out].cls:'')):'')));
+    var dot=s.level==='red'?'🔴':(s.level==='amber'?'🟡':(s.level==='green'?'🟢':(s.level==='out'?(s.out==='lesion'?'🚑':(s.out==='primera'?'🟡':'🔵')):'⚪')));
+    if(s.level==='out')dot='';
+    var sub=s.level==='none'?'sin check-in':(s.level==='out'?(HOY_ESTADOS[s.out]?HOY_ESTADOS[s.out].lbl:s.out):(s.reasons.length?(s.reasons[0].txt):'OK'));
     return '<div class="hoy-pl '+cls+'" onclick="hoyOpenPlayer('+i+')" data-hoy-idx="'+i+'" title="'+s.name.replace(/"/g,'&quot;')+'">'+
       '<b>'+dot+' '+hoyShortName(s.name)+'</b><small>'+sub+'</small></div>';
   }).join('');
@@ -32346,6 +32405,7 @@ function hoyRender(){
   // ── Alertas: motivos rojos primero, después amarillos (máx 8) ──
   var alerts=[];
   window._hoySorted.forEach(function(s){
+    if(s.level==='out')return;
     s.reasons.forEach(function(r){ alerts.push({name:s.name, t:r.t, txt:r.txt}); });
   });
   alerts.sort(function(a,b){ return (a.t==='red'?0:1)-(b.t==='red'?0:1); });
@@ -32386,6 +32446,7 @@ function hoyRender(){
       '<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'+
         '<button class="hoy-btn" style="background:#1D9E75" onclick="cargaSelfEntry(\'wellness\')">📲 Wellness</button>'+
         '<button class="hoy-btn" style="background:#D85A30" onclick="cargaSelfEntry(\'pse\')">📲 PSE</button>'+
+        '<button class="hoy-btn" style="background:#5C6470" onclick="hoyOpenCfg()" title="Configurar el semáforo">⚙</button>'+
       '</div>'+
     '</div>'+
     '<div class="hoy-grid">'+
@@ -32395,9 +32456,10 @@ function hoyRender(){
             '<span style="margin-left:auto;display:flex;gap:5px">'+
               '<span class="hoy-count g">'+nG+' OK</span><span class="hoy-count y">'+nY+'</span>'+
               '<span class="hoy-count r">'+nR+'</span><span class="hoy-count n">'+nN+' s/checkin</span>'+
+              (nO?'<span class="hoy-count o">'+nO+' no disp.</span>':'')+
             '</span></h3>'+
           (statuses.length?('<div class="hoy-sem">'+semHtml+'</div>'):'<div style="font-size:12px;color:#888">Sin jugadores registrados todavía. Se toman de perfiles, GPS y wellness.</div>')+
-          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Verde/amarillo/rojo = wellness de hoy + ACWR (sRPE 7d/28d, Foster) + estado médico manual. Tocá un jugador para ver el detalle o marcar su estado.</div>'+
+          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Semáforo = wellness de hoy (dolor, ítems bajos)'+(HOY_CFG.useACWR?' + ACWR (sRPE 7d/28d)':'')+' + estado del CT. Primera/Reserva/Lesión salen del estado en Perfiles. Tocá un jugador para el detalle. ⚙ para configurar.</div>'+
         '</div>'+
         '<div class="hoy-card"><h3>⚠️ Alertas de hoy</h3>'+alertsHtml+'</div>'+
       '</div>'+
@@ -32405,8 +32467,8 @@ function hoyRender(){
         '<div class="hoy-card"><h3>⚽ Sesión de hoy'+(plan&&plan.week&&plan.week.name?'<span style="margin-left:auto;font-size:9px;color:#aaa;font-weight:600;text-transform:none">'+plan.week.name+'</span>':'')+'</h3>'+sesHtml+'</div>'+
         '<div class="hoy-card"><h3>📲 Check-in de hoy</h3>'+
           '<div style="display:flex;align-items:center;gap:12px">'+
-            '<div style="font-size:26px;font-weight:800;color:'+(withWellness>=roster.length&&roster.length?'#1D9E75':'#E8A13C')+'">'+withWellness+'<span style="font-size:13px;color:#aaa">/'+roster.length+'</span></div>'+
-            '<div style="font-size:11px;color:#666;line-height:1.4">jugadores respondieron el wellness.<br>El kiosco pisa duplicados: queda el último envío.</div>'+
+            '<div style="font-size:26px;font-weight:800;color:'+(withWellness>=activos.length&&activos.length?'#1D9E75':'#E8A13C')+'">'+withWellness+'<span style="font-size:13px;color:#aaa">/'+activos.length+'</span></div>'+
+            '<div style="font-size:11px;color:#666;line-height:1.4">jugadores disponibles respondieron el wellness de hoy.</div>'+
           '</div>'+
         '</div>'+
       '</div>'+
@@ -32467,10 +32529,88 @@ function hoySetFlagNote(nameL, note){
 }
 window.hoySetFlagNote=hoySetFlagNote;
 
+// ── Configuración del semáforo ──
+function hoyOpenCfg(){
+  var old=document.getElementById('hoy-cfg'); if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='hoy-cfg';
+  m.style.cssText='position:fixed;inset:0;background:rgba(13,27,42,.7);z-index:10500;display:flex;align-items:center;justify-content:center;padding:16px';
+  function chk(id,label,checked,hint){
+    return '<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px dashed #eee;cursor:pointer">'+
+      '<input type="checkbox" id="'+id+'" '+(checked?'checked':'')+' style="width:18px;height:18px;margin-top:1px;flex-shrink:0">'+
+      '<span style="font-size:13px;font-weight:600;color:#0D1B2A">'+label+
+      (hint?'<br><span style="font-size:10.5px;font-weight:400;color:#888">'+hint+'</span>':'')+'</span></label>';
+  }
+  m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:420px;width:100%;max-height:88vh;overflow-y:auto;padding:18px 20px" onclick="event.stopPropagation()">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<div style="font-size:15px;font-weight:800;color:#0D1B2A">⚙ Configurar el semáforo</div>'+
+      '<button onclick="document.getElementById(\'hoy-cfg\').remove()" style="background:#f0f0f0;border:none;border-radius:6px;padding:5px 12px;font-size:14px;cursor:pointer;font-weight:700">✕</button>'+
+    '</div>'+
+    chk('hoy-cfg-acwr','Usar ACWR en el semáforo',HOY_CFG.useACWR,
+        'Ratio de carga aguda (7d) vs crónica (28d) por sRPE. Desactivalo si los registros son irregulares (jugadores que suben a Reserva, olvidos del kiosco) y genera falsas alarmas.')+
+    '<div id="hoy-cfg-thr" style="display:'+(HOY_CFG.useACWR?'block':'none')+';padding:4px 0 4px 28px">'+
+      '<div style="display:flex;gap:14px;flex-wrap:wrap">'+
+        '<label style="font-size:11px;color:#666;font-weight:600">🔴 Rojo si ACWR ><br><input type="number" id="hoy-cfg-high" step="0.05" min="1" max="3" value="'+HOY_CFG.acwrHigh+'" style="width:80px;padding:6px 8px;border:1px solid #ddd;border-radius:7px;font-size:13px;margin-top:3px"></label>'+
+        '<label style="font-size:11px;color:#666;font-weight:600">🟡 Amarillo si ACWR ><br><input type="number" id="hoy-cfg-warn" step="0.05" min="0.9" max="3" value="'+HOY_CFG.acwrWarn+'" style="width:80px;padding:6px 8px;border:1px solid #ddd;border-radius:7px;font-size:13px;margin-top:3px"></label>'+
+      '</div>'+
+      chk('hoy-cfg-low','Marcar subcarga (ACWR &lt; 0,80)',HOY_CFG.lowWarn,
+          'Amarillo para jugadores muy por debajo de su carga habitual. Apagado por defecto: con registros con huecos da mucho ruido.')+
+    '</div>'+
+    '<div style="font-size:10px;color:#aaa;padding:8px 0;border-top:1px dashed #eee">Las alertas de wellness (dolor muscular e ítems bajos) siempre están activas: son el corazón del semáforo. El estado Primera/Reserva/Lesión se cambia en la pestaña Perfiles.</div>'+
+    '<button onclick="hoySaveCfgFromModal()" style="width:100%;margin-top:8px;background:#1D9E75;color:#fff;border:none;border-radius:9px;padding:12px;font-size:13px;font-weight:800;cursor:pointer">✓ Guardar configuración</button>'+
+  '</div>';
+  m.onclick=function(){ m.remove(); };
+  document.body.appendChild(m);
+  var acwrChk=document.getElementById('hoy-cfg-acwr');
+  if(acwrChk)acwrChk.onchange=function(){ var t=document.getElementById('hoy-cfg-thr'); if(t)t.style.display=this.checked?'block':'none'; };
+}
+window.hoyOpenCfg=hoyOpenCfg;
+
+function hoySaveCfgFromModal(){
+  var g=function(id){return document.getElementById(id);};
+  HOY_CFG.useACWR=!!(g('hoy-cfg-acwr')&&g('hoy-cfg-acwr').checked);
+  HOY_CFG.lowWarn=!!(g('hoy-cfg-low')&&g('hoy-cfg-low').checked);
+  var hi=parseFloat(g('hoy-cfg-high')&&g('hoy-cfg-high').value), wa=parseFloat(g('hoy-cfg-warn')&&g('hoy-cfg-warn').value);
+  if(!isNaN(hi)&&hi>1)HOY_CFG.acwrHigh=hi;
+  if(!isNaN(wa)&&wa>0.9)HOY_CFG.acwrWarn=Math.min(wa,HOY_CFG.acwrHigh-0.01);
+  hoySaveCfg();
+  var mm=document.getElementById('hoy-cfg'); if(mm)mm.remove();
+  hoyRender();
+}
+window.hoySaveCfgFromModal=hoySaveCfgFromModal;
+
+// ── FIX de carga inicial: los datos bajan de Supabase DESPUÉS del login ──
+// 1) Al terminar la carga inicial de la nube, re-renderizar Hoy si está a la vista
+if(typeof window.sbLoadInitialData==='function'){
+  var _hoyOrigSbLoad=window.sbLoadInitialData;
+  window.sbLoadInitialData=function(){
+    var p=_hoyOrigSbLoad.apply(this,arguments);
+    if(p&&typeof p.then==='function'){
+      return p.then(function(r){
+        try{ if(typeof mainView!=='undefined'&&mainView==='hoy')hoyRender(); }catch(e){}
+        return r;
+      });
+    }
+    return p;
+  };
+}
+// 2) Red de seguridad: reintentos suaves post-boot hasta que aparezca el plantel
+function hoyBootRetry(){
+  var tries=0;
+  var iv=setInterval(function(){
+    tries++;
+    if(tries>10){ clearInterval(iv); return; }
+    if(typeof mainView==='undefined'||mainView!=='hoy'){ clearInterval(iv); return; }
+    try{
+      if(hoyRoster().length>0){ hoyRender(); clearInterval(iv); }
+    }catch(e){ clearInterval(iv); }
+  },1500);
+}
+
 // Arranque: Hoy es la pantalla de inicio. Registrado al final → corre después
 // de que loadData() ya restauró todo (loadData es síncrono al parsear).
 document.addEventListener('DOMContentLoaded', function(){
-  try{ setMainView('hoy'); }catch(e){ console.warn('hoy boot:', e); }
+  try{ setMainView('hoy'); hoyBootRetry(); }catch(e){ console.warn('hoy boot:', e); }
 });
 </script>
 </body>
