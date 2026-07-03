@@ -779,10 +779,52 @@ body.sb-show{visibility:visible}
 <!-- VISTA ENTRENAMIENTOS -->
 <div id="view-train" style="display:none">
 
+<!-- ═══ BARRA DE ACCIONES DE LA BIBLIOTECA ═══ -->
+<div id="lib-actions" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+  <button onclick="libToggleDesign()" style="display:flex;align-items:center;gap:10px;background:linear-gradient(120deg,#1E2A52,#3B4D88);color:#fff;border:none;border-radius:12px;padding:12px 22px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(30,42,82,0.3)">
+    <span style="font-size:19px">🎨</span> Diseñá tu ejercicio
+  </button>
+  <div style="position:relative;margin-left:auto">
+    <button onclick="libToggleGear(event)" title="Herramientas de la biblioteca" style="background:#fff;border:1px solid #d5d8e0;border-radius:10px;padding:11px 14px;font-size:16px;cursor:pointer">⚙</button>
+    <div id="lib-gear-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #d5d8e0;border-radius:10px;box-shadow:0 8px 28px rgba(20,30,60,0.18);z-index:500;min-width:230px;overflow:hidden">
+      <button onclick="libGearOpen('cat-det')" style="display:block;width:100%;text-align:left;background:none;border:none;padding:11px 16px;font-size:12.5px;font-weight:600;color:#333;cursor:pointer;border-bottom:1px solid #f0f0f0">🏷 Gestionar categorías</button>
+      <button onclick="libGearOpen('csv-det')" style="display:block;width:100%;text-align:left;background:none;border:none;padding:11px 16px;font-size:12.5px;font-weight:600;color:#333;cursor:pointer">📥 Importar ejercicios desde CSV</button>
+    </div>
+  </div>
+</div>
+<script>
+function libToggleDesign(){
+  var d=document.getElementById('form-det'); if(!d)return;
+  d.open=!d.open;
+  if(d.open){ try{ d.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){} }
+}
+function libToggleGear(ev){
+  if(ev)ev.stopPropagation();
+  var m=document.getElementById('lib-gear-menu'); if(!m)return;
+  m.style.display=(m.style.display==='none')?'':'none';
+}
+function libGearOpen(id){
+  var m=document.getElementById('lib-gear-menu'); if(m)m.style.display='none';
+  ['csv-det','cat-det'].forEach(function(pid){
+    var p=document.getElementById(pid); if(!p)return;
+    if(pid===id){
+      var show=(p.style.display==='none');
+      p.style.display=show?'':'none';
+      p.open=show;
+      if(show){ try{ p.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){} }
+    } else { p.style.display='none'; p.open=false; }
+  });
+}
+document.addEventListener('click',function(e){
+  var m=document.getElementById('lib-gear-menu');
+  if(m&&m.style.display!=='none'&&!e.target.closest('#lib-gear-menu')&&!e.target.closest('[onclick^="libToggleGear"]'))m.style.display='none';
+});
+</script>
+
 <!-- ═══ PANELES SUPERIORES (movidos desde top-level) ═══ -->
 <div class="top-panels-row">
 <details id="form-det" class="panel">
-<summary>Diseñá tus ejercicios</summary>
+<summary>🎨 Diseñá tus ejercicios</summary>
 <div class="panel-body">
 <div class="fg">
   <label class="fw">Nombre <span class="req">*</span><input id="f-n" type="text" placeholder="Ej: 4vs4 transición"></label>
@@ -885,7 +927,7 @@ body.sb-show{visibility:visible}
 </div></details>
 
 <!-- IMPORTAR CSV -->
-<details id="csv-det" class="panel">
+<details id="csv-det" class="panel" style="display:none">
 <summary>Importar ejercicios desde CSV</summary>
 <div class="panel-body">
 <div style="font-size:11px;color:#666;line-height:1.6;margin-bottom:6px">
@@ -930,7 +972,7 @@ body.sb-show{visibility:visible}
 </div></details>
 
 <!-- GESTIÓN DE CATEGORÍAS -->
-<details id="cat-det" class="panel">
+<details id="cat-det" class="panel" style="display:none">
 <summary>Gestionar categorías de ejercicios</summary>
 <div class="panel-body">
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
@@ -962,7 +1004,7 @@ body.sb-show{visibility:visible}
 </div></details>
 
 <!-- COMPARAR SESIÓN DEL DÍA -->
-<details id="cmp-ses-det" class="panel">
+<details id="cmp-ses-det" class="panel" style="display:none"><!-- Oculto: se integrará en Planificación -->
 <summary>📊 Comparar sesión del día</summary>
 <div class="panel-body">
 <div style="font-size:11px;color:#666;margin-bottom:8px">Subí el CSV de la sesión, elegí un ejercicio y compará contra tu biblioteca (relativo a minutos).</div>
@@ -1824,8 +1866,23 @@ function toggleStarredFromModal(id){
 window.toggleStarredFromModal = toggleStarredFromModal;
 function sTab(t){tab=2;document.getElementById('p1').style.display='none';document.getElementById('p2').style.display='';updateSel();}
 window.sTab=sTab;
-function setCat(c){af=c;document.querySelectorAll('.cb').forEach(b=>{const on=b.dataset.cat===c;b.classList.toggle('on',on);b.style.background=on?(BC[c]||'#3B4D88'):'transparent';b.style.borderColor=on?(BC[c]||'#3B4D88'):'#ccc';b.style.color=on?'#fff':'#555';});refresh();}
+function setCat(c){af=c;window._libCatAutoDone=true;document.querySelectorAll('.cb').forEach(b=>{const on=b.dataset.cat===c;b.classList.toggle('on',on);b.style.background=on?(BC[c]||'#3B4D88'):'transparent';b.style.borderColor=on?(BC[c]||'#3B4D88'):'#ccc';b.style.color=on?'#fff':'#555';});refresh();}
 window.setCat=setCat;
+// La biblioteca no arranca en "Todos" (no es una categoría): al iniciar se
+// selecciona la primera categoría real con ejercicios. Corre una sola vez
+// (al boot y/o al llegar los datos de la nube); después manda el usuario.
+window._libCatAutoDone=false;
+function libAutoCat(){
+  try{
+    if(window._libCatAutoDone) return;
+    if(af!=='all') { window._libCatAutoDone=true; return; }
+    var counts={}; D.forEach(function(r){ counts[r.cat]=(counts[r.cat]||0)+1; });
+    var first=CATS.find(function(c){ return c!=='all' && counts[c]; });
+    if(first){ setCat(first); }
+  }catch(e){}
+}
+window.libAutoCat=libAutoCat;
+document.addEventListener('DOMContentLoaded',function(){ setTimeout(libAutoCat,50); });
 function getCatsInUse(){return['all',...new Set(D.map(r=>r.cat))];}
 
 function rebuildCatBtns(){
@@ -29028,6 +29085,16 @@ function _sbDrillToPayload(d){
 // imagen). Se usa al combinar/crear ejercicios para que queden guardados en
 // la nube y aparezcan al re-iniciar sesión, incluso desde otro dispositivo.
 function sbUpsertOneDrill(d){
+  // Antes de la reconciliación inicial, no subir: encolar en pendientes.
+  // La carga inicial preserva y sube los pendientes que no estén en la nube.
+  if(!window._sbDrillsSynced){
+    try{
+      var pend0 = JSON.parse(localStorage.getItem('drills_pending')||'[]');
+      var id0 = Number(d && d.id);
+      if(!isNaN(id0) && pend0.indexOf(id0)<0){ pend0.push(id0); localStorage.setItem('drills_pending', JSON.stringify(pend0)); }
+    }catch(e){}
+    return;
+  }
   try{
     // Si este id estaba marcado como borrado, quitarlo del tombstone (se recreó).
     try{
@@ -29156,6 +29223,11 @@ function _sbMatchFromRow(row){
 }
 
 // ── SYNC con debounce (Tanda 2b) ──
+// GATE anti-resurrección: hasta que la carga inicial desde la nube no haya
+// reconciliado D, ningún sync masivo puede subir el D local (que puede venir
+// de un localStorage viejo o del seed hardcodeado) y revivir ejercicios
+// borrados/combinados en la nube. La nube es la única fuente de verdad.
+window._sbDrillsSynced = false;
 var _sbTanda2bSyncTimer = null;
 function sbScheduleTanda2bSync(){
   if(!sbReady) return;
@@ -29165,7 +29237,7 @@ function sbScheduleTanda2bSync(){
     // D — sincronización REAL (no solo upsert): borra de la nube lo que ya no está
     // en D y sube lo actual. Esto evita que ejercicios borrados/combinados reaparezcan
     // por carreras entre el delete individual y el upsert masivo.
-    if(typeof D!=='undefined' && Array.isArray(D)){
+    if(typeof D!=='undefined' && Array.isArray(D) && window._sbDrillsSynced){
       var dPayload = D.map(_sbDrillToPayload).filter(function(p){return p && p.id!=null;});
       var localIds = {};
       dPayload.forEach(function(p){ localIds[Number(p.id)] = true; });
@@ -29256,10 +29328,19 @@ sbLoadInitialData = function(){
       D.length = 0;
       Object.values(keys).forEach(function(d){ D.push(d); });
       localOnly.forEach(function(d){ D.push(d); });
+      // La nube ya mandó: desde ahora los syncs quedan habilitados
+      window._sbDrillsSynced = true;
       // Subir a la nube los pendientes que faltaban
       if(localOnly.length && typeof sbUpsertOneDrill==='function'){
         localOnly.forEach(function(d){ sbUpsertOneDrill(d); });
       }
+      // Refrescar la biblioteca con el estado real de la nube (antes quedaba
+      // el render viejo de localStorage hasta que el usuario tocaba algo)
+      try{
+        if(typeof rebuildCatBtns==='function') rebuildCatBtns();
+        if(typeof libAutoCat==='function') libAutoCat();
+        if(typeof refresh==='function') refresh();
+      }catch(e){}
     }
     return sbMatchesFetchAll();
   }).then(function(rows){
