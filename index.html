@@ -857,48 +857,24 @@ body.sb-show{visibility:visible}
     </div>
   </div>
 
-  <!-- MODO DIBUJAR -->
+  <!-- MODO DIBUJAR → Diseñador v2 (XD2). El editor inline viejo fue reemplazado. -->
   <div id="f-diag-draw-panel">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap">
-    <button class="btn bc" onclick="drwUndo()" style="padding:2px 8px;font-size:10px">↩ Deshacer</button>
-    <button class="btn bc" onclick="drwClear()" style="padding:2px 8px;font-size:10px;margin-left:auto">🗑 Limpiar</button>
-  </div>
-  <!-- Background selector -->
-  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
-    <span style="font-size:10px;color:#666;font-weight:600">Fondo:</span>
-    <button id="drw-bg-plain"  onclick="drwSetBg('plain')"  class="btn bb" style="padding:3px 9px;font-size:10px">🟩 Vacío</button>
-    <button id="drw-bg-half"   onclick="drwSetBg('half')"   class="btn bc" style="padding:3px 9px;font-size:10px">⬜ Medio campo</button>
-    <button id="drw-bg-full"   onclick="drwSetBg('full')"   class="btn bc" style="padding:3px 9px;font-size:10px">⬜ Cancha completa</button>
-  </div>
-  <!-- Tools -->
-  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
-    <span style="font-size:10px;color:#666;font-weight:600">Herramienta:</span>
-    <button id="drw-t-select" onclick="drwSetTool('select')" class="btn bb" style="padding:3px 9px;font-size:10px">↖ Mover</button>
-    <button id="drw-t-circle" onclick="drwSetTool('circle')" class="btn bc" style="padding:3px 9px;font-size:10px">● Círculo</button>
-    <button id="drw-t-rect"   onclick="drwSetTool('rect')"   class="btn bc" style="padding:3px 9px;font-size:10px">▭ Rect.</button>
-    <button id="drw-t-line"   onclick="drwSetTool('line')"   class="btn bc" style="padding:3px 9px;font-size:10px">— Línea</button>
-    <button id="drw-t-arrow"  onclick="drwSetTool('arrow')"  class="btn bc" style="padding:3px 9px;font-size:10px">→ Flecha</button>
-    <button id="drw-t-ball"   onclick="drwSetTool('ball')"   class="btn bc" style="padding:3px 9px;font-size:10px">⚽ Pelota</button>
-    <button id="drw-t-goal"   onclick="drwSetTool('goal')"   class="btn bc" style="padding:3px 9px;font-size:10px">🥅 Arco</button>
-    <button id="drw-t-erase"  onclick="drwSetTool('erase')"  class="btn bc" style="padding:3px 9px;font-size:10px">✕ Borrar</button>
-  </div>
-  <!-- Colors (not shown for ball/goal) -->
-  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;align-items:center" id="drw-color-row">
-    <span style="font-size:10px;color:#666;font-weight:600">Color:</span>
-    <button id="drw-c-red"    onclick="drwSetColor('red')"    style="width:22px;height:22px;border-radius:50%;background:#E24B4A;border:3px solid #333;cursor:pointer;flex-shrink:0"></button>
-    <button id="drw-c-blue"   onclick="drwSetColor('blue')"   style="width:22px;height:22px;border-radius:50%;background:#3B4D88;border:2px solid #ccc;cursor:pointer;flex-shrink:0"></button>
-    <button id="drw-c-white"  onclick="drwSetColor('white')"  style="width:22px;height:22px;border-radius:50%;background:#fff;border:2px solid #ccc;cursor:pointer;flex-shrink:0"></button>
-    <button id="drw-c-orange" onclick="drwSetColor('orange')" style="width:22px;height:22px;border-radius:50%;background:#EF9F27;border:2px solid #ccc;cursor:pointer;flex-shrink:0"></button>
-    <button id="drw-c-black"  onclick="drwSetColor('black')"  style="width:22px;height:22px;border-radius:50%;background:#1a1a1a;border:2px solid #ccc;cursor:pointer;flex-shrink:0"></button>
-    <button class="btn bc" onclick="drwRotate()" id="drw-rotate-btn" style="padding:3px 9px;font-size:10px;margin-left:6px" title="Girar 90° (R)">↻ Girar</button>
-    <span style="font-size:10px;color:#888;margin-left:4px" id="drw-sel-hint"></span>
-  </div>
-  <div style="position:relative;display:inline-block;border:1px solid #ccc;border-radius:6px;overflow:hidden;touch-action:none;user-select:none">
-    <canvas id="drw-canvas" width="320" height="480" style="display:block;cursor:crosshair;max-width:100%"></canvas>
-  </div>
-  <div style="font-size:10px;color:#aaa;margin-top:4px">
-    <strong>Mover:</strong> clic → arrastrá. <strong>Línea recta:</strong> Shift+drag. <strong>Copiar:</strong> sel. + <kbd style="background:#f0f0f0;padding:0 3px;border-radius:2px;font-size:9px">C</kbd>. <strong>Girar:</strong> sel. + <kbd style="background:#f0f0f0;padding:0 3px;border-radius:2px;font-size:9px">R</kbd>. <strong>Borrar:</strong> <kbd style="background:#f0f0f0;padding:0 3px;border-radius:2px;font-size:9px">Del</kbd>
-  </div>
+    <div id="f-xd2-empty" style="border:2px dashed #ccc;border-radius:8px;padding:24px;text-align:center;cursor:pointer;background:#fafafa" onclick="fXd2Open()">
+      <div style="font-size:26px;margin-bottom:6px">🎨</div>
+      <div style="font-size:12px;font-weight:700;color:#3B4D88">Crear diagrama</div>
+      <div style="font-size:10px;color:#999;margin-top:3px">Abre el diseñador a pantalla completa: jugadores numerados, conos, flechas de pase/conducción/remate, zonas con medidas.</div>
+    </div>
+    <div id="f-xd2-preview" style="display:none">
+      <div style="border:1px solid #ddd;border-radius:8px;overflow:hidden;display:inline-block;max-width:100%">
+        <canvas id="f-xd2-canvas" style="display:block;width:320px;max-width:100%;height:auto;cursor:pointer" onclick="fXd2Open()" title="Tocar para editar"></canvas>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button type="button" class="btn bb" onclick="fXd2Open()" style="padding:5px 12px;font-size:11px">✏️ Editar</button>
+        <button type="button" class="btn bc" onclick="xd2BoardFromForm()" style="padding:5px 12px;font-size:11px">⛶ Pizarra</button>
+        <button type="button" class="btn bc" onclick="fXd2Clear()" style="padding:5px 12px;font-size:11px;color:#E24B4A;border-color:#E24B4A55">🗑 Quitar</button>
+      </div>
+    </div>
+    <div style="font-size:10px;color:#aaa;margin-top:6px">El diagrama se guarda junto al ejercicio al apretar <strong>Agregar</strong>.</div>
   </div><!-- /f-diag-draw-panel -->
 </div>
 
@@ -7893,13 +7869,21 @@ document.addEventListener('DOMContentLoaded',function(){
 
 var _origAddRow=window.addRow;
 window.addRow=function(){
-  var diagData=drwGetData();
+  // Diagrama pendiente del diseñador XD2 (nuevo flujo); drwGetData queda como fallback legacy
+  var diagData=(typeof window._fPendingDiag==='string'&&window._fPendingDiag)?window._fPendingDiag:drwGetData();
+  var beforeLen=D.length;
   _origAddRow();
-  if(D.length){
+  var added=D.length>beforeLen;
+  if(added){
     var target=drwCurrentEditId!==null?D.find(function(r){return r.id===drwCurrentEditId;}):D[D.length-1];
-    if(target&&diagData)target.diag=diagData;
-    else if(target&&!diagData){}// no diagram = don't overwrite existing
+    if(target&&diagData){
+      target.diag=diagData;
+      window._fPendingDiag=null;
+      if(typeof fXd2Preview==='function')fXd2Preview();
+      if(typeof sbUpsertOneDrill==='function'){ try{ sbUpsertOneDrill(target); }catch(e){} }
+    }
   }
+  // Si la validación abortó (added=false) el diagrama pendiente se conserva
   drwShapes=[];drwHistory=[];drwState.selIdx=-1;drwBg='plain';drwSetBg('plain');drwRender();
   drwCurrentEditId=null;
 };
@@ -14352,40 +14336,14 @@ document.addEventListener('DOMContentLoaded',function(){
     <div style="border-top:1px solid #eee;padding-top:10px">
       <button id="exi-diag-toggle-btn" onclick="exiToggleDiag()" class="btn bc" style="font-size:10px;padding:3px 12px;margin-bottom:8px">✏️ Agregar diagrama</button>
       <div id="exi-diag-panel" style="display:none">
-        <!-- Fondo -->
-        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px;align-items:center">
-          <span style="font-size:10px;color:#666;font-weight:600">Fondo:</span>
-          <button id="exi-bg-plain" onclick="exiDiagSetBg('plain')" class="btn bb" style="padding:2px 8px;font-size:10px">🟩 Vacío</button>
-          <button id="exi-bg-half"  onclick="exiDiagSetBg('half')"  class="btn bc" style="padding:2px 8px;font-size:10px">⬜ Medio</button>
-          <button id="exi-bg-full"  onclick="exiDiagSetBg('full')"  class="btn bc" style="padding:2px 8px;font-size:10px">⬜ Completa</button>
+        <!-- Vista previa (solo lectura) — la edición es con el diseñador XD2 -->
+        <div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;display:inline-block;max-width:100%">
+          <canvas id="exi-diag-canvas" style="display:block;max-width:100%;pointer-events:none"></canvas>
         </div>
-        <!-- Herramientas -->
-        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px;align-items:center">
-          <span style="font-size:10px;color:#666;font-weight:600">Herr.:</span>
-          <button id="exi-t-select" onclick="exiDiagSetTool('select')" class="btn bb" style="padding:2px 7px;font-size:10px">↖</button>
-          <button id="exi-t-circle" onclick="exiDiagSetTool('circle')" class="btn bc" style="padding:2px 7px;font-size:10px">●</button>
-          <button id="exi-t-rect"   onclick="exiDiagSetTool('rect')"   class="btn bc" style="padding:2px 7px;font-size:10px">▭</button>
-          <button id="exi-t-line"   onclick="exiDiagSetTool('line')"   class="btn bc" style="padding:2px 7px;font-size:10px">—</button>
-          <button id="exi-t-arrow"  onclick="exiDiagSetTool('arrow')"  class="btn bc" style="padding:2px 7px;font-size:10px">→</button>
-          <button id="exi-t-ball"   onclick="exiDiagSetTool('ball')"   class="btn bc" style="padding:2px 7px;font-size:10px">⚽</button>
-          <button id="exi-t-goal"   onclick="exiDiagSetTool('goal')"   class="btn bc" style="padding:2px 7px;font-size:10px">🥅</button>
-          <button id="exi-t-erase"  onclick="exiDiagSetTool('erase')"  class="btn bc" style="padding:2px 7px;font-size:10px">✕</button>
-          <button onclick="exiDiagUndo()" class="btn bc" style="padding:2px 8px;font-size:10px;margin-left:4px" title="Deshacer último cambio">↩</button>
-          <button onclick="exiDiagClear()" class="btn bc" style="padding:2px 8px;font-size:10px" title="Limpiar canvas (vaciar para volver a dibujar)">🗑</button>
-          <button onclick="exiDiagRemove()" style="margin-left:auto;border:1px solid #E24B4A55;background:#E24B4A12;color:#E24B4A;border-radius:5px;padding:2px 9px;font-size:10px;font-weight:700;cursor:pointer" title="Quitar el diagrama guardado: el ejercicio queda sin imagen">❌ Quitar diagrama</button>
-        </div>
-        <!-- Colores -->
-        <div style="display:flex;gap:5px;align-items:center;margin-bottom:7px">
-          <span style="font-size:10px;color:#666;font-weight:600">Color:</span>
-          <button id="exi-c-red"    onclick="exiDiagSetColor('red')"    style="width:20px;height:20px;border-radius:50%;background:#E24B4A;border:3px solid #333;cursor:pointer"></button>
-          <button id="exi-c-blue"   onclick="exiDiagSetColor('blue')"   style="width:20px;height:20px;border-radius:50%;background:#3B4D88;border:2px solid #ccc;cursor:pointer"></button>
-          <button id="exi-c-white"  onclick="exiDiagSetColor('white')"  style="width:20px;height:20px;border-radius:50%;background:#fff;border:2px solid #ccc;cursor:pointer"></button>
-          <button id="exi-c-orange" onclick="exiDiagSetColor('orange')" style="width:20px;height:20px;border-radius:50%;background:#EF9F27;border:2px solid #ccc;cursor:pointer"></button>
-          <button id="exi-c-black"  onclick="exiDiagSetColor('black')"  style="width:20px;height:20px;border-radius:50%;background:#1a1a1a;border:2px solid #ccc;cursor:pointer"></button>
-        </div>
-        <!-- Canvas -->
-        <div style="border:1px solid #ccc;border-radius:6px;overflow:hidden;touch-action:none;user-select:none;display:inline-block">
-          <canvas id="exi-diag-canvas" style="display:block;cursor:crosshair;max-width:100%"></canvas>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button type="button" class="btn bb" onclick="exiToggleDiag()" style="padding:4px 12px;font-size:10px">✏️ Editar con el diseñador</button>
+          <button type="button" class="btn bc" onclick="exiBoardOpen()" style="padding:4px 12px;font-size:10px">⛶ Pizarra</button>
+          <button type="button" onclick="exiDiagRemove()" style="margin-left:auto;border:1px solid #E24B4A55;background:#E24B4A12;color:#E24B4A;border-radius:5px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer" title="Quitar el diagrama guardado: el ejercicio queda sin imagen">❌ Quitar diagrama</button>
         </div>
       </div>
     </div>
@@ -31433,11 +31391,12 @@ function xdSvgShape(s,i){
   return '<g data-i="'+i+'"'+halo+'>'+g+'</g>';
 }
 
-function xdSvgBg(){
+function xdSvgBg(bgOpt){
+  var bgv=bgOpt||X.bg;
   var g='<rect width="480" height="300" fill="#3d8c2f"/>';
   for(var i=0;i<10;i++) if(i%2===0) g+='<rect y="'+(i*30)+'" width="480" height="30" fill="rgba(0,0,0,0.05)"/>';
   var W='rgba(255,255,255,0.9)';
-  if(X.bg==='full'){
+  if(bgv==='full'){
     g+='<rect x="14" y="14" width="452" height="272" fill="none" stroke="'+W+'" stroke-width="2"/>'+
        '<line x1="240" y1="14" x2="240" y2="286" stroke="'+W+'" stroke-width="2"/>'+
        '<circle cx="240" cy="150" r="34" fill="none" stroke="'+W+'" stroke-width="2"/>'+
@@ -31445,7 +31404,7 @@ function xdSvgBg(){
        '<rect x="414" y="86" width="52" height="128" fill="none" stroke="'+W+'" stroke-width="2"/>'+
        '<rect x="14" y="122" width="20" height="56" fill="none" stroke="'+W+'" stroke-width="2"/>'+
        '<rect x="446" y="122" width="20" height="56" fill="none" stroke="'+W+'" stroke-width="2"/>';
-  } else if(X.bg==='half'){
+  } else if(bgv==='half'){
     g+='<rect x="14" y="14" width="452" height="272" fill="none" stroke="'+W+'" stroke-width="2"/>'+
        '<path d="M14 150 A 120 120 0 0 1 466 150" fill="none" stroke="none"/>'+
        '<rect x="150" y="14" width="180" height="60" fill="none" stroke="'+W+'" stroke-width="2"/>'+
@@ -31838,27 +31797,104 @@ if(typeof window.exiToggleDiag==='function'){
   };
 }
 
-// 3) Formulario de alta: botón "Editor completo" sincronizado con el canvas chico
-document.addEventListener('DOMContentLoaded',function(){
-  var rot=document.getElementById('drw-rotate-btn');
-  if(rot&&!document.getElementById('drw-xd2-btn')){
-    var b=document.createElement('button');
-    b.id='drw-xd2-btn'; b.type='button'; b.className='btn bb';
-    b.style.cssText='padding:3px 12px;font-size:10px;margin-left:6px;font-weight:800';
-    b.textContent='⛶ Editor completo';
-    b.onclick=function(){
-      var nameEl=document.getElementById('f-n');
-      var data=(typeof drwGetData==='function')?drwGetData():null;
-      xd2Open(data,function(json){
-        if(typeof drwLoadData==='function'){ drwLoadData(json); }
-        if(typeof drwSetBg==='function'&&typeof drwBg!=='undefined'){ drwSetBg(drwBg); }
-        if(typeof drwRender==='function')drwRender();
-        var h=document.getElementById('drw-sel-hint');
-        if(h){ h.textContent='✓ Dibujo del editor completo cargado — se guarda con el botón Agregar'; h.style.color='#1D9E75'; }
-      },{title:(nameEl&&nameEl.value.trim())||'Nuevo ejercicio'});
-    };
-    rot.parentNode.insertBefore(b,rot.nextSibling);
+// 3) Formulario de alta: el diseñador ES el editor principal.
+//    Estado pendiente _fPendingDiag hasta que se aprieta "Agregar".
+window._fPendingDiag=null;
+window.fXd2Preview=function(){
+  var empty=document.getElementById('f-xd2-empty');
+  var prev=document.getElementById('f-xd2-preview');
+  var cv=document.getElementById('f-xd2-canvas');
+  if(!empty||!prev)return;
+  if(window._fPendingDiag){
+    empty.style.display='none'; prev.style.display='';
+    if(cv&&typeof drwRenderTo==='function')drwRenderTo(cv,window._fPendingDiag);
+  } else {
+    empty.style.display=''; prev.style.display='none';
   }
+};
+window.fXd2Open=function(){
+  var nameEl=document.getElementById('f-n');
+  xd2Open(window._fPendingDiag,function(json){
+    window._fPendingDiag=json;
+    fXd2Preview();
+  },{title:(nameEl&&nameEl.value.trim())||'Nuevo ejercicio'});
+};
+window.fXd2Clear=function(){
+  if(!confirm('¿Quitar el diagrama del ejercicio nuevo?'))return;
+  window._fPendingDiag=null; fXd2Preview();
+};
+
+// ═══ MODO PIZARRA (visor a pantalla completa para tablet, solo lectura) ═══
+window.xd2BoardOpen=function(data,title){
+  var old=document.getElementById('xd2-board'); if(old)old.remove();
+  var inner='', isImg=data&&String(data).slice(0,10)==='data:image';
+  if(isImg){
+    inner='<img src="'+data+'" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:10px">';
+  } else {
+    var shapes=[],bg='plain';
+    try{ var d=JSON.parse(data||'null'); if(d){ if(Array.isArray(d)){shapes=d;} else {shapes=d.shapes||[]; bg=d.bg||'plain';} } }catch(e){}
+    if(!shapes.length&&bg==='plain'){ alert('Este ejercicio no tiene diagrama.'); return; }
+    var svgBody=xdSvgBg(bg)+shapes.map(function(s){return xdSvgShape(s,-1);}).join('');
+    inner='<svg viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="width:min(100%,calc((100dvh - 90px)*1.6));aspect-ratio:480/300;background:#3d8c2f;border-radius:12px;box-shadow:0 14px 60px rgba(0,0,0,0.6)">'+svgBody+'</svg>';
+  }
+  var m=document.createElement('div');
+  m.id='xd2-board';
+  m.style.cssText='position:fixed;inset:0;z-index:12500;background:#0A0F18;display:flex;flex-direction:column';
+  m.innerHTML=
+    '<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;flex-shrink:0">'+
+      '<span style="font-size:17px">⛶</span>'+
+      '<b style="color:#fff;font-size:15px;font-family:system-ui,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+xdEsc(title||'Ejercicio')+'</b>'+
+      '<button onclick="document.getElementById(\'xd2-board\').remove()" style="border:none;background:#2A3A58;color:#fff;border-radius:9px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer">✕ Cerrar</button>'+
+    '</div>'+
+    '<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:6px 14px 16px;min-height:0" onclick="document.getElementById(\'xd2-board\').remove()">'+inner+'</div>';
+  document.body.appendChild(m);
+};
+window.xd2BoardFromForm=function(){
+  var nameEl=document.getElementById('f-n');
+  if(!window._fPendingDiag){ alert('Todavía no hay diagrama dibujado.'); return; }
+  xd2BoardOpen(window._fPendingDiag,(nameEl&&nameEl.value.trim())||'Nuevo ejercicio');
+};
+window.exiBoardOpen=function(){
+  var id=(typeof _exInfoId!=='undefined')?_exInfoId:null;
+  var row=(id!==null)?D.find(function(r){return r.id===id;}):null;
+  if(!row){ return; }
+  xd2BoardOpen(row.diag||row.img||null,row.n||'Ejercicio');
+};
+
+// Vista previa del modal exi: delegar en el pintor unificado a resolución nativa
+// (el canvas del panel exi ahora es solo lectura; pointer-events:none en el HTML)
+window.exiDiagRender=function(){
+  var c=document.getElementById('exi-diag-canvas'); if(!c)return;
+  if(typeof drwRenderTo!=='function')return;
+  var shapes=(typeof _exiDiagShapes!=='undefined')?_exiDiagShapes:[];
+  var bg=(typeof _exiDiagBg!=='undefined')?_exiDiagBg:'plain';
+  drwRenderTo(c,JSON.stringify({shapes:shapes,bg:bg}));
+};
+
+// Botón ⛶ Pizarra junto al ✏️ Editar del panel de diagrama de la biblioteca
+if(typeof window._diagUpdateHook==='function'){
+  var _xdOrigDiagHook=window._diagUpdateHook;
+  window._diagUpdateHook=function(rows){
+    _xdOrigDiagHook(rows);
+    var eb=document.getElementById('diag-edit-btn'); if(!eb)return;
+    var bb=document.getElementById('diag-board-btn');
+    if(!bb){
+      bb=document.createElement('button');
+      bb.id='diag-board-btn'; bb.type='button'; bb.className='btn bc';
+      bb.style.cssText='padding:1px 7px;font-size:10px;margin-left:4px';
+      bb.textContent='⛶ Pizarra';
+      eb.parentNode.insertBefore(bb,eb.nextSibling);
+    }
+    if(rows.length===1&&(rows[0].diag||rows[0].img)){
+      bb.style.display='';
+      bb.onclick=function(){ xd2BoardOpen(rows[0].diag||rows[0].img,rows[0].n||'Ejercicio'); };
+    } else { bb.style.display='none'; }
+  };
+}
+
+// Inicializar la vista previa del formulario al cargar
+document.addEventListener('DOMContentLoaded',function(){
+  if(typeof fXd2Preview==='function')fXd2Preview();
 });
 })();
 </script>
