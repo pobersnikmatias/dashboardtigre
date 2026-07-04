@@ -32440,6 +32440,40 @@ function hoyTodaysPlan(){
   return {week:week, day:day, items:items, sum:sum, todayLbl:todayLbl};
 }
 
+// ── Gimnasio planificado hoy (subpestaña sesiones de Prep. física) ──
+function hoyGymToday(todayISO){
+  if(typeof GYM_SESSIONS==='undefined'||!Array.isArray(GYM_SESSIONS))return null;
+  var found=null;
+  GYM_SESSIONS.forEach(function(s){ if(hoyPDate(s.date)===todayISO) found=s; });
+  return found;
+}
+function hoyEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── Pendientes del CT (checklist persistente) ──
+var HOY_TODOS=[];
+try{ HOY_TODOS=JSON.parse(localStorage.getItem('hoyTodos_v1')||'[]')||[]; }catch(e){ HOY_TODOS=[]; }
+function hoySaveTodos(){ try{ localStorage.setItem('hoyTodos_v1', JSON.stringify(HOY_TODOS)); }catch(e){} }
+function hoyTodoAdd(){
+  var inp=document.getElementById('hoy-todo-inp'); if(!inp)return;
+  var txt=(inp.value||'').trim(); if(!txt)return;
+  HOY_TODOS.push({id:Date.now(), txt:txt.slice(0,120), done:false});
+  inp.value='';
+  hoySaveTodos(); hoyRender();
+}
+window.hoyTodoAdd=hoyTodoAdd;
+function hoyTodoToggle(id){
+  var t=HOY_TODOS.find(function(x){return x.id===id;}); if(!t)return;
+  t.done=!t.done; hoySaveTodos(); hoyRender();
+}
+window.hoyTodoToggle=hoyTodoToggle;
+function hoyTodoDel(id){
+  var i=HOY_TODOS.findIndex(function(x){return x.id===id;}); if(i<0)return;
+  HOY_TODOS.splice(i,1); hoySaveTodos(); hoyRender();
+}
+window.hoyTodoDel=hoyTodoDel;
+function hoyTodoKey(ev){ if(ev.key==='Enter'){ ev.preventDefault(); hoyTodoAdd(); } }
+window.hoyTodoKey=hoyTodoKey;
+
 // ── Próximo partido (primer fixture sin resultado) ──
 function hoyNextMatch(){
   if(typeof FIX_FIXTURE==='undefined' || !FIX_FIXTURE.length) return null;
@@ -32498,18 +32532,70 @@ function hoyRender(){
   if(!alertsHtml) alertsHtml='<div style="font-size:12px;color:#1D9E75;padding:6px 0">✓ Sin alertas: plantel completo en verde.</div>';
 
   // ── Sesión de hoy ──
+  function hoyVolsHtml(sum){
+    if(!sum)return '';
+    function m(v){ return Math.round(v).toLocaleString('es-AR')+' m'; }
+    var vols=[];
+    if(sum.mts>0)vols.push({v:m(sum.mts),l:'Distancia total'});
+    if(sum.hsr>0)vols.push({v:m(sum.hsr),l:'18–21 km/h'});
+    if(sum.h2>0)vols.push({v:m(sum.h2),l:'21–25 km/h'});
+    if(sum.h25>0)vols.push({v:m(sum.h25),l:'+25 km/h'});
+    if(sum.acc>0)vols.push({v:String(Math.round(sum.acc)),l:'Acc +3'});
+    if(sum.dcc>0)vols.push({v:String(Math.round(sum.dcc)),l:'Dcc +3'});
+    if(sum.rhie>0)vols.push({v:String(Math.round(sum.rhie)),l:'RHIE'});
+    if(sum.mts_min_avg>0)vols.push({v:Math.round(sum.mts_min_avg)+' m/min',l:'intensidad prom.'});
+    if(!vols.length)return '';
+    return '<div style="margin-top:10px">'+
+      '<div style="font-size:9px;font-weight:800;color:#8a93a5;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">Volúmenes estimados · biblioteca</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(94px,1fr));gap:6px">'+
+        vols.map(function(x){return '<div style="background:#f6f7fa;border:1px solid #e4e6ec;border-radius:8px;padding:6px 6px;text-align:center"><b style="display:block;font-size:13px;color:#1E2A52;white-space:nowrap">'+x.v+'</b><small style="font-size:8px;color:#888">'+x.l+'</small></div>';}).join('')+
+      '</div></div>';
+  }
+  function hoyTodosHtml(hasSession){
+    var h='';
+    // Auto-pendiente: PSE post-sesión si hay sesión hoy y faltan respuestas
+    var pseToday=0;
+    try{
+      var seen={};
+      (PSE_DATA||[]).forEach(function(r){ if(hoyPDate(r.date)===today){ seen[hoyNorm(r.name)]=true; } });
+      pseToday=Object.keys(seen).length;
+    }catch(e){}
+    if(hasSession && pseToday<withWellness){
+      h+='<div class="hoy-alert"><div class="ic" style="background:#f0f5ff">📋</div><div>Cargar PSE post-sesión en el kiosco — respondieron <b>'+pseToday+' de '+withWellness+'</b>.</div></div>';
+    }
+    // Checklist manual
+    var items=HOY_TODOS.slice().sort(function(a,b){ return (a.done?1:0)-(b.done?1:0) || a.id-b.id; });
+    h+=items.map(function(t){
+      return '<div class="hoy-alert" style="align-items:center">'+
+        '<div class="ic" style="background:'+(t.done?'#edfaf3':'#f5f5f5')+';cursor:pointer;font-size:13px" onclick="hoyTodoToggle('+t.id+')">'+(t.done?'✅':'⬜')+'</div>'+
+        '<div style="flex:1;'+(t.done?'text-decoration:line-through;color:#aaa':'')+'">'+hoyEsc(t.txt)+'</div>'+
+        '<button onclick="hoyTodoDel('+t.id+')" style="border:none;background:none;color:#ccc;font-size:13px;cursor:pointer;padding:2px 4px" title="Eliminar">✕</button>'+
+      '</div>';
+    }).join('');
+    if(!h)h='<div style="font-size:11.5px;color:#aaa;padding:4px 0">Sin pendientes. Agregá tareas del día para el cuerpo técnico.</div>';
+    h+='<div style="display:flex;gap:6px;margin-top:10px">'+
+      '<input id="hoy-todo-inp" placeholder="Nueva tarea… (ej: hablar con kinesiólogo por Ferro)" onkeydown="hoyTodoKey(event)" style="flex:1;padding:8px 10px;font-size:11.5px;border:1px solid #ddd;border-radius:8px;min-width:0">'+
+      '<button class="hoy-btn" style="background:#1E2A52;padding:8px 14px" onclick="hoyTodoAdd()">＋</button>'+
+    '</div>';
+    return h;
+  }
+  var gym=hoyGymToday(today);
+  var gymHtml=gym?('<div style="margin-top:10px;display:flex;gap:9px;align-items:flex-start;background:#f0faf5;border:1px solid #bfe5d2;border-radius:9px;padding:9px 11px">'+
+      '<span style="font-size:16px">🏋️</span>'+
+      '<div style="font-size:11.5px;color:#1D6B4F;line-height:1.4"><b>✓ Gimnasio planificado</b> · '+((gym.exercises||[]).length)+' ejercicio'+((gym.exercises||[]).length===1?'':'s')+(gym.md?' · '+hoyEsc(gym.md):'')+
+      (gym.notes?'<br><span style="color:#4a7a65;font-size:10.5px">'+hoyEsc(gym.notes)+'</span>':'')+
+      '</div></div>'):'';
   var sesHtml;
   if(plan && plan.day && plan.items && plan.items.length){
     sesHtml=plan.items.map(function(it,i){
       return '<div class="hoy-row"><span>'+(i+1)+' · '+it.name+(it.parallel?' <span style="font-size:9px;color:#9C59D1">∥</span>':'')+'</span><b>'+it.mins+'\'</b></div>';
     }).join('');
     var tm=plan.sum&&plan.sum.totalMins?Math.round(plan.sum.totalMins):plan.items.reduce(function(a,i){return a+i.mins;},0);
-    var mts=plan.sum&&plan.sum.mts?Math.round(plan.sum.mts):null;
     sesHtml+='<div class="hoy-kpis">'+
       '<div><b>'+tm+'\'</b><small>minutos planificados</small></div>'+
-      (mts!=null?'<div><b>'+mts.toLocaleString('es-AR')+'</b><small>m estimados (biblioteca)</small></div>':'')+
       '<div><b>'+plan.items.length+'</b><small>ejercicios</small></div>'+
     '</div>'+
+    hoyVolsHtml(plan.sum)+
     '<div style="margin-top:10px;text-align:right"><button class="hoy-btn" style="background:#EF9F27" onclick="setMainView(\'plan\')">Abrir planificación →</button></div>';
   } else if(plan && plan.week){
     sesHtml='<div style="font-size:12px;color:#888;padding:8px 0">La semana "'+(plan.week.name||'actual')+'" no tiene ejercicios cargados para '+plan.todayLbl+'.</div>'+
@@ -32518,6 +32604,7 @@ function hoyRender(){
     sesHtml='<div style="font-size:12px;color:#888;padding:8px 0">No hay planificación semanal creada todavía.</div>'+
       '<button class="hoy-btn" style="background:#EF9F27" onclick="setMainView(\'plan\')">Crear semana →</button>';
   }
+  sesHtml+=gymHtml;
 
   root.innerHTML=
     '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">'+
@@ -32527,6 +32614,7 @@ function hoyRender(){
       '<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'+
         '<button class="hoy-btn" style="background:#1D9E75" onclick="cargaSelfEntry(\'wellness\')">📲 Wellness</button>'+
         '<button class="hoy-btn" style="background:#D85A30" onclick="cargaSelfEntry(\'pse\')">📲 PSE</button>'+
+        '<button class="hoy-btn" style="background:#3B4D88" onclick="hoyInformeOpen()">📤 Informe</button>'+
         '<button class="hoy-btn" style="background:#5C6470" onclick="hoyOpenCfg()" title="Configurar el semáforo">⚙</button>'+
       '</div>'+
     '</div>'+
@@ -32552,6 +32640,7 @@ function hoyRender(){
             '<div style="font-size:11px;color:#666;line-height:1.4">jugadores disponibles respondieron el wellness de hoy.</div>'+
           '</div>'+
         '</div>'+
+        '<div class="hoy-card"><h3>✅ Pendientes del CT</h3>'+hoyTodosHtml(plan&&plan.day&&plan.items&&plan.items.length?true:false)+'</div>'+
       '</div>'+
     '</div>';
 }
@@ -32609,6 +32698,182 @@ function hoySetFlagNote(nameL, note){
   if(HOY_FLAGS[nameL]){ HOY_FLAGS[nameL].note=(note||'').trim(); hoySaveFlags(); }
 }
 window.hoySetFlagNote=hoySetFlagNote;
+
+// ── 📤 INFORME DEL DÍA (imagen 1080×1350 lista para WhatsApp, cero dependencias) ──
+function hoyInformeOpen(){
+  try{
+    var today=hoyLocalISO();
+    var roster=hoyRoster();
+    var profMap=hoyProfileByNorm();
+    var statuses=roster.map(function(n){ return hoyPlayerStatus(n, today, profMap); });
+    var nG=statuses.filter(function(s){return s.level==='green';}).length;
+    var nY=statuses.filter(function(s){return s.level==='amber';}).length;
+    var nR=statuses.filter(function(s){return s.level==='red';}).length;
+    var nN=statuses.filter(function(s){return s.level==='none';}).length;
+    var nO=statuses.filter(function(s){return s.level==='out';}).length;
+    var activos=statuses.filter(function(s){return s.level!=='out';});
+    var withWellness=activos.filter(function(s){return !!s.wellness;}).length;
+    var plan=hoyTodaysPlan(), gym=hoyGymToday(today), next=hoyNextMatch();
+    var mdLbl=(plan&&plan.day&&plan.day.mdLabel)?plan.day.mdLabel:'';
+    var fmt=new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    fmt=fmt.charAt(0).toUpperCase()+fmt.slice(1);
+
+    // Altura adaptativa: el informe crece si hay muchas alertas/ejercicios,
+    // así el contenido nunca pisa el footer. Mínimo 1350 (formato WhatsApp).
+    var _flagN=Math.min(6,statuses.filter(function(s){return s.level==='red'||s.level==='amber';}).length);
+    var _itemsN=(plan&&plan.items)?plan.items.length:0;
+    var _showN=Math.min(7,_itemsN);
+    var _volsN=(function(){ var s=(plan&&plan.sum)||{}; return ['mts','hsr','h2','h25','acc','dcc'].filter(function(k){return s[k]>0;}).length; })();
+    var _gymH=gym?((gym.notes?86:56)+24):0;
+    var _need=236 + 22 + 112
+      + (_flagN? _flagN*44+24+28 : 44)
+      + 20
+      + (_itemsN? _showN*40+(_itemsN>7?34:0)+70+20 : 88)
+      + (_volsN? 86+36 : 0)
+      + _gymH
+      + 130;
+    var W=1080,H=Math.max(1350,Math.ceil(_need));
+    var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+    var ctx=cv.getContext('2d');
+    var NAVY='#1E2A52', BLUE='#3B4D88', GOLD='#E0A93B', INK='#10141D', MUT='#5C6470';
+    function rr(x,y,w,h,r,fill,stroke){
+      ctx.beginPath();
+      ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+      ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+      if(fill){ctx.fillStyle=fill;ctx.fill();}
+      if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke();}
+    }
+    function txt(t,x,y,size,color,bold,align){
+      ctx.font=(bold?'800 ':'500 ')+size+'px system-ui, sans-serif';
+      ctx.fillStyle=color; ctx.textAlign=align||'left'; ctx.textBaseline='alphabetic';
+      ctx.fillText(t,x,y); ctx.textAlign='left';
+    }
+    function trunc(t,maxW,size,bold){
+      ctx.font=(bold?'800 ':'500 ')+size+'px system-ui, sans-serif';
+      if(ctx.measureText(t).width<=maxW)return t;
+      while(t.length>1&&ctx.measureText(t+'…').width>maxW)t=t.slice(0,-1);
+      return t+'…';
+    }
+    // Fondo
+    ctx.fillStyle='#F4F6F9'; ctx.fillRect(0,0,W,H);
+    // Header
+    var grd=ctx.createLinearGradient(0,0,W,180); grd.addColorStop(0,NAVY); grd.addColorStop(1,BLUE);
+    ctx.fillStyle=grd; ctx.fillRect(0,0,W,180);
+    ctx.fillStyle=GOLD; ctx.fillRect(0,180,W,6);
+    var esc=document.querySelector('#boot-splash img');
+    var hx=48;
+    if(esc&&esc.complete&&esc.naturalWidth){ try{ ctx.drawImage(esc,40,36,108,108); hx=176; }catch(e){} }
+    txt('INFORME DEL DÍA',hx,86,46,'#fff',true);
+    txt(fmt+(typeof SB_CATEGORIA!=='undefined'&&SB_CATEGORIA?' · '+SB_CATEGORIA:''),hx,132,26,'rgba(255,255,255,0.85)');
+    if(mdLbl){ rr(W-190,54,140,54,12,GOLD); txt(mdLbl,W-120,90,28,NAVY,true,'center'); }
+
+    var y=236;
+    // ── Semáforo ──
+    txt('🚦 DISPONIBILIDAD DEL PLANTEL',48,y,26,BLUE,true); y+=22;
+    var chips=[{n:nG,l:'OK',c:'#1D9E75'},{n:nY,l:'PRECAUCIÓN',c:'#E8A13C'},{n:nR,l:'RIESGO',c:'#D9534F'},{n:nN,l:'SIN CHECK-IN',c:'#9AA2AC'}];
+    if(nO)chips.push({n:nO,l:'NO DISP.',c:BLUE});
+    var cw=(W-96-(chips.length-1)*14)/chips.length;
+    chips.forEach(function(c,i){
+      var x=48+i*(cw+14);
+      rr(x,y,cw,86,14,'#fff','#E3E6DE');
+      ctx.fillStyle=c.c; ctx.fillRect(x,y,8,86);
+      txt(String(c.n),x+cw/2,y+52,40,c.c,true,'center');
+      txt(c.l,x+cw/2,y+74,15,MUT,false,'center');
+    });
+    y+=112;
+    var flagged=statuses.filter(function(s){return s.level==='red'||s.level==='amber';})
+      .sort(function(a,b){return (a.level==='red'?0:1)-(b.level==='red'?0:1);}).slice(0,6);
+    if(flagged.length){
+      var lh=44, boxH=flagged.length*lh+24;
+      rr(48,y,W-96,boxH,14,'#fff','#E3E6DE');
+      flagged.forEach(function(s,i){
+        var yy=y+34+i*lh;
+        txt(s.level==='red'?'🔴':'🟡',64,yy,22,INK);
+        txt(trunc(hoyShortName(s.name),200,22,true),100,yy,22,INK,true);
+        var motivo=s.reasons.length?s.reasons[0].txt:'';
+        txt(trunc(motivo,W-96-330,20),320,yy,20,MUT);
+      });
+      y+=boxH+28;
+    } else { txt('✓ Plantel completo sin señales de riesgo.',48,y+8,22,'#1D9E75',true); y+=44; }
+
+    // ── Sesión ──
+    txt('⚽ SESIÓN DE HOY'+(plan&&plan.week&&plan.week.name?' · '+plan.week.name.toUpperCase():''),48,y,26,BLUE,true); y+=20;
+    if(plan&&plan.items&&plan.items.length){
+      var show=plan.items.slice(0,7);
+      var sesH=show.length*40+(plan.items.length>7?34:0)+70;
+      rr(48,y,W-96,sesH,14,'#fff','#E3E6DE');
+      show.forEach(function(it,i){
+        var yy=y+38+i*40;
+        txt((i+1)+' · '+trunc(it.name,W-96-260,21),64,yy,21,INK);
+        txt(it.mins+"'",W-72,yy,21,NAVY,true,'right');
+      });
+      var yy2=y+38+show.length*40;
+      if(plan.items.length>7){ txt('… y '+(plan.items.length-7)+' ejercicios más',64,yy2,18,MUT); yy2+=34; }
+      var tm=plan.sum&&plan.sum.totalMins?Math.round(plan.sum.totalMins):0;
+      txt(tm+"' planificados · "+plan.items.length+' ejercicios',64,yy2+4,21,BLUE,true);
+      y+=sesH+20;
+      // Volúmenes estimados
+      var sum=plan.sum||{};
+      function fm(v){return Math.round(v).toLocaleString('es-AR');}
+      var vols=[];
+      if(sum.mts>0)vols.push({v:fm(sum.mts)+' m',l:'DISTANCIA'});
+      if(sum.hsr>0)vols.push({v:fm(sum.hsr)+' m',l:'18–21'});
+      if(sum.h2>0)vols.push({v:fm(sum.h2)+' m',l:'21–25'});
+      if(sum.h25>0)vols.push({v:fm(sum.h25)+' m',l:'+25'});
+      if(sum.acc>0)vols.push({v:fm(sum.acc),l:'ACC+3'});
+      if(sum.dcc>0)vols.push({v:fm(sum.dcc),l:'DCC+3'});
+      if(vols.length){
+        var vw=(W-96-(vols.length-1)*12)/vols.length;
+        vols.forEach(function(v,i){
+          var x=48+i*(vw+12);
+          rr(x,y,vw,74,12,'#EEF1F8');
+          txt(v.v,x+vw/2,y+40,Math.min(24,vw/5.2),NAVY,true,'center');
+          txt(v.l,x+vw/2,y+62,13,MUT,false,'center');
+        });
+        y+=74+12;
+        txt('Volúmenes estimados desde la biblioteca de ejercicios',48,y+12,16,'#9AA2AC'); y+=36;
+      }
+    } else {
+      rr(48,y,W-96,64,14,'#fff','#E3E6DE');
+      txt('Sin sesión de campo planificada para hoy.',64,y+40,21,MUT); y+=88;
+    }
+    // Gimnasio
+    if(gym){
+      var gN=(gym.exercises||[]).length;
+      var gLines=gym.notes?2:1, gh=26+gLines*30;
+      rr(48,y,W-96,gh,14,'#F0FAF5','#BFE5D2');
+      txt('🏋️ Gimnasio planificado · '+gN+' ejercicio'+(gN===1?'':'s')+(gym.md?' · '+gym.md:''),64,y+38,21,'#1D6B4F',true);
+      if(gym.notes)txt(trunc(gym.notes,W-140,19),64,y+68,19,'#4A7A65');
+      y+=gh+24;
+    }
+    // ── Footer ──
+    ctx.fillStyle=NAVY; ctx.fillRect(0,H-96,W,96);
+    txt('📲 Check-in: '+withWellness+'/'+activos.length,48,H-38,22,'#fff',true);
+    if(next)txt('Próximo: vs '+trunc(next.rival,330,22,true)+' ('+next.cond+')',W/2,H-38,22,'#fff',true,'center');
+    txt('Generado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+' hs',W-48,H-38,20,'rgba(255,255,255,0.75)',false,'right');
+
+    // ── Vista previa + descarga ──
+    var url=cv.toDataURL('image/png');
+    var old=document.getElementById('hoy-informe'); if(old)old.remove();
+    var m=document.createElement('div');
+    m.id='hoy-informe';
+    m.style.cssText='position:fixed;inset:0;background:rgba(13,27,42,.8);z-index:10600;display:flex;align-items:center;justify-content:center;padding:16px';
+    m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:480px;width:100%;max-height:92vh;overflow-y:auto;padding:14px" onclick="event.stopPropagation()">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+        '<div style="font-size:14px;font-weight:800;color:#0D1B2A">📤 Informe del día</div>'+
+        '<button onclick="document.getElementById(\'hoy-informe\').remove()" style="background:#f0f0f0;border:none;border-radius:6px;padding:5px 12px;font-size:14px;cursor:pointer;font-weight:700">✕</button>'+
+      '</div>'+
+      '<img src="'+url+'" style="width:100%;border-radius:10px;border:1px solid #e4e6ec;display:block">'+
+      '<div style="display:flex;gap:8px;margin-top:12px">'+
+        '<a download="informe_'+today+'.png" href="'+url+'" style="flex:1;text-align:center;background:#1D9E75;color:#fff;border-radius:9px;padding:12px;font-size:13px;font-weight:800;text-decoration:none">⬇ Descargar imagen</a>'+
+      '</div>'+
+      '<div style="font-size:10px;color:#aaa;margin-top:8px;text-align:center">Lista para compartir por WhatsApp con el DT y los directivos.</div>'+
+    '</div>';
+    m.onclick=function(){ m.remove(); };
+    document.body.appendChild(m);
+  }catch(e){ alert('No se pudo generar el informe: '+e.message); }
+}
+window.hoyInformeOpen=hoyInformeOpen;
 
 // ── Configuración del semáforo ──
 function hoyOpenCfg(){
