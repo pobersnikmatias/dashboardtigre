@@ -32696,7 +32696,7 @@ function hoyProfileByNorm(){
   });
   return map;
 }
-var HOY_ESTADOS={lesion:{lbl:'🚑 Lesión',cls:'o-les'}, reserva:{lbl:'🔵 Reserva',cls:'o-res'}, primera:{lbl:'🟡 Primera',cls:'o-pri'}};
+var HOY_ESTADOS={lesion:{lbl:'🚑 Lesión',cls:'o-les'}, reserva:{lbl:'🔵 Reserva',cls:'o-res'}, primera:{lbl:'🟡 Primera',cls:'o-pri'}, ausente:{lbl:'⬜ Ausente',cls:''}};
 
 // Fecha local (no UTC): a la noche en ART toISOString ya marca mañana.
 function hoyLocalISO(d){
@@ -32789,6 +32789,16 @@ function hoyPlayerStatus(name, todayISO, profMap){
             reasons:[{t:'out', txt:HOY_ESTADOS[est].lbl+' (estado en Perfiles)'}],
             wellness:null, acwr:null, flag:flag||null};
   }
+
+  // Asistencia del día: A = fuera del día; K = rojo; D = amarillo
+  var asist=hoyAsistGet(todayISO, nameL);
+  if(asist==='A'){
+    return {name:name, nameL:nameL, level:'out', out:'ausente',
+            reasons:[{t:'out', txt:'⬜ Ausente (asistencia de hoy)'}],
+            wellness:hoyWellnessToday(nameL, todayISO), acwr:null, flag:flag||null};
+  }
+  if(asist==='K'){ level='red'; reasons.push({t:'red', txt:'🚑 En kinesiología/médico (asistencia de hoy)'}); }
+  else if(asist==='D'){ ambers++; reasons.push({t:'amber', txt:'Trabajo diferenciado (asistencia de hoy)'}); }
 
   if(flag && (flag.flag==='medico')){
     level='red'; reasons.push({t:'red', txt:'Estado médico/kinesio'+(flag.note?': '+flag.note:'')});
@@ -32886,6 +32896,59 @@ window.hoyTodoDel=hoyTodoDel;
 function hoyTodoKey(ev){ if(ev.key==='Enter'){ ev.preventDefault(); hoyTodoAdd(); } }
 window.hoyTodoKey=hoyTodoKey;
 
+// ── Asistencia diaria en 1 toque ──
+// HOY_ASIST = { 'YYYY-MM-DD': { nombreNormalizado: 'P'|'D'|'K'|'A' } }
+// P Presente · D Diferenciado · K Kinesio/Médico · A Ausente
+var HOY_ASIST={};
+try{ HOY_ASIST=JSON.parse(localStorage.getItem('hoyAsist_v1')||'{}')||{}; }catch(e){ HOY_ASIST={}; }
+var HOY_ASIST_STATES=['P','D','K','A'];
+var HOY_ASIST_META={
+  P:{lbl:'Presente',     ico:'✅', col:'#1D9E75', bg:'#edfaf3', bd:'#1D9E7555'},
+  D:{lbl:'Diferenciado', ico:'🟡', col:'#9A6A1B', bg:'#fdf3e2', bd:'#E8A13C77'},
+  K:{lbl:'Kinesio/Méd.', ico:'🚑', col:'#D9534F', bg:'#fdeeee', bd:'#D9534F66'},
+  A:{lbl:'Ausente',      ico:'⬜', col:'#888',    bg:'#f2f2f2', bd:'#ccc'}
+};
+function hoySaveAsist(){
+  // Poda: conservar solo los últimos 120 días para que el registro viaje liviano
+  try{
+    var keys=Object.keys(HOY_ASIST).sort();
+    while(keys.length>120){ delete HOY_ASIST[keys.shift()]; }
+    localStorage.setItem('hoyAsist_v1', JSON.stringify(HOY_ASIST));
+  }catch(e){}
+  hoySyncCloud();
+}
+function hoyAsistGet(dateISO, nameL){ return (HOY_ASIST[dateISO]||{})[nameL]||null; }
+function hoyAsistCycle(nameL){
+  var today=hoyLocalISO();
+  if(!HOY_ASIST[today])HOY_ASIST[today]={};
+  var cur=HOY_ASIST[today][nameL];
+  var next=cur?HOY_ASIST_STATES[(HOY_ASIST_STATES.indexOf(cur)+1)%HOY_ASIST_STATES.length]:'P';
+  HOY_ASIST[today][nameL]=next;
+  hoySaveAsist(); hoyRender();
+}
+window.hoyAsistCycle=hoyAsistCycle;
+function hoyAsistAllPresent(){
+  var today=hoyLocalISO();
+  if(!HOY_ASIST[today])HOY_ASIST[today]={};
+  var profMap=hoyProfileByNorm();
+  hoyRoster().forEach(function(n){
+    var nameL=hoyNorm(n);
+    var prof=profMap[nameL];
+    if(prof&&HOY_ESTADOS[prof.estado])return;            // Primera/Reserva/Lesión no se marcan
+    if(!HOY_ASIST[today][nameL])HOY_ASIST[today][nameL]='P'; // no pisa excepciones ya marcadas
+  });
+  hoySaveAsist(); hoyRender();
+}
+window.hoyAsistAllPresent=hoyAsistAllPresent;
+// % de disponibilidad de un día: P sobre el total marcado
+function hoyAsistPct(dateISO){
+  var day=HOY_ASIST[dateISO]||{};
+  var vals=Object.values(day);
+  if(!vals.length)return null;
+  var p=vals.filter(function(v){return v==='P';}).length;
+  return {pct:Math.round(p*100/vals.length), p:p, tot:vals.length};
+}
+
 // ── Próximo partido (primer fixture sin resultado) ──
 function hoyNextMatch(){
   if(typeof FIX_FIXTURE==='undefined' || !FIX_FIXTURE.length) return null;
@@ -32942,6 +33005,38 @@ function hoyRender(){
   }).join('');
   if(nN>0) alertsHtml+='<div class="hoy-alert"><div class="ic" style="background:#f2f2f2">⚪</div><div><b>'+nN+' jugador'+(nN===1?'':'es')+'</b> todavía sin check-in de wellness hoy.</div></div>';
   if(!alertsHtml) alertsHtml='<div style="font-size:12px;color:#1D9E75;padding:6px 0">✓ Sin alertas: plantel completo en verde.</div>';
+
+  // ── Asistencia de hoy: 1 toque cicla P → D → K → A ──
+  var asistDay=HOY_ASIST[today]||{};
+  var asistables=statuses.filter(function(s){ return !(s.level==='out'&&s.out!=='ausente'); }); // Primera/Reserva/Lesión afuera
+  var pct=hoyAsistPct(today);
+  var pct7=(function(){
+    var acc=0,nd=0;
+    for(var i=1;i<=7;i++){
+      var d=new Date(today+'T12:00:00'); d.setDate(d.getDate()-i);
+      var r=hoyAsistPct(hoyLocalISO(d));
+      if(r){acc+=r.pct;nd++;}
+    }
+    return nd?Math.round(acc/nd):null;
+  })();
+  var asistHeadHtml='<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+
+    (pct?'<span class="hoy-count '+(pct.pct>=85?'g':(pct.pct>=70?'y':'r'))+'">'+pct.pct+'% disponible ('+pct.p+'/'+pct.tot+')</span>':'')+
+    (pct7!=null?'<span class="hoy-count n">7d: '+pct7+'%</span>':'')+
+    '</span>';
+  var marcados=Object.keys(asistDay).length;
+  var asistHtml='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:9px">'+
+    '<button class="hoy-btn" style="background:#1D9E75;padding:8px 14px" onclick="hoyAsistAllPresent()">✓ Todos presentes</button>'+
+    '<span style="font-size:10px;color:#999">Después tocá solo las excepciones: cada toque cambia Presente → Diferenciado → Kinesio → Ausente'+(marcados?'':' · <b>sin marcar todavía</b>')+'</span>'+
+  '</div>'+
+  '<div class="hoy-sem">'+
+    asistables.map(function(s){
+      var st=asistDay[s.nameL]||null;
+      var meta=st?HOY_ASIST_META[st]:null;
+      return '<div class="hoy-pl" style="'+(meta?('background:'+meta.bg+';border-color:'+meta.bd):'')+'" onclick="hoyAsistCycle(\''+s.nameL.replace(/'/g,"\\'")+'\')">'+
+        '<b>'+(meta?meta.ico+' ':'')+hoyShortName(s.name)+'</b>'+
+        '<small style="'+(meta?('color:'+meta.col+';font-weight:700'):'')+'">'+(meta?meta.lbl:'sin marcar')+'</small></div>';
+    }).join('')+
+  '</div>';
 
   // ── Sesión de hoy ──
   function hoyVolsHtml(sum){
@@ -33042,6 +33137,7 @@ function hoyRender(){
           (statuses.length?('<div class="hoy-sem">'+semHtml+'</div>'):'<div style="font-size:12px;color:#888">Sin jugadores registrados todavía. Se toman de perfiles, GPS y wellness.</div>')+
           '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Semáforo = wellness de hoy (dolor, ítems bajos)'+(HOY_CFG.useACWR?' + ACWR (sRPE 7d/28d)':'')+' + estado del CT. Primera/Reserva/Lesión salen del estado en Perfiles. Tocá un jugador para el detalle. ⚙ para configurar.</div>'+
         '</div>'+
+        '<div class="hoy-card"><h3>📋 Asistencia de hoy'+asistHeadHtml+'</h3>'+asistHtml+'</div>'+
         '<div class="hoy-card"><h3>⚠️ Alertas de hoy</h3>'+alertsHtml+'</div>'+
       '</div>'+
       '<div style="display:flex;flex-direction:column;gap:14px">'+
@@ -33262,7 +33358,8 @@ function hoyInformeOpen(){
     }
     // ── Footer ──
     ctx.fillStyle=NAVY; ctx.fillRect(0,H-96,W,96);
-    txt('📲 Check-in: '+withWellness+'/'+activos.length,48,H-38,22,'#fff',true);
+    var _ap=hoyAsistPct(today);
+    txt('📲 Check-in: '+withWellness+'/'+activos.length+(_ap?('   ·   Disponibilidad: '+_ap.pct+'%'):''),48,H-38,22,'#fff',true);
     if(next)txt('Próximo: vs '+trunc(next.rival,330,22,true)+' ('+next.cond+')',W/2,H-38,22,'#fff',true,'center');
     txt('Generado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+' hs',W-48,H-38,20,'rgba(255,255,255,0.75)',false,'right');
 
@@ -33374,7 +33471,7 @@ function hoyBootRetry(){
 document.addEventListener('DOMContentLoaded', function(){
   try{
     if(typeof SB_SETTINGS_KEYS!=='undefined'){
-      ['HOY_CFG','HOY_FLAGS','HOY_TODOS'].forEach(function(k){
+      ['HOY_CFG','HOY_FLAGS','HOY_TODOS','HOY_ASIST'].forEach(function(k){
         if(SB_SETTINGS_KEYS.indexOf(k)<0)SB_SETTINGS_KEYS.push(k);
       });
     }
@@ -33382,11 +33479,12 @@ document.addEventListener('DOMContentLoaded', function(){
       var _origApplyHoy=window._sbApplySettingRow;
       window._sbApplySettingRow=function(row){
         _origApplyHoy(row);
-        if(row&&(row.key==='HOY_CFG'||row.key==='HOY_FLAGS'||row.key==='HOY_TODOS')){
+        if(row&&(row.key==='HOY_CFG'||row.key==='HOY_FLAGS'||row.key==='HOY_TODOS'||row.key==='HOY_ASIST')){
           try{
             if(row.key==='HOY_CFG')localStorage.setItem('hoyCfg_v1',JSON.stringify(HOY_CFG));
             if(row.key==='HOY_FLAGS')localStorage.setItem('hoyFlags_v1',JSON.stringify(HOY_FLAGS));
             if(row.key==='HOY_TODOS')localStorage.setItem('hoyTodos_v1',JSON.stringify(HOY_TODOS));
+            if(row.key==='HOY_ASIST')localStorage.setItem('hoyAsist_v1',JSON.stringify(HOY_ASIST));
           }catch(e){}
           try{ if(typeof mainView!=='undefined'&&mainView==='hoy')hoyRender(); }catch(e){}
         }
