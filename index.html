@@ -764,6 +764,7 @@ body.sb-show{visibility:visible}
     <button class="mobile-nav-item" onclick="setMainView('gym')" data-view="gym"><span class="mn-icon">💪</span><span class="mn-label">Prep. física</span></button>
     <button class="mobile-nav-item" onclick="setMainView('train')" data-view="train"><span class="mn-icon">📋</span><span class="mn-label">Biblioteca de ejercicios</span></button>
     <button class="mobile-nav-item" onclick="mobileCloseDrawer&&mobileCloseDrawer();clubOpenSettings()"><span class="mn-icon">🎨</span><span class="mn-label">Identidad del club</span></button>
+    <button class="mobile-nav-item" onclick="mobileCloseDrawer&&mobileCloseDrawer();ckioEnter()"><span class="mn-icon">🔒</span><span class="mn-label">Check IN-OUT (vestuario)</span></button>
   </div>
 </div>
 
@@ -31297,6 +31298,154 @@ window.planNewExSave = planNewExSave;
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════
+// CHECK IN-OUT — modo tablet de vestuario (pantalla bloqueada de check-in)
+// ---------------------------------------------------------------------------
+// · Se activa con un botón desde el dashboard (pestaña Hoy o menú móvil).
+//   También auto-entra si la URL trae #checkin (para el ícono en el home
+//   de la tablet). NO es otra app ni otro link: es esta misma página.
+// · Muestra SOLO dos acciones gigantes: Check-IN (wellness) y Check-OUT
+//   (PSE). Reusa los formularios existentes (cargaSelfEntry), que abren
+//   por encima (z 11000 > 10800). El resto del dashboard queda inaccesible.
+// · Salida solo con PIN del CT (se crea la primera vez, queda en el
+//   dispositivo). Sin PIN por jugador, por decisión de producto.
+// ═══════════════════════════════════════════════════════════════════════════
+function ckioGetPin(){ try{ return localStorage.getItem('ckioPin_v1')||null; }catch(e){ return null; } }
+function ckioSetPin(p){ try{ localStorage.setItem('ckioPin_v1',p); }catch(e){} }
+
+function ckioCreatePinFlow(){
+  var p1=prompt('Creá el PIN de salida del modo Check IN-OUT (4 a 6 dígitos).\nSolo el CT lo conoce: es lo único que permite volver al dashboard.');
+  if(p1===null)return null;
+  p1=(p1||'').trim();
+  if(!/^\d{4,6}$/.test(p1)){ alert('El PIN debe tener entre 4 y 6 dígitos numéricos.'); return null; }
+  var p2=prompt('Repetí el PIN para confirmar:');
+  if(p2===null)return null;
+  if(p2.trim()!==p1){ alert('Los PIN no coinciden. Probá de nuevo.'); return null; }
+  ckioSetPin(p1);
+  return p1;
+}
+
+function ckioTodayCount(){
+  var today, n=0, seen={};
+  try{
+    var d=new Date();
+    today=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    var pd=(typeof cargaParseDate==='function')?cargaParseDate:function(x){return String(x||'').slice(0,10);};
+    var nm=(typeof cargaNormName==='function')?cargaNormName:function(s){return (s||'').toLowerCase();};
+    (typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:[]).forEach(function(r){ if(pd(r.date)===today)seen['w'+nm(r.name)]=1; });
+    var w=Object.keys(seen).length; seen={};
+    (typeof PSE_DATA!=='undefined'?PSE_DATA:[]).forEach(function(r){ if(pd(r.date)===today)seen['p'+nm(r.name)]=1; });
+    return {w:w, p:Object.keys(seen).length};
+  }catch(e){ return {w:0,p:0}; }
+}
+
+var _ckioTimer=null;
+function ckioEnter(){
+  if(!ckioGetPin()){ if(!ckioCreatePinFlow())return; }
+  var old=document.getElementById('ckio-overlay'); if(old)old.remove();
+  var cs=(typeof CLUB_SETTINGS!=='undefined')?CLUB_SETTINGS:{name:'',category:'',c1:'#1E2A52',c2:'#3B4D88'};
+  var escEl=document.getElementById('club-escudo-hdr')||document.getElementById('club-escudo-splash');
+  var escSrc=(cs.escudo)||(escEl?escEl.src:'');
+  var fecha=new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+  fecha=fecha.charAt(0).toUpperCase()+fecha.slice(1);
+  var m=document.createElement('div');
+  m.id='ckio-overlay';
+  m.style.cssText='position:fixed;inset:0;z-index:10800;background:linear-gradient(160deg,'+cs.c1+','+cs.c2+');display:flex;flex-direction:column;align-items:center;overflow-y:auto;-webkit-user-select:none;user-select:none';
+  m.innerHTML=
+    '<div style="display:flex;align-items:center;gap:14px;padding:26px 24px 6px;width:100%;max-width:640px;box-sizing:border-box">'+
+      (escSrc?'<img src="'+escSrc+'" style="width:58px;height:58px;object-fit:contain;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.35))">':'')+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="color:#fff;font-size:19px;font-weight:800;font-family:system-ui,sans-serif;line-height:1.15">'+(cs.name||'')+'</div>'+
+        '<div style="color:rgba(255,255,255,0.75);font-size:12.5px;font-family:system-ui,sans-serif">'+(cs.category?cs.category+' · ':'')+fecha+'</div>'+
+      '</div>'+
+      '<button onclick="ckioExitAsk()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:rgba(255,255,255,0.8);border-radius:9px;padding:8px 13px;font-size:10.5px;font-weight:700;cursor:pointer;font-family:system-ui,sans-serif">STAFF · SALIR</button>'+
+    '</div>'+
+    '<div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:18px;width:100%;max-width:640px;padding:10px 24px 8px;box-sizing:border-box">'+
+      '<div style="text-align:center;color:#fff;font-family:system-ui,sans-serif;font-size:24px;font-weight:800;letter-spacing:.02em;margin-bottom:2px">Check IN-OUT</div>'+
+      '<div style="text-align:center;color:rgba(255,255,255,0.7);font-family:system-ui,sans-serif;font-size:13px;margin-top:-12px">Tocá tu opción, buscá tu nombre y respondé</div>'+
+      '<button onclick="cargaSelfEntry(\'wellness\')" style="background:#1D9E75;border:none;border-radius:18px;padding:26px 20px;cursor:pointer;box-shadow:0 10px 28px rgba(0,0,0,0.28);text-align:left;display:flex;align-items:center;gap:18px">'+
+        '<span style="font-size:42px">🌅</span>'+
+        '<span style="font-family:system-ui,sans-serif"><b style="display:block;color:#fff;font-size:23px;font-weight:800">Check-IN · Wellness</b>'+
+        '<small style="color:rgba(255,255,255,0.85);font-size:13px">Al llegar: sueño, energía, dolor muscular. 40 segundos.</small></span>'+
+      '</button>'+
+      '<button onclick="cargaSelfEntry(\'pse\')" style="background:#D85A30;border:none;border-radius:18px;padding:26px 20px;cursor:pointer;box-shadow:0 10px 28px rgba(0,0,0,0.28);text-align:left;display:flex;align-items:center;gap:18px">'+
+        '<span style="font-size:42px">🌇</span>'+
+        '<span style="font-family:system-ui,sans-serif"><b style="display:block;color:#fff;font-size:23px;font-weight:800">Check-OUT · PSE</b>'+
+        '<small style="color:rgba(255,255,255,0.85);font-size:13px">Después de entrenar: ¿qué tan dura fue la sesión?</small></span>'+
+      '</button>'+
+      '<div id="ckio-counts" style="text-align:center;color:rgba(255,255,255,0.65);font-family:system-ui,sans-serif;font-size:12px;padding-top:4px"></div>'+
+    '</div>'+
+    '<div style="padding:10px 24px 22px;color:rgba(255,255,255,0.4);font-family:system-ui,sans-serif;font-size:10px;text-align:center">Modo vestuario · la tablet queda bloqueada en esta pantalla</div>';
+  document.body.appendChild(m);
+  try{ if(location.hash!=='#checkin')location.hash='#checkin'; }catch(e){}
+  function upd(){
+    var c=ckioTodayCount(), el=document.getElementById('ckio-counts');
+    if(el)el.textContent='Hoy respondieron · Wellness: '+c.w+' · PSE: '+c.p;
+  }
+  upd();
+  if(_ckioTimer)clearInterval(_ckioTimer);
+  _ckioTimer=setInterval(function(){ if(!document.getElementById('ckio-overlay')){clearInterval(_ckioTimer);_ckioTimer=null;return;} upd(); },20000);
+}
+window.ckioEnter=ckioEnter;
+
+var _ckioFails=0;
+function ckioExitAsk(){
+  var old=document.getElementById('ckio-exit'); if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='ckio-exit';
+  m.style.cssText='position:fixed;inset:0;z-index:10900;background:rgba(13,27,42,0.75);display:flex;align-items:center;justify-content:center;padding:20px';
+  m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:320px;width:100%;padding:20px;font-family:system-ui,sans-serif" onclick="event.stopPropagation()">'+
+    '<div style="font-size:14px;font-weight:800;color:#0D1B2A;margin-bottom:10px">🔒 PIN del CT para salir</div>'+
+    '<input id="ckio-pin-inp" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" '+
+      'style="width:100%;box-sizing:border-box;padding:13px;font-size:22px;text-align:center;letter-spacing:8px;border:1px solid #ddd;border-radius:9px" placeholder="••••">'+
+    '<div id="ckio-pin-err" style="font-size:10.5px;color:#D9534F;font-weight:700;min-height:16px;padding-top:5px"></div>'+
+    '<div style="display:flex;gap:8px;margin-top:6px">'+
+      '<button onclick="document.getElementById(\'ckio-exit\').remove()" style="flex:1;background:#f0f0f0;border:none;border-radius:9px;padding:11px;font-size:12px;font-weight:700;cursor:pointer">Cancelar</button>'+
+      '<button onclick="ckioExitTry()" style="flex:1;background:#1E2A52;color:#fff;border:none;border-radius:9px;padding:11px;font-size:12px;font-weight:800;cursor:pointer">Salir</button>'+
+    '</div></div>';
+  m.onclick=function(){ m.remove(); };
+  document.body.appendChild(m);
+  var inp=document.getElementById('ckio-pin-inp');
+  if(inp){ inp.focus(); inp.onkeydown=function(e){ if(e.key==='Enter')ckioExitTry(); }; }
+}
+window.ckioExitAsk=ckioExitAsk;
+
+function ckioExitTry(){
+  var inp=document.getElementById('ckio-pin-inp');
+  var val=inp?inp.value.trim():'';
+  if(val===ckioGetPin()){
+    _ckioFails=0;
+    var ex=document.getElementById('ckio-exit'); if(ex)ex.remove();
+    var ov=document.getElementById('ckio-overlay'); if(ov)ov.remove();
+    if(_ckioTimer){clearInterval(_ckioTimer);_ckioTimer=null;}
+    try{ if(location.hash==='#checkin')history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+  } else {
+    _ckioFails++;
+    var err=document.getElementById('ckio-pin-err');
+    if(err)err.textContent=_ckioFails>=3?'PIN incorrecto. Si lo olvidaste: borrá #checkin de la dirección y recargá la página.':'PIN incorrecto.';
+    if(inp){ inp.value=''; inp.focus(); }
+  }
+}
+window.ckioExitTry=ckioExitTry;
+
+function ckioChangePin(){
+  var cur=ckioGetPin();
+  if(cur){
+    var v=prompt('PIN actual:');
+    if(v===null)return;
+    if((v||'').trim()!==cur){ alert('PIN incorrecto.'); return; }
+  }
+  ckioCreatePinFlow();
+}
+window.ckioChangePin=ckioChangePin;
+
+// Auto-entrada por URL (#checkin) — para el ícono en el home de la tablet
+document.addEventListener('DOMContentLoaded',function(){
+  try{ if(location.hash&&location.hash.indexOf('checkin')>=0)setTimeout(ckioEnter,400); }catch(e){}
+});
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
 // MOTOR DE TEMAS (club_settings) — identidad del club configurable
 // ---------------------------------------------------------------------------
 // CLUB_SETTINGS: nombre, categoría (texto de display), escudo (dataURL) y
@@ -32890,6 +33039,7 @@ function hoyRender(){
             '<div style="font-size:26px;font-weight:800;color:'+(withWellness>=activos.length&&activos.length?'#1D9E75':'#E8A13C')+'">'+withWellness+'<span style="font-size:13px;color:#aaa">/'+activos.length+'</span></div>'+
             '<div style="font-size:11px;color:#666;line-height:1.4">jugadores disponibles respondieron el wellness de hoy.</div>'+
           '</div>'+
+          '<button class="hoy-btn" style="background:#1E2A52;width:100%;margin-top:10px" onclick="ckioEnter()">🔒 Activar Check IN-OUT (modo tablet vestuario)</button>'+
         '</div>'+
         '<div class="hoy-card"><h3>✅ Pendientes del CT</h3>'+hoyTodosHtml(plan&&plan.day&&plan.items&&plan.items.length?true:false)+'</div>'+
       '</div>'+
@@ -33155,6 +33305,7 @@ function hoyOpenCfg(){
           'Amarillo para jugadores muy por debajo de su carga habitual. Apagado por defecto: con registros con huecos da mucho ruido.')+
     '</div>'+
     '<div style="font-size:10px;color:#aaa;padding:8px 0;border-top:1px dashed #eee">Las alertas de wellness (dolor muscular e ítems bajos) siempre están activas: son el corazón del semáforo. El estado Primera/Reserva/Lesión se cambia en la pestaña Perfiles.</div>'+
+    '<button onclick="ckioChangePin()" style="width:100%;background:#f6f8fd;border:1px solid #d0d8ea;color:#3B4D88;border-radius:9px;padding:10px;font-size:11.5px;font-weight:700;cursor:pointer;margin-top:4px">🔒 Cambiar PIN de salida del Check IN-OUT</button>'+
     '<button onclick="hoySaveCfgFromModal()" style="width:100%;margin-top:8px;background:#1D9E75;color:#fff;border:none;border-radius:9px;padding:12px;font-size:13px;font-weight:800;cursor:pointer">✓ Guardar configuración</button>'+
   '</div>';
   m.onclick=function(){ m.remove(); };
