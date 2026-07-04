@@ -32668,12 +32668,13 @@ document.addEventListener('DOMContentLoaded',function(){
 // ═══════════════════════════════════════════════════════════════════════════
 var HOY_FLAGS = {};
 try{ HOY_FLAGS = JSON.parse(localStorage.getItem('hoyFlags_v1')||'{}') || {}; }catch(e){ HOY_FLAGS = {}; }
-function hoySaveFlags(){ try{ localStorage.setItem('hoyFlags_v1', JSON.stringify(HOY_FLAGS)); }catch(e){} }
+function hoySyncCloud(){ if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} } }
+function hoySaveFlags(){ try{ localStorage.setItem('hoyFlags_v1', JSON.stringify(HOY_FLAGS)); }catch(e){} hoySyncCloud(); }
 
 // Configuración de la pestaña Hoy (persistente)
 var HOY_CFG={useACWR:true, acwrHigh:1.5, acwrWarn:1.3, lowWarn:false};
 try{ var _hc=JSON.parse(localStorage.getItem('hoyCfg_v1')||'null'); if(_hc)HOY_CFG=Object.assign(HOY_CFG,_hc); }catch(e){}
-function hoySaveCfg(){ try{ localStorage.setItem('hoyCfg_v1', JSON.stringify(HOY_CFG)); }catch(e){} }
+function hoySaveCfg(){ try{ localStorage.setItem('hoyCfg_v1', JSON.stringify(HOY_CFG)); }catch(e){} hoySyncCloud(); }
 
 // Perfiles indexados por nombre normalizado (la clave real conserva acentos)
 function hoyProfileByNorm(){
@@ -32852,7 +32853,7 @@ function hoyEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/<
 // ── Pendientes del CT (checklist persistente) ──
 var HOY_TODOS=[];
 try{ HOY_TODOS=JSON.parse(localStorage.getItem('hoyTodos_v1')||'[]')||[]; }catch(e){ HOY_TODOS=[]; }
-function hoySaveTodos(){ try{ localStorage.setItem('hoyTodos_v1', JSON.stringify(HOY_TODOS)); }catch(e){} }
+function hoySaveTodos(){ try{ localStorage.setItem('hoyTodos_v1', JSON.stringify(HOY_TODOS)); }catch(e){} hoySyncCloud(); }
 function hoyTodoAdd(){
   var inp=document.getElementById('hoy-todo-inp'); if(!inp)return;
   var txt=(inp.value||'').trim(); if(!txt)return;
@@ -33355,6 +33356,34 @@ function hoyBootRetry(){
     }catch(e){ clearInterval(iv); }
   },1500);
 }
+
+// Persistencia en la nube de la configuración de Hoy (semáforo, estados
+// manuales del CT y pendientes): viajan entre dispositivos por app_settings,
+// igual que CLUB_SETTINGS. localStorage queda como caché rápida.
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    if(typeof SB_SETTINGS_KEYS!=='undefined'){
+      ['HOY_CFG','HOY_FLAGS','HOY_TODOS'].forEach(function(k){
+        if(SB_SETTINGS_KEYS.indexOf(k)<0)SB_SETTINGS_KEYS.push(k);
+      });
+    }
+    if(typeof window._sbApplySettingRow==='function'&&!window._sbApplySettingRowHoyWrapped){
+      var _origApplyHoy=window._sbApplySettingRow;
+      window._sbApplySettingRow=function(row){
+        _origApplyHoy(row);
+        if(row&&(row.key==='HOY_CFG'||row.key==='HOY_FLAGS'||row.key==='HOY_TODOS')){
+          try{
+            if(row.key==='HOY_CFG')localStorage.setItem('hoyCfg_v1',JSON.stringify(HOY_CFG));
+            if(row.key==='HOY_FLAGS')localStorage.setItem('hoyFlags_v1',JSON.stringify(HOY_FLAGS));
+            if(row.key==='HOY_TODOS')localStorage.setItem('hoyTodos_v1',JSON.stringify(HOY_TODOS));
+          }catch(e){}
+          try{ if(typeof mainView!=='undefined'&&mainView==='hoy')hoyRender(); }catch(e){}
+        }
+      };
+      window._sbApplySettingRowHoyWrapped=true;
+    }
+  }catch(e){}
+});
 
 // Arranque: Hoy es la pantalla de inicio. Registrado al final → corre después
 // de que loadData() ya restauró todo (loadData es síncrono al parsear).
