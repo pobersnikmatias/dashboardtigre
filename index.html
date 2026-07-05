@@ -4247,44 +4247,95 @@ function _buildFullPayload(stripImages){
   };
 }
 
-function saveData(){
-  var buildPayload=_buildFullPayload;
-  // Attempt 1: full save. Attempt 2 (on quota error): save without exercise
-  // images. localStorage has a ~5MB cap and base64 exercise photos can blow it,
-  // which previously made the WHOLE save fail silently — including the Carga
-  // tab data. Now we degrade gracefully and tell the user.
+// ═══════════════════════════════════════════════════════════════════════════
+// DSTORE — persistencia en IndexedDB (v92)
+// ---------------------------------------------------------------------------
+// El payload principal vive en IndexedDB (sin el techo de ~5MB de
+// localStorage). localStorage queda como ESPEJO best-effort: acelera el
+// arranque (lectura síncrona al parsear) y si su cuota se llena, no pasa
+// nada — IndexedDB tiene la copia real y el overlay del boot la aplica.
+// ═══════════════════════════════════════════════════════════════════════════
+var _dsReady=(function(){
   try{
-    localStorage.setItem(STORAGE_KEY,JSON.stringify(buildPayload(false)));
+    if(typeof indexedDB==='undefined')return Promise.resolve(null);
+    return new Promise(function(res){
+      var rq=indexedDB.open('tigre_dash',1);
+      rq.onupgradeneeded=function(){ try{ rq.result.createObjectStore('kv'); }catch(e){} };
+      rq.onsuccess=function(){ res(rq.result); };
+      rq.onerror=function(){ console.warn('[dstore] IndexedDB no disponible:',rq.error); res(null); };
+      rq.onblocked=function(){ res(null); };
+    });
+  }catch(e){ return Promise.resolve(null); }
+})();
+function dstoreSet(key,val){
+  return _dsReady.then(function(db){
+    if(!db)return false;
+    return new Promise(function(res){
+      try{
+        var tx=db.transaction('kv','readwrite');
+        tx.objectStore('kv').put(val,key);
+        tx.oncomplete=function(){ res(true); };
+        tx.onerror=function(){ console.warn('[dstore] set error:',tx.error); res(false); };
+      }catch(e){ console.warn('[dstore] set:',e); res(false); }
+    });
+  });
+}
+function dstoreGet(key){
+  return _dsReady.then(function(db){
+    if(!db)return null;
+    return new Promise(function(res){
+      try{
+        var rq=db.transaction('kv','readonly').objectStore('kv').get(key);
+        rq.onsuccess=function(){ res(rq.result==null?null:rq.result); };
+        rq.onerror=function(){ res(null); };
+      }catch(e){ res(null); }
+    });
+  });
+}
+function dstoreDel(key){
+  return _dsReady.then(function(db){
+    if(!db)return false;
+    return new Promise(function(res){
+      try{
+        var tx=db.transaction('kv','readwrite');
+        tx.objectStore('kv').delete(key);
+        tx.oncomplete=function(){ res(true); };
+        tx.onerror=function(){ res(false); };
+      }catch(e){ res(false); }
+    });
+  });
+}
+window.dstoreSet=dstoreSet; window.dstoreGet=dstoreGet; window.dstoreDel=dstoreDel;
+
+function saveData(){
+  // v92: IndexedDB es el hogar real del payload; localStorage es solo un
+  // espejo para el arranque rápido. Si el espejo no entra (cuota), no es
+  // un problema: el overlay del boot aplica la copia de IndexedDB.
+  var payload, json;
+  try{
+    payload=_buildFullPayload(false);
+    payload.__ts=Date.now();
+    json=JSON.stringify(payload);
+  }catch(e){ console.warn('saveData build error:',e); return; }
+  try{ dstoreSet(STORAGE_KEY,json); }catch(e){ console.warn('saveData IDB:',e); }
+  try{
+    localStorage.setItem(STORAGE_KEY,json);
   }catch(e){
     var isQuota = e && (e.name==='QuotaExceededError' || e.code===22 || e.code===1014 ||
                         /quota/i.test(e.message||''));
     if(isQuota){
-      try{
-        localStorage.setItem(STORAGE_KEY,JSON.stringify(buildPayload(true)));
-        if(typeof window!=='undefined' && !window._quotaWarned){
-          window._quotaWarned=true;
-          setTimeout(function(){
-            alert('⚠️ El almacenamiento local está lleno.\n\nTus datos se guardaron, pero las imágenes de ejercicios del gimnasio NO se pudieron guardar (ocupan demasiado espacio).\n\nPara liberar espacio: borrá imágenes de ejercicios que no uses, o exportá una copia de seguridad.');
-          },300);
-        }
-      }catch(e2){
-        console.error('saveData failed even without images:',e2);
-        if(typeof window!=='undefined' && !window._quotaWarned){
-          window._quotaWarned=true;
-          setTimeout(function(){
-            alert('⚠️ No se pudieron guardar los datos: el almacenamiento local está lleno y no se pudo liberar espacio suficiente. Exportá una copia de seguridad y borrá datos viejos.');
-          },300);
-        }
+      if(!window._lsMirrorWarned){
+        window._lsMirrorWarned=true;
+        console.info('[dstore] Espejo localStorage lleno; los datos viven en IndexedDB (todo OK).');
       }
     } else {
-      console.warn('saveData error:',e);
+      console.warn('saveData espejo LS:',e);
     }
   }
 }
-function loadData(){
+function applyPayload(p){
   try{
-    const s=localStorage.getItem(STORAGE_KEY);if(!s)return false;
-    const p=JSON.parse(s);
+    if(!p)return false;
     if(p.D&&p.D.length){D.length=0;p.D.forEach(r=>D.push(r));}
     if(p.MATCHES&&p.MATCHES.length){MATCHES.length=0;p.MATCHES.forEach(m=>MATCHES.push(m));}
     if(p.CATS){CATS.length=0;p.CATS.forEach(c=>CATS.push(c));}
@@ -4320,11 +4371,24 @@ function loadData(){
     if(p.CARGA_NAME_ALIASES && typeof CARGA_NAME_ALIASES!=='undefined'){CARGA_NAME_ALIASES=p.CARGA_NAME_ALIASES;}
     if(p.CARGA_LOAD_CONFIG && typeof CARGA_LOAD_CONFIG!=='undefined'){CARGA_LOAD_CONFIG=p.CARGA_LOAD_CONFIG;}
     return true;
+  }catch(e){console.warn('applyPayload error:',e);return false;}
+}
+window.applyPayload=applyPayload;
+function loadData(){
+  try{
+    const s=localStorage.getItem(STORAGE_KEY);if(!s)return false;
+    const p=JSON.parse(s);
+    window.__lsPayloadTs=p.__ts||0;
+    return applyPayload(p);
   }catch(e){console.warn('loadData error:',e);return false;}
 }
 function clearSavedData(){
   if(!confirm('¿Borrar datos guardados y volver al dataset original?'))return;
-  localStorage.removeItem(STORAGE_KEY);location.reload();
+  try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+  var done=false;
+  function go(){ if(done)return; done=true; location.reload(); }
+  try{ dstoreDel(STORAGE_KEY).then(go); }catch(e){ go(); }
+  setTimeout(go,600); // red de seguridad si IDB no responde
 }
 window.clearSavedData=clearSavedData;
 
@@ -4450,6 +4514,35 @@ function refresh(){
 
 // Cargar datos guardados antes de inicializar
 const hadSaved=loadData();
+
+// ── Overlay de IndexedDB (v92) ──
+// El arranque leyó el espejo localStorage (rápido y síncrono). Ahora se
+// consulta IndexedDB: si tiene un payload más nuevo (el espejo dejó de
+// actualizarse por cuota llena), se aplica y se re-renderiza la vista.
+// Si IndexedDB está vacío (primera vez), se siembra desde localStorage.
+(function(){
+  if(typeof dstoreGet!=='function')return;
+  dstoreGet(STORAGE_KEY).then(function(s){
+    if(s==null){
+      try{
+        var raw=localStorage.getItem(STORAGE_KEY);
+        if(raw){ dstoreSet(STORAGE_KEY,raw); console.log('[dstore] Migración inicial: payload sembrado en IndexedDB.'); }
+      }catch(e){}
+      return;
+    }
+    var p=null; try{ p=JSON.parse(s); }catch(e){ console.warn('[dstore] payload IDB corrupto, se ignora.'); return; }
+    var lsTs=window.__lsPayloadTs||0;
+    if(!p.__ts || p.__ts<=lsTs) return; // el espejo estaba al día
+    console.log('[dstore] Espejo localStorage desactualizado; aplicando IndexedDB ('+new Date(p.__ts).toLocaleString('es-AR')+').');
+    function applyAll(){
+      try{ applyPayload(p); }catch(e){ console.warn('[dstore] overlay apply:',e); }
+      try{ if(typeof gymLoadDataFromPayload==='function')gymLoadDataFromPayload(p); }catch(e){}
+      try{ if(typeof mainView!=='undefined'&&typeof setMainView==='function')setMainView(mainView); }catch(e){}
+    }
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',applyAll);
+    else applyAll();
+  });
+})();
 rebuildCatBtns();
 rebuildCatSelects();
 mcRebuildWeekSel();
