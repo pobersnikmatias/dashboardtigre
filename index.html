@@ -22970,12 +22970,52 @@ function cargaRenderWellPse(){
     return;
   }
 
+  // ─── Barra de contexto: asignar microciclo/MD a días sin GPS ───
+  var ctxBar=(function(){
+    var today=(function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+    var wks=cargaMicroWeeksByDate();
+    // ¿Hay registros de hoy sin semana? (el motivo de todo esto)
+    var orphans=0;
+    var check=function(arr){ (arr||[]).forEach(function(r){
+      var iso=cargaParseDate(r.date)||r.date;
+      if(iso===today && !cargaMicroWeekForDate(iso,wks))orphans++;
+    });};
+    check(typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:[]);
+    check(typeof PSE_DATA!=='undefined'?PSE_DATA:[]);
+    var cur=CARGA_WEEK_CTX[today];
+    var curWkObj=cargaMicroWeekForDate(today,wks);
+    // opciones de semana: las existentes + nueva
+    var wkNames=wks.map(function(w){return w.week;});
+    var opts=wkNames.map(function(n){
+      return '<option value="'+n.replace(/"/g,'&quot;')+'"'+((cur&&cur.week===n)||((!cur)&&curWkObj&&curWkObj.week===n)?' selected':'')+'>'+n+'</option>';
+    }).join('')+'<option value="__new">➕ Nueva semana…</option>';
+    var dayOpts='<option value=""></option>'+DAY_ORDER.map(function(d){
+      return '<option value="'+d+'"'+(cur&&cur.day===d?' selected':'')+'>'+d+'</option>';
+    }).join('');
+    var status='';
+    if(cur){
+      status='<span style="font-size:10px;color:#1D9E75;font-weight:700">📌 Hoy: '+cur.week+(cur.day?' · '+cur.day:'')+' <span onclick="cargaCtxDel(\''+today+'\')" style="cursor:pointer;color:#bbb" title="Quitar asignación">✕</span></span>';
+    } else if(orphans>0){
+      status='<span style="font-size:10px;color:#D9534F;font-weight:700">⚠ '+orphans+' registro'+(orphans===1?'':'s')+' de hoy sin microciclo — asignalo acá para verlos en el análisis</span>';
+    } else if(curWkObj){
+      status='<span style="font-size:10px;color:#999">Hoy cae en '+curWkObj.week+' (por sesiones GPS)</span>';
+    }
+    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f6f8fd;border:1px solid #d0d8ea;border-radius:9px;padding:8px 12px;margin-bottom:12px">'+
+      '<span style="font-size:10.5px;font-weight:800;color:#3B4D88">📌 Microciclo del día</span>'+
+      '<input type="date" id="carga-ctx-date" value="'+today+'" style="padding:4px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px">'+
+      '<select id="carga-ctx-week" style="padding:4px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;background:#fff;min-width:130px">'+opts+'</select>'+
+      '<select id="carga-ctx-day" style="padding:4px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;background:#fff">'+dayOpts+'</select>'+
+      '<button onclick="cargaCtxSave()" style="padding:5px 14px;border:none;background:#1D9E75;color:#fff;font-size:11px;font-weight:700;border-radius:6px;cursor:pointer">Asignar</button>'+
+      status+
+    '</div>';
+  })();
+
   // ─── Switch Equipo / Individual + (en individual) desplegable de jugador ───
   var players = _cargaWPCollectPlayers();
   if(_cargaWPMode==='individual' && (!_cargaWPPlayer || players.indexOf(_cargaWPPlayer)<0)){
     _cargaWPPlayer = players[0] || '';
   }
-  var switchHtml = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">'+
+  var switchHtml = ctxBar + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">'+
     '<div style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden">'+
       '<button onclick="cargaWPSetMode(\'team\')" style="padding:6px 14px;border:none;background:'+(_cargaWPMode==='team'?'#3B4D88':'none')+';color:'+(_cargaWPMode==='team'?'#fff':'#666')+';font-size:11px;font-weight:700;cursor:pointer">👥 Equipo</button>'+
       '<button onclick="cargaWPSetMode(\'individual\')" style="padding:6px 14px;border:none;background:'+(_cargaWPMode==='individual'?'#3B4D88':'none')+';color:'+(_cargaWPMode==='individual'?'#fff':'#666')+';font-size:11px;font-weight:700;cursor:pointer">👤 Individual</button>'+
@@ -23887,6 +23927,46 @@ window.cargaEvoSetMetric=cargaEvoSetMetric;
 
 // Para cada semana declarada en MICROCICLO, calcula el rango [fechaMin, fechaMax]
 // y un mapa fecha→día (ej. '2025-04-18'→'MD-1') usando las sesiones declaradas.
+// ═══ Contexto manual de microciclo (fecha → semana + MD) ═══
+// Permite que el CT asigne "hoy es Semana X, MD-N" sin depender de que haya
+// sesiones GPS cargadas. Los registros del Check IN-OUT de ese día caen así
+// en la semana correcta del análisis histórico. Sincroniza por app_settings.
+var CARGA_WEEK_CTX={};
+try{ CARGA_WEEK_CTX=JSON.parse(localStorage.getItem('cargaWeekCtx_v1')||'{}')||{}; }catch(e){ CARGA_WEEK_CTX={}; }
+function cargaCtxPersist(){
+  try{
+    var keys=Object.keys(CARGA_WEEK_CTX).sort();
+    while(keys.length>200){ delete CARGA_WEEK_CTX[keys.shift()]; }
+    localStorage.setItem('cargaWeekCtx_v1', JSON.stringify(CARGA_WEEK_CTX));
+  }catch(e){}
+  if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} }
+}
+function cargaCtxSave(){
+  var g=function(id){var el=document.getElementById(id);return el?el.value:'';};
+  var date=g('carga-ctx-date'), week=g('carga-ctx-week'), day=g('carga-ctx-day');
+  if(!date){ alert('Elegí la fecha.'); return; }
+  if(week==='__new'){
+    var n=prompt('Nombre de la semana nueva (ej: Semana 14):');
+    if(n===null)return;
+    n=(n||'').trim();
+    if(!n){ alert('El nombre no puede estar vacío.'); return; }
+    week=n;
+  }
+  if(!week){ alert('Elegí la semana del microciclo.'); return; }
+  CARGA_WEEK_CTX[date]={week:week, day:day||''};
+  cargaCtxPersist();
+  if(typeof cargaRender==='function')cargaRender();
+}
+window.cargaCtxSave=cargaCtxSave;
+function cargaCtxDel(date){
+  if(!CARGA_WEEK_CTX[date])return;
+  if(!confirm('¿Quitar la asignación manual del '+date+'?'))return;
+  delete CARGA_WEEK_CTX[date];
+  cargaCtxPersist();
+  if(typeof cargaRender==='function')cargaRender();
+}
+window.cargaCtxDel=cargaCtxDel;
+
 function cargaMicroWeeksByDate(){
   var byW={};
   (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){
@@ -23898,6 +23978,17 @@ function cargaMicroWeeksByDate(){
       if(f>byW[s.week].end)byW[s.week].end=f;
     }
     if(s.day)byW[s.week].dateToDay[f]=s.day;
+  });
+  // Fusionar el contexto manual del CT: crea/extiende semanas sin GPS.
+  // Las sesiones GPS tienen prioridad en el rótulo del día si coinciden.
+  Object.keys(CARGA_WEEK_CTX||{}).forEach(function(f){
+    var c=CARGA_WEEK_CTX[f]; if(!c||!c.week)return;
+    if(!byW[c.week]){ byW[c.week]={week:c.week,start:f,end:f,dateToDay:{}}; }
+    else{
+      if(f<byW[c.week].start)byW[c.week].start=f;
+      if(f>byW[c.week].end)byW[c.week].end=f;
+    }
+    if(c.day && !byW[c.week].dateToDay[f])byW[c.week].dateToDay[f]=c.day;
   });
   // Ordenar por start
   var wks = Object.values(byW).sort(function(a,b){return a.start<b.start?-1:1;});
@@ -33564,7 +33655,7 @@ function hoyBootRetry(){
 document.addEventListener('DOMContentLoaded', function(){
   try{
     if(typeof SB_SETTINGS_KEYS!=='undefined'){
-      ['HOY_CFG','HOY_FLAGS','HOY_TODOS','HOY_ASIST'].forEach(function(k){
+      ['HOY_CFG','HOY_FLAGS','HOY_TODOS','HOY_ASIST','CARGA_WEEK_CTX'].forEach(function(k){
         if(SB_SETTINGS_KEYS.indexOf(k)<0)SB_SETTINGS_KEYS.push(k);
       });
     }
@@ -33572,14 +33663,16 @@ document.addEventListener('DOMContentLoaded', function(){
       var _origApplyHoy=window._sbApplySettingRow;
       window._sbApplySettingRow=function(row){
         _origApplyHoy(row);
-        if(row&&(row.key==='HOY_CFG'||row.key==='HOY_FLAGS'||row.key==='HOY_TODOS'||row.key==='HOY_ASIST')){
+        if(row&&(row.key==='HOY_CFG'||row.key==='HOY_FLAGS'||row.key==='HOY_TODOS'||row.key==='HOY_ASIST'||row.key==='CARGA_WEEK_CTX')){
           try{
             if(row.key==='HOY_CFG')localStorage.setItem('hoyCfg_v1',JSON.stringify(HOY_CFG));
             if(row.key==='HOY_FLAGS')localStorage.setItem('hoyFlags_v1',JSON.stringify(HOY_FLAGS));
             if(row.key==='HOY_TODOS')localStorage.setItem('hoyTodos_v1',JSON.stringify(HOY_TODOS));
             if(row.key==='HOY_ASIST')localStorage.setItem('hoyAsist_v1',JSON.stringify(HOY_ASIST));
+            if(row.key==='CARGA_WEEK_CTX')localStorage.setItem('cargaWeekCtx_v1',JSON.stringify(CARGA_WEEK_CTX));
           }catch(e){}
           try{ if(typeof mainView!=='undefined'&&mainView==='hoy')hoyRender(); }catch(e){}
+          try{ if(row.key==='CARGA_WEEK_CTX'&&typeof mainView!=='undefined'&&mainView==='carga'&&typeof cargaRender==='function')cargaRender(); }catch(e){}
         }
       };
       window._sbApplySettingRowHoyWrapped=true;
