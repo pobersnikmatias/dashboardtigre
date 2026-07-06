@@ -12336,6 +12336,9 @@ window.planDeleteSelectedPrev = planDeleteSelectedPrev;
 
 function planDeleteWeek(i){
   if(!confirm('¿Eliminar "'+PLAN_WEEKS[i].name+'"?'))return;
+  var w=PLAN_WEEKS[i];
+  // Borrar también de la nube (si no, reaparece al recargar)
+  if(w && typeof sbPlanWeekDelete==='function'){ try{ sbPlanWeekDelete(w.name, w.created); }catch(e){} }
   PLAN_WEEKS.splice(i,1);
   planSave();
   planRenderWeeksList();
@@ -16189,7 +16192,11 @@ window.gymRenderSessions = gymRenderSessions;
 function gymDeleteSession(id){
   if(!confirm('¿Eliminar esta sesión?')) return;
   var i = GYM_SESSIONS.findIndex(function(s){return String(s.id)===String(id);});
-  if(i>-1) GYM_SESSIONS.splice(i,1);
+  if(i>-1){
+    var s=GYM_SESSIONS[i];
+    if(s && s.id!=null && typeof sbGymSessionDelete==='function'){ try{ sbGymSessionDelete(s.id); }catch(e){} }
+    GYM_SESSIONS.splice(i,1);
+  }
   saveData();
   gymRenderFilterWeek();
   gymRenderSessions();
@@ -28830,6 +28837,66 @@ function _sbMobilityToPayloads(obj){
   });
 }
 
+// Borra una semana de plan_weeks en la nube (por su identidad name+created).
+// Sin esto, borrar una semana localmente no la quita de Supabase y reaparece
+// al recargar (el sync normal solo hace upsert, nunca delete).
+var _sbPlanDeleteQueue=[];
+function sbPlanWeekDelete(name, created){
+  var item={name:name||'(sin nombre)', created:created||''};
+  if(!sbReady){
+    _sbPlanDeleteQueue.push(item);
+    if(_sbPlanDelRetries<30){ _sbPlanDelRetries++; setTimeout(sbPlanFlushDeletes, 4000); }
+    return;
+  }
+  _doPlanWeekDelete(item);
+}
+function _doPlanWeekDelete(item){
+  try{
+    sbClient.from('plan_weeks').delete()
+      .eq('name', item.name).eq('created', item.created).eq('categoria', SB_CATEGORIA)
+      .then(function(res){
+        if(res.error){ console.error('[Supabase] Delete plan_week error:', res.error); _sbPlanDeleteQueue.push(item); setTimeout(sbPlanFlushDeletes, 10000); }
+        else console.log('[Supabase] Semana borrada de la nube:', item.name);
+      });
+  }catch(e){ console.warn('[Supabase] delete plan_week:', e); }
+}
+var _sbPlanDelRetries=0;
+function sbPlanFlushDeletes(){
+  if(!sbReady){ if(_sbPlanDelRetries<30){ _sbPlanDelRetries++; setTimeout(sbPlanFlushDeletes, 4000); } return; }
+  _sbPlanDelRetries=0;
+  var q=_sbPlanDeleteQueue.slice(); _sbPlanDeleteQueue.length=0;
+  q.forEach(_doPlanWeekDelete);
+}
+window.sbPlanWeekDelete=sbPlanWeekDelete;
+
+// Borra una sesión de gimnasio de la nube por su id (mismo patrón que plan_weeks).
+var _sbGymDeleteQueue=[];
+var _sbGymDelRetries=0;
+function sbGymSessionDelete(id){
+  if(id==null||id==='')return;
+  if(!sbReady){
+    _sbGymDeleteQueue.push(id);
+    if(_sbGymDelRetries<30){ _sbGymDelRetries++; setTimeout(sbGymFlushDeletes, 4000); }
+    return;
+  }
+  _doGymSessionDelete(id);
+}
+function _doGymSessionDelete(id){
+  try{
+    sbClient.from('gym_sessions').delete().eq('id', id).eq('categoria', SB_CATEGORIA).then(function(res){
+      if(res.error){ console.error('[Supabase] Delete gym_session error:', res.error); _sbGymDeleteQueue.push(id); setTimeout(sbGymFlushDeletes, 10000); }
+      else console.log('[Supabase] Sesión de gym borrada de la nube:', id);
+    });
+  }catch(e){ console.warn('[Supabase] delete gym_session:', e); }
+}
+function sbGymFlushDeletes(){
+  if(!sbReady){ if(_sbGymDelRetries<30){ _sbGymDelRetries++; setTimeout(sbGymFlushDeletes, 4000); } return; }
+  _sbGymDelRetries=0;
+  var q=_sbGymDeleteQueue.slice(); _sbGymDeleteQueue.length=0;
+  q.forEach(_doGymSessionDelete);
+}
+window.sbGymSessionDelete=sbGymSessionDelete;
+
 // ── SYNC con debounce (Tanda 1 — los 4 juntos) ──
 var _sbTanda1SyncTimer = null;
 function sbScheduleTanda1Sync(){
@@ -32422,7 +32489,7 @@ if(typeof _xdOrigPaint==='function'){
 // ── ESTADO DEL EDITOR ──
 var X={open:false,shapes:[],bg:'plain',hist:[],redo:[],tool:'select',color:'red',
       sel:-1,drag:null,dirty:false,onSave:null,title:'',
-      frames:[[]],cur:0,playing:false,playRAF:null};
+      frames:[[]],cur:0,playing:false,playRAF:null,gscale:1};
 
 // Compromete el frame actual (los shapes en edición) a su slot
 function xdCommit(){ X.frames[X.cur]=JSON.parse(JSON.stringify(X.shapes)); }
@@ -32648,7 +32715,13 @@ function xdDown(e){
   e.preventDefault();
   var p=xdPos(e), t=X.tool;
   try{ e.target.setPointerCapture&&document.getElementById('xd2-svg').setPointerCapture(e.pointerId); }catch(err){}
-  if(XD_STAMPS[t]){ xdSnap(); X.shapes.push(XD_STAMPS[t](p)); X.sel=X.shapes.length-1; xdRender(); return; }
+  if(XD_STAMPS[t]){
+    xdSnap();
+    var _ns=XD_STAMPS[t](p);
+    // Tamaño global: los objetos puntuales nacen con la escala elegida en el toolbar
+    if(X.gscale!==1 && (_ns.type==='player'||_ns.type==='cone'||_ns.type==='ball'||_ns.type==='goal'||_ns.type==='minigoal'||_ns.type==='circle'))_ns.scale=X.gscale;
+    X.shapes.push(_ns); X.sel=X.shapes.length-1; xdRender(); return;
+  }
   if(t==='text'){
     var txt=prompt('Texto:',''); if(txt&&txt.trim()){ xdSnap(); X.shapes.push({type:'text',x:p.x,y:p.y,txt:txt.trim(),color:X.color}); X.sel=X.shapes.length-1; xdRender(); }
     return;
@@ -32780,6 +32853,38 @@ window.xd2Scale=function(factor){
   xdRender();
 };
 window.xd2Undo=function(){ xdUndo(); };
+
+// Tamaño GLOBAL: escala todos los objetos puntuales a la vez (y fija el tamaño
+// de los que se agreguen después). El ajuste individual (barra contextual)
+// sigue disponible para excepciones.
+var XD_GSCALE_STEPS=[0.5,0.65,0.8,1,1.25,1.5,1.9];
+function xd2GScaleApply(oldG,newG){
+  if(oldG===newG)return;
+  var f=newG/oldG;
+  xdSnap();
+  X.gscale=newG;
+  X.shapes.forEach(function(s){
+    if(s.type==='player'||s.type==='cone'||s.type==='ball'||s.type==='goal'||s.type==='minigoal'||s.type==='circle'){
+      s.scale=Math.round(Math.max(0.4,Math.min(3,(s.scale||1)*f))*100)/100;
+    } else if(s.type==='zone'||s.type==='rect'){
+      var cx=s.x+s.w/2, cy=s.y+s.h/2, nw=Math.max(14,s.w*f), nh=Math.max(14,s.h*f);
+      s.w=nw; s.h=nh; s.x=cx-nw/2; s.y=cy-nh/2;
+    }
+  });
+  xdRender();
+  var lbl=document.getElementById('xd2-gscale-lbl');
+  if(lbl)lbl.childNodes[0].nodeValue=Math.round(newG*100)+'%';
+}
+window.xd2GScale=function(dir){
+  var i=XD_GSCALE_STEPS.indexOf(X.gscale);
+  if(i<0){ // valor fuera de la escala discreta: buscar el más cercano
+    i=0; var best=1e9;
+    XD_GSCALE_STEPS.forEach(function(v,k){ var d=Math.abs(v-X.gscale); if(d<best){best=d;i=k;} });
+  }
+  var ni=Math.max(0,Math.min(XD_GSCALE_STEPS.length-1,i+dir));
+  xd2GScaleApply(X.gscale, XD_GSCALE_STEPS[ni]);
+};
+window.xd2GScaleReset=function(){ xd2GScaleApply(X.gscale, 1); };
 window.xd2EditNum=function(){
   var s=X.shapes[X.sel]; if(!s||s.type!=='player')return;
   var n=prompt('Número / etiqueta del jugador:',s.num||'');
@@ -32809,7 +32914,7 @@ window.xd2ExportPNG=function(){
 window.xd2Open=function(data,onSave,opts){
   opts=opts||{};
   X.shapes=[]; X.bg='plain'; X.hist=[]; X.redo=[]; X.sel=-1; X.drag=null; X.dirty=false;
-  X.frames=[[]]; X.cur=0; xd2StopPlay();
+  X.frames=[[]]; X.cur=0; X.gscale=1; xd2StopPlay();
   X.onSave=onSave||null; X.title=opts.title||'Ejercicio';
   var legacyImg=false;
   if(data){
@@ -33081,6 +33186,11 @@ function xdBuildModal(){
       '<button class="xd2-tbtn xd2-bgbtn" data-b="plain" onclick="xd2SetBg(\'plain\')">🟩<small>LIBRE</small></button>'+
       '<button class="xd2-tbtn xd2-bgbtn" data-b="half" onclick="xd2SetBg(\'half\')">◧<small>MEDIA</small></button>'+
       '<button class="xd2-tbtn xd2-bgbtn" data-b="full" onclick="xd2SetBg(\'full\')">▣<small>COMPLETA</small></button>'+
+    '</div>'+
+    '<div class="xd2-grp">'+
+      '<button class="xd2-tbtn" onclick="xd2GScale(-1)" title="Achicar todos los objetos">➖<small>TAMAÑO</small></button>'+
+      '<button class="xd2-tbtn" id="xd2-gscale-lbl" onclick="xd2GScaleReset()" title="Tamaño de los objetos (tocá para volver a 100%)" style="min-width:52px">100%<small>OBJETOS</small></button>'+
+      '<button class="xd2-tbtn" onclick="xd2GScale(1)" title="Agrandar todos los objetos">➕<small>TAMAÑO</small></button>'+
     '</div>'+
     '<div class="xd2-grp">'+
       '<button class="xd2-tbtn" id="xd2-undo" onclick="xd2Undo()">↩<small>DESHACER</small></button>'+
