@@ -29681,14 +29681,20 @@ function sbSettingsFetchAll(){
 }
 
 function _sbSettingsToPayloads(){
-  // Construye payloads para cada key cuya variable local existe y tiene contenido
+  // Construye payloads para cada key cuya variable local existe y tiene contenido.
+  // Claves "borrables": deben subir INCLUSO vacías, para que al borrar el último
+  // ítem (pendiente, disponibilidad, asistencia) el vacío se propague a la nube.
+  // Si no, la nube conserva la versión vieja con datos y reaparecen al recargar.
+  var ALWAYS_SYNC = {HOY_FLAGS:1, HOY_TODOS:1, HOY_ASIST:1, HOY_CFG:1, CARGA_WEEK_CTX:1};
   var out = [];
   SB_SETTINGS_KEYS.forEach(function(k){
     var v = _sbReadGlobal(k);
     if(v === undefined || v === null) return;
-    // Skip vacíos puros (no vale la pena ocupar fila)
-    if(Array.isArray(v) && v.length === 0) return;
-    if(typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) return;
+    if(!ALWAYS_SYNC[k]){
+      // Skip vacíos puros (no vale la pena ocupar fila)
+      if(Array.isArray(v) && v.length === 0) return;
+      if(typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) return;
+    }
     out.push({
       key: k,
       value: v,
@@ -29730,9 +29736,17 @@ function _sbApplySettingRow(row){
 }
 
 // ── SYNC con debounce (Tanda 3) ──
+// Resiliente: si la sesión aún no está lista (recién abierto, token vencido),
+// reintenta en vez de tragarse el cambio. Así una disponibilidad o un pendiente
+// marcado apenas se abre el dashboard no queda solo en local.
 var _sbTanda3SyncTimer = null;
+var _sbTanda3Retries = 0;
 function sbScheduleTanda3Sync(){
-  if(!sbReady) return;
+  if(!sbReady){
+    if(_sbTanda3Retries < 30){ _sbTanda3Retries++; setTimeout(sbScheduleTanda3Sync, 4000); }
+    return;
+  }
+  _sbTanda3Retries = 0;
   if(_sbTanda3SyncTimer) clearTimeout(_sbTanda3SyncTimer);
   _sbTanda3SyncTimer = setTimeout(function(){
     _sbTanda3SyncTimer = null;
