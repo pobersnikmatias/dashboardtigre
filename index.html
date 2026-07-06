@@ -2188,7 +2188,8 @@ function drawTable(rows){
         }).join('');
       })()}
       <td style="white-space:nowrap">
-        <button onclick="exEditInfo(${r.id})" style="border:none;background:none;cursor:pointer;font-size:13px;padding:0 3px;opacity:${(r.desc||r.img)?1:0.25}" title="Descripción e imagen">${r.img?'🖼️':'📝'}</button>
+        ${r.video?`<button onclick="vidOpen('${String(r.video).replace(/'/g,"\\'")}')" style="border:none;background:none;cursor:pointer;font-size:13px;padding:0 3px;color:#D9534F" title="Ver video demostrativo">▶</button>`:''}
+        <button onclick="exEditInfo(${r.id})" style="border:none;background:none;cursor:pointer;font-size:13px;padding:0 3px;opacity:${(r.desc||r.img||r.video)?1:0.25}" title="Descripción, imagen y video">${r.img?'🖼️':'📝'}</button>
         <button class="btn-r" onclick="delRow(${r.id})" title="Eliminar fila">🗑</button>
       </td>
     </tr>`;
@@ -13809,6 +13810,75 @@ planLoad();
 // ══════════════════════════════════════════════════════════════════════════════
 var _exInfoId=null, _exInfoImg=null;
 
+// ── Video del ejercicio: detección de plataforma + embebido/afuera ──
+// YouTube/Vimeo/Drive → se pueden reproducir DENTRO (iframe). El resto
+// (Instagram, TikTok, etc.) → botón que abre en pestaña nueva. El PF pega
+// el link una vez; el usuario solo toca ▶. Se guarda la URL (texto liviano),
+// nunca el video: cero peso en el payload y en la sincronización.
+function vidParse(url){
+  if(!url)return null;
+  url=String(url).trim();
+  if(!/^https?:\/\//i.test(url))return null;
+  var m;
+  // YouTube
+  m=url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{6,})/);
+  if(m)return {embed:'https://www.youtube.com/embed/'+m[1], url:url, kind:'YouTube'};
+  // Vimeo
+  m=url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+  if(m)return {embed:'https://player.vimeo.com/video/'+m[1], url:url, kind:'Vimeo'};
+  // Google Drive
+  m=url.match(/drive\.google\.com\/file\/d\/([\w-]+)/);
+  if(m)return {embed:'https://drive.google.com/file/d/'+m[1]+'/preview', url:url, kind:'Drive'};
+  m=url.match(/drive\.google\.com\/open\?id=([\w-]+)/);
+  if(m)return {embed:'https://drive.google.com/file/d/'+m[1]+'/preview', url:url, kind:'Drive'};
+  // Otros: solo abrir afuera
+  var host=''; try{ host=new URL(url).hostname.replace(/^www\./,''); }catch(e){}
+  return {embed:null, url:url, kind:host||'Video'};
+}
+function vidOpen(url){
+  var v=vidParse(url);
+  if(!v){ return; }
+  if(!v.embed){ try{ window.open(v.url,'_blank','noopener'); }catch(e){ location.href=v.url; } return; }
+  var old=document.getElementById('vid-modal'); if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='vid-modal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(8,12,20,.86);z-index:12800;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px';
+  m.innerHTML='<div style="width:min(96vw,900px);max-width:100%">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+      '<span style="color:#fff;font-size:13px;font-weight:700;font-family:system-ui,sans-serif">▶ Video · '+v.kind+'</span>'+
+      '<div style="display:flex;gap:8px">'+
+        '<a href="'+v.url+'" target="_blank" rel="noopener" style="color:#cfe0ff;font-size:11px;text-decoration:none;background:rgba(255,255,255,0.12);padding:7px 12px;border-radius:8px;font-weight:700">Abrir original ↗</a>'+
+        '<button onclick="var e=document.getElementById(\'vid-modal\');if(e)e.remove()" style="background:#2A3A58;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer">✕ Cerrar</button>'+
+      '</div>'+
+    '</div>'+
+    '<div style="position:relative;width:100%;padding-bottom:56.25%;background:#000;border-radius:10px;overflow:hidden;box-shadow:0 14px 50px rgba(0,0,0,0.6)">'+
+      '<iframe src="'+v.embed+'" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="autoplay; fullscreen; encrypted-media" allowfullscreen></iframe>'+
+    '</div></div>';
+  m.onclick=function(e){ if(e.target===m)m.remove(); };
+  document.body.appendChild(m);
+}
+window.vidOpen=vidOpen;
+window.vidParse=vidParse;
+function exiVideoHint(){
+  var el=document.getElementById('exi-video'), hint=document.getElementById('exi-video-hint');
+  if(!el||!hint)return;
+  var val=(el.value||'').trim();
+  if(!val){ hint.textContent='Se guarda solo el link (liviano). El video queda en su plataforma.'; hint.style.color='#888'; return; }
+  var v=vidParse(val);
+  if(!v){ hint.textContent='\u26a0 No parece un link v\u00e1lido (tiene que empezar con http).'; hint.style.color='#D9534F'; return; }
+  if(v.embed){ hint.textContent='\u2713 '+v.kind+' \u2014 se reproduce dentro del dashboard.'; hint.style.color='#1D9E75'; }
+  else { hint.textContent='\u2713 '+v.kind+' \u2014 se abre en una pesta\u00f1a nueva (no permite embeber).'; hint.style.color='#3B7A44'; }
+}
+window.exiVideoHint=exiVideoHint;
+function exiVideoTest(){
+  var el=document.getElementById('exi-video'); if(!el)return;
+  var val=(el.value||'').trim();
+  if(!val){ return; }
+  if(!vidParse(val)){ alert('Ese link no parece v\u00e1lido. Tiene que empezar con http:// o https://'); return; }
+  vidOpen(val);
+}
+window.exiVideoTest=exiVideoTest;
+
 function exEditInfo(id){
   var row=D.find(function(r){return r.id===id;});
   if(!row)return;
@@ -13816,6 +13886,8 @@ function exEditInfo(id){
   document.getElementById('exi-name').textContent=row.cat?' Categoría: '+row.cat:'';
   document.getElementById('exi-rename').value=row.n;
   document.getElementById('exi-desc').value=row.desc||'';
+  var vEl=document.getElementById('exi-video'); if(vEl)vEl.value=row.video||'';
+  exiVideoHint();
   var prev=document.getElementById('exi-prev');
   var thumb=document.getElementById('exi-thumb');
   var empty=document.getElementById('exi-empty');
@@ -13876,6 +13948,8 @@ function exiSave(){
   var newName=(document.getElementById('exi-rename').value||'').trim();
   if(newName) row.n=newName;
   row.desc=(document.getElementById('exi-desc').value||'').trim()||null;
+  var vv=(document.getElementById('exi-video').value||'').trim();
+  row.video=vv||null;
   row.img=_exInfoImg||null;
   if(row.img&&row.diag)row.diag=null;
   saveData();
@@ -14306,6 +14380,8 @@ window.exiSave=function(){
   var newName=(document.getElementById('exi-rename').value||'').trim();
   if(newName) row.n=newName;
   row.desc=(document.getElementById('exi-desc').value||'').trim()||null;
+  var vv=(document.getElementById('exi-video').value||'').trim();
+  row.video=vv||null;
   row.img=_exInfoImg||null;
   // Guardar diagrama solo si el panel está visible
   var diagPanel=document.getElementById('exi-diag-panel');
@@ -14470,6 +14546,16 @@ document.addEventListener('DOMContentLoaded',function(){
     <div>
       <div style="font-size:11px;font-weight:700;color:#333;margin-bottom:4px">Descripción</div>
       <textarea id="exi-desc" rows="3" placeholder="Consigna, variantes, notas del entrenador…" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;font-family:inherit;resize:vertical;background:#fafafa;color:#1a1a1a;box-sizing:border-box"></textarea>
+    </div>
+
+    <!-- Video (link) -->
+    <div>
+      <div style="font-size:11px;font-weight:700;color:#333;margin-bottom:4px">🎥 Video demostrativo <span style="font-weight:400;color:#999">(link, opcional)</span></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="exi-video" type="url" placeholder="Pegá el link de YouTube, Drive, Vimeo, Instagram…" oninput="exiVideoHint()" style="flex:1;min-width:0;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;background:#fafafa;color:#1a1a1a;box-sizing:border-box">
+        <button type="button" onclick="exiVideoTest()" class="btn bc" style="font-size:10px;padding:5px 10px;white-space:nowrap">▶ Probar</button>
+      </div>
+      <div id="exi-video-hint" style="font-size:9.5px;color:#888;margin-top:3px"></div>
     </div>
 
     <!-- Imagen -->
