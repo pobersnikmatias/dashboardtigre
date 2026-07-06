@@ -4229,6 +4229,7 @@ function _buildFullPayload(stripImages){
     GYM_EXERCISES:gymEx,
     GYM_CATS:(typeof GYM_CATS!=='undefined' && Array.isArray(GYM_CATS))?[...GYM_CATS]:[],
     GYM_EVALS:(typeof GYM_EVALS!=='undefined' && GYM_EVALS)?{...GYM_EVALS}:{},
+    TST_DATA:(typeof TST_DATA!=='undefined' && Array.isArray(TST_DATA))?TST_DATA.slice():[],
     NUTRITION_DATA:(typeof NUTRITION_DATA!=='undefined' && NUTRITION_DATA)?{...NUTRITION_DATA}:{},
     MOBILITY_DATA:(typeof MOBILITY_DATA!=='undefined' && MOBILITY_DATA)?{...MOBILITY_DATA}:{},
     NUT_REF:(typeof NUT_REF!=='undefined' && NUT_REF)?{...NUT_REF}:{},
@@ -4354,6 +4355,7 @@ function applyPayload(p){
     if(p.GYM_EXERCISES && typeof GYM_EXERCISES!=='undefined'){GYM_EXERCISES.length=0;p.GYM_EXERCISES.forEach(function(e){GYM_EXERCISES.push(e);});}
     if(p.GYM_CATS && typeof GYM_CATS!=='undefined'){GYM_CATS.length=0;p.GYM_CATS.forEach(function(c){GYM_CATS.push(c);});}
     if(p.GYM_EVALS && typeof GYM_EVALS!=='undefined')Object.assign(GYM_EVALS,p.GYM_EVALS);
+    if(p.TST_DATA && typeof TST_DATA!=='undefined' && Array.isArray(p.TST_DATA)){TST_DATA.length=0;p.TST_DATA.forEach(function(r){TST_DATA.push(r);});}
     if(p.NUTRITION_DATA && typeof NUTRITION_DATA!=='undefined')Object.assign(NUTRITION_DATA,p.NUTRITION_DATA);
     if(p.MOBILITY_DATA && typeof MOBILITY_DATA!=='undefined')Object.assign(MOBILITY_DATA,p.MOBILITY_DATA);
     if(p.NUT_REF && typeof NUT_REF!=='undefined')Object.assign(NUT_REF,p.NUT_REF);
@@ -14557,6 +14559,7 @@ document.addEventListener('DOMContentLoaded',function(){
 <div class="subtabs-bar" style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid #ddd;padding-bottom:0">
   <button id="pf-tab-gym-btn" onclick="pfSetTab('gym')" style="padding:7px 18px;border:none;border-bottom:3px solid #0D1B2A;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#0D1B2A;cursor:pointer">🏋️ Gimnasio</button>
   <button id="pf-tab-resistencia-btn" onclick="pfSetTab('resistencia')" style="padding:7px 18px;border:none;border-bottom:3px solid transparent;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#666;cursor:pointer">🏃 Resistencia</button>
+  <button id="pf-tab-tests-btn" onclick="pfSetTab('tests')" style="padding:7px 18px;border:none;border-bottom:3px solid transparent;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#666;cursor:pointer">🧪 Tests</button>
 </div>
 
 <!-- ═══════════════════════════════════════════════════ -->
@@ -15127,6 +15130,10 @@ document.addEventListener('DOMContentLoaded',function(){
 <!-- ═══════════════════════════════════════════════════ -->
 <div id="pf-tab-resistencia" style="display:none">
   <div id="resi-container"></div>
+</div>
+
+<div id="pf-tab-tests" style="display:none">
+  <div id="tst-container"></div>
 </div>
 
 </div><!-- end view-gym -->
@@ -29965,10 +29972,397 @@ setTimeout(function(){
 // ════════════════════════════════════════════════════════════════════
 // PREPARACIÓN FÍSICA — Switching entre subpestañas Gimnasio / Resistencia
 // ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+// TESTS — Evaluaciones físicas configurables (saltos, fuerza, sprints…)
+// ════════════════════════════════════════════════════════════════════
+// Arquitectura QUÉ/CÓMO:
+//  · TST_CATALOG = definiciones de test (editable por club). Cada test tiene
+//    unidad, dirección de mejora, lateralidad (bi/unilateral) y modo de
+//    registro (único o múltiple→promedio). Vive en app_settings (viaja a la
+//    nube y en el futuro multi-tenant cada club tiene el suyo).
+//  · TST_DATA = registros [{id,testId,name,date,val,valI,valD,reps,note}].
+//    Vive en el payload principal (sin techo desde IndexedDB v92).
+// ════════════════════════════════════════════════════════════════════
+var TST_CAT_GROUPS=[
+  {k:'salto_v', lbl:'Salto vertical'},
+  {k:'salto_h', lbl:'Salto horizontal'},
+  {k:'fuerza',  lbl:'Fuerza'},
+  {k:'sprint',  lbl:'Velocidad / Sprint'},
+  {k:'agil',    lbl:'Agilidad / COD'},
+  {k:'aerob',   lbl:'Aeróbico'},
+  {k:'otro',    lbl:'Otro'}
+];
+var TST_CATALOG_SEED=[
+  {id:'cmj',      name:'CMJ',                 group:'salto_v', unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
+  {id:'sj',       name:'Squat Jump',          group:'salto_v', unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
+  {id:'abk',      name:'Abalakov',            group:'salto_v', unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
+  {id:'cmj_uni',  name:'CMJ unilateral',      group:'salto_v', unit:'cm', better:'up',   lat:'uni', mode:'multi'},
+  {id:'hop',      name:'Salto horizontal',    group:'salto_h', unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
+  {id:'hop_uni',  name:'Single hop distancia',group:'salto_h', unit:'cm', better:'up',   lat:'uni', mode:'multi'},
+  {id:'imtp',     name:'IMTP (pico)',         group:'fuerza',  unit:'N',  better:'up',   lat:'bi',  mode:'single'},
+  {id:'iso_ext',  name:'Fuerza iso cuadriceps',group:'fuerza', unit:'N',  better:'up',   lat:'uni', mode:'single'},
+  {id:'spr10',    name:'Sprint 10 m',         group:'sprint',  unit:'s',  better:'down', lat:'bi',  mode:'single'},
+  {id:'spr30',    name:'Sprint 30 m',         group:'sprint',  unit:'s',  better:'down', lat:'bi',  mode:'single'},
+  {id:'cod505',   name:'505 (COD)',           group:'agil',    unit:'s',  better:'down', lat:'uni', mode:'single'}
+];
+var TST_CATALOG=[];
+try{
+  var _tc=JSON.parse(localStorage.getItem('tstCatalog_v1')||'null');
+  TST_CATALOG=(Array.isArray(_tc)&&_tc.length)?_tc:TST_CATALOG_SEED.map(function(t){return Object.assign({},t);});
+}catch(e){ TST_CATALOG=TST_CATALOG_SEED.map(function(t){return Object.assign({},t);}); }
+var TST_DATA=[];
+var TST_UNITS=['cm','m','N','kg','N/kg','s','W','reps','%','pts'];
+
+var _tstView='load';
+var _tstDate='';
+var _tstSelTests=[];
+var _tstIndivPlayer='';
+var _tstTeamTest='';
+
+function tstSaveCatalog(){
+  try{ localStorage.setItem('tstCatalog_v1', JSON.stringify(TST_CATALOG)); }catch(e){}
+  if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} }
+}
+function tstNorm(s){ return (typeof cargaNormName==='function')?cargaNormName(s):String(s||'').toLowerCase().trim(); }
+function tstToday(){ var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function tstById(id){ return TST_CATALOG.find(function(t){return t.id===id;})||null; }
+function tstEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function tstGroupLbl(k){ var g=TST_CAT_GROUPS.find(function(x){return x.k===k;}); return g?g.lbl:'Otro'; }
+
+function tstRoster(){
+  var names={};
+  try{ Object.keys(PLAYER_PROFILES||{}).forEach(function(k){ var p=PLAYER_PROFILES[k]; if(p&&p.name)names[p.name]=true; }); }catch(e){}
+  TST_DATA.forEach(function(r){ if(r&&r.name)names[r.name]=true; });
+  if(typeof cargaSelfPlayerNames==='function'){ try{ cargaSelfPlayerNames().forEach(function(n){names[n]=true;}); }catch(e){} }
+  return Object.keys(names).sort(function(a,b){return a.localeCompare(b,'es');});
+}
+
+function tstVal(rec){
+  if(!rec)return null;
+  if(rec.valI!=null||rec.valD!=null){
+    var a=rec.valI, b=rec.valD;
+    if(a!=null&&b!=null)return (a+b)/2;
+    return a!=null?a:b;
+  }
+  return rec.val!=null?rec.val:null;
+}
+function tstAsym(rec){
+  if(!rec||rec.valI==null||rec.valD==null)return null;
+  var mx=Math.max(Math.abs(rec.valI),Math.abs(rec.valD));
+  if(!mx)return null;
+  return (rec.valD-rec.valI)/mx*100;
+}
+
+function tstRender(){
+  var out=document.getElementById('tst-container'); if(!out)return;
+  var tabs='<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">'+
+    [['load','📋 Cargar jornada'],['indiv','📈 Individual'],['team','👥 Plantel'],['cat','⚙ Tests']].map(function(t){
+      var on=_tstView===t[0];
+      return '<button onclick="tstSetView(\''+t[0]+'\')" style="padding:7px 15px;border:1px solid '+(on?'#3B4D88':'#ddd')+';background:'+(on?'#3B4D88':'#fff')+';color:'+(on?'#fff':'#555')+';border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'+t[1]+'</button>';
+    }).join('')+'</div>';
+  var body='';
+  if(_tstView==='load')body=tstRenderLoad();
+  else if(_tstView==='indiv')body=tstRenderIndiv();
+  else if(_tstView==='team')body=tstRenderTeam();
+  else if(_tstView==='cat')body=tstRenderCat();
+  out.innerHTML=tabs+body;
+}
+window.tstRender=tstRender;
+function tstSetView(v){ _tstView=v; tstRender(); }
+window.tstSetView=tstSetView;
+
+function tstRenderLoad(){
+  if(!TST_CATALOG.length){
+    return '<div style="padding:24px;text-align:center;background:#fff;border:2px dashed #e0e0e0;border-radius:10px"><div style="font-size:28px">🧪</div><div style="font-size:13px;font-weight:700;margin:8px 0">No hay tests definidos todavía</div><div style="font-size:11px;color:#888">Andá a <b>⚙ Tests</b> para crear el primero o cargar el catálogo semilla.</div></div>';
+  }
+  if(!_tstDate)_tstDate=tstToday();
+  if(!_tstSelTests.length)_tstSelTests=TST_CATALOG.slice(0,3).map(function(t){return t.id;});
+  var chips=TST_CATALOG.map(function(t){
+    var on=_tstSelTests.indexOf(t.id)>=0;
+    return '<button onclick="tstToggleTest(\''+t.id+'\')" style="padding:5px 11px;border:1px solid '+(on?'#1D9E75':'#ddd')+';background:'+(on?'#edfaf3':'#fff')+';color:'+(on?'#1D6B4F':'#777')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+(on?'✓ ':'')+tstEsc(t.name)+'</button>';
+  }).join('');
+  var head='<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;padding:14px;margin-bottom:12px">'+
+    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
+      '<label style="font-size:12px;font-weight:700;color:#333">📅 Fecha de la jornada '+
+        '<input type="date" id="tst-date" value="'+_tstDate+'" onchange="tstDateChange(this.value)" style="margin-left:6px;padding:5px 9px;border:1px solid #ccc;border-radius:6px;font-size:12px"></label>'+
+      '<span style="font-size:11px;color:#999">Elegí qué tests se toman hoy:</span>'+
+    '</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap">'+chips+'</div>'+
+  '</div>';
+  var active=_tstSelTests.map(tstById).filter(Boolean);
+  if(!active.length)return head+'<div style="padding:20px;text-align:center;color:#999;font-size:12px">Elegí al menos un test para armar la grilla.</div>';
+  var roster=tstRoster();
+  if(!roster.length)return head+'<div style="padding:20px;text-align:center;color:#999;font-size:12px">No hay jugadores en el plantel. Cargá perfiles primero.</div>';
+  var existing={};
+  TST_DATA.forEach(function(r){ if(r.date===_tstDate)existing[r.testId+'|'+tstNorm(r.name)]=r; });
+  var th='<th style="position:sticky;left:0;background:#0D1B2A;color:#fff;padding:8px 10px;text-align:left;font-size:11px;min-width:130px;z-index:2">Jugador</th>'+
+    active.map(function(t){
+      var sub=t.unit+(t.lat==='uni'?' · I/D':'')+(t.mode==='multi'?' · xn':'');
+      return '<th style="background:#1E2A52;color:#fff;padding:7px 8px;font-size:11px;min-width:'+(t.lat==='uni'?'150':'90')+'px">'+tstEsc(t.name)+'<br><span style="font-size:8.5px;color:#9FB0D0;font-weight:400">'+sub+'</span></th>';
+    }).join('');
+  var rows=roster.map(function(name){
+    var cells=active.map(function(t){
+      var rec=existing[t.id+'|'+tstNorm(name)];
+      return '<td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;text-align:center">'+tstCellInput(t,name,rec)+'</td>';
+    }).join('');
+    return '<tr><td style="position:sticky;left:0;background:#fff;padding:6px 10px;font-size:11.5px;font-weight:600;border-bottom:1px solid #f0f0f0;border-right:1px solid #eee;z-index:1">'+tstEsc(name)+'</td>'+cells+'</tr>';
+  }).join('');
+  return head+'<div style="overflow-x:auto;background:#fff;border:1px solid #e4e6ec;border-radius:10px"><table style="border-collapse:collapse;width:100%"><thead><tr>'+th+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div style="font-size:10px;color:#aaa;margin-top:8px">Escribí el valor y salí de la celda para guardar. En tests unilaterales cargás Izq/Der y la asimetría se calcula sola. En modo múltiple cargás varios intentos separados por espacio o coma y se promedia.</div>';
+}
+function tstCellInput(t,name,rec){
+  if(t.lat==='uni'){
+    var vi=rec&&rec.valI!=null?rec.valI:'';
+    var vd=rec&&rec.valD!=null?rec.valD:'';
+    var asy=tstAsym(rec);
+    var asyHtml=asy!=null?'<div style="font-size:8.5px;font-weight:700;color:'+(Math.abs(asy)>=15?'#D9534F':(Math.abs(asy)>=10?'#E8A13C':'#1D9E75'))+'">D '+(asy>0?'+':'')+asy.toFixed(0)+'%</div>':'';
+    return '<div style="display:flex;gap:3px;align-items:center;justify-content:center">'+
+      '<input value="'+vi+'" placeholder="I" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'I\',this.value)" style="width:46px;padding:5px 3px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+
+      '<input value="'+vd+'" placeholder="D" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'D\',this.value)" style="width:46px;padding:5px 3px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+
+      asyHtml+'</div>';
+  }
+  var raw=rec?(rec._raw!=null?rec._raw:(rec.val!=null?rec.val:'')):'';
+  var avg=(rec&&rec.reps>1&&rec.val!=null)?'<div style="font-size:8.5px;color:#3B4D88;font-weight:700">x '+rec.val.toFixed(1)+'</div>':'';
+  var ph=t.mode==='multi'?'ej: 38 40 39':'valor';
+  return '<div><input value="'+raw+'" placeholder="'+ph+'" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'B\',this.value)" style="width:76px;padding:5px 4px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+avg+'</div>';
+}
+function tstDateChange(v){ _tstDate=v||tstToday(); tstRender(); }
+window.tstDateChange=tstDateChange;
+function tstToggleTest(id){
+  var i=_tstSelTests.indexOf(id);
+  if(i>=0)_tstSelTests.splice(i,1); else _tstSelTests.push(id);
+  tstRender();
+}
+window.tstToggleTest=tstToggleTest;
+function tstSaveCell(testId,nameL,nameEnc,side,rawVal){
+  var name=decodeURIComponent(nameEnc);
+  var t=tstById(testId); if(!t)return;
+  var idx=TST_DATA.findIndex(function(r){return r.testId===testId&&tstNorm(r.name)===nameL&&r.date===_tstDate;});
+  var rec=idx>=0?TST_DATA[idx]:{id:Date.now()+Math.floor(Math.random()*1000),testId:testId,name:name,date:_tstDate};
+  function parseNums(s){ return String(s||'').split(/[\s,;]+/).map(function(x){return parseFloat(x.replace(',','.'));}).filter(function(n){return !isNaN(n);}); }
+  if(side==='I'||side==='D'){
+    var n=parseFloat(String(rawVal).replace(',','.'));
+    rec[side==='I'?'valI':'valD']=isNaN(n)?null:n;
+  } else {
+    var nums=parseNums(rawVal);
+    rec._raw=rawVal;
+    if(!nums.length){ rec.val=null; rec.reps=0; }
+    else if(t.mode==='multi'){ rec.val=nums.reduce(function(a,b){return a+b;},0)/nums.length; rec.reps=nums.length; rec.vals=nums; }
+    else { rec.val=nums[0]; rec.reps=1; }
+  }
+  var empty=(rec.val==null&&rec.valI==null&&rec.valD==null);
+  if(idx>=0){ if(empty)TST_DATA.splice(idx,1); else TST_DATA[idx]=rec; }
+  else if(!empty){ TST_DATA.push(rec); }
+  saveData();
+  if(t.lat==='uni')tstRender();
+}
+window.tstSaveCell=tstSaveCell;
+
+function tstRenderIndiv(){
+  var roster=tstRoster().filter(function(n){ return TST_DATA.some(function(r){return tstNorm(r.name)===tstNorm(n);}); });
+  if(!roster.length)return '<div style="padding:24px;text-align:center;color:#999;font-size:12px">Sin registros todavía. Cargá una jornada primero.</div>';
+  if(!_tstIndivPlayer||roster.indexOf(_tstIndivPlayer)<0)_tstIndivPlayer=roster[0];
+  var sel='<select onchange="tstSetIndiv(this.value)" style="padding:6px 12px;border:1px solid #ccc;border-radius:6px;font-size:12px;font-weight:600;min-width:200px;margin-bottom:14px">'+
+    roster.map(function(n){return '<option'+(n===_tstIndivPlayer?' selected':'')+'>'+tstEsc(n)+'</option>';}).join('')+'</select>';
+  var recs=TST_DATA.filter(function(r){return tstNorm(r.name)===tstNorm(_tstIndivPlayer);});
+  var byTest={};
+  recs.forEach(function(r){ (byTest[r.testId]=byTest[r.testId]||[]).push(r); });
+  var cards=Object.keys(byTest).map(function(testId){
+    var t=tstById(testId); if(!t)return '';
+    var series=byTest[testId].slice().sort(function(a,b){return a.date<b.date?-1:1;});
+    var vals=series.map(function(r){return {date:r.date, v:tstVal(r), asy:tstAsym(r)};}).filter(function(x){return x.v!=null;});
+    if(!vals.length)return '';
+    var nums=vals.map(function(x){return x.v;});
+    var best=t.better==='down'?Math.min.apply(null,nums):Math.max.apply(null,nums);
+    var last=vals[vals.length-1], first=vals[0];
+    var delta=last.v-first.v;
+    var deltaGood=(t.better==='down')?(delta<0):(delta>0);
+    return '<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;padding:14px;margin-bottom:10px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'+
+        '<b style="font-size:13px;color:#0D1B2A">'+tstEsc(t.name)+' <span style="font-size:10px;color:#999;font-weight:500">'+tstGroupLbl(t.group)+' · '+t.unit+'</span></b>'+
+        '<span style="font-size:11px;color:#666">Mejor: <b style="color:#1D9E75">'+best.toFixed(1)+' '+t.unit+'</b></span>'+
+      '</div>'+
+      tstSparkline(vals,t)+
+      '<div style="display:flex;gap:14px;margin-top:8px;font-size:10.5px;color:#666;flex-wrap:wrap">'+
+        vals.map(function(x){
+          return '<span title="'+x.date+'">'+x.date.slice(5)+': <b>'+x.v.toFixed(1)+'</b>'+(x.asy!=null?' <span style="color:'+(Math.abs(x.asy)>=15?'#D9534F':(Math.abs(x.asy)>=10?'#E8A13C':'#1D9E75'))+'">(D'+(x.asy>0?'+':'')+x.asy.toFixed(0)+'%)</span>':'')+'</span>';
+        }).join('')+
+      '</div>'+
+      (vals.length>1?'<div style="font-size:10px;margin-top:6px;color:'+(deltaGood?'#1D9E75':'#D9534F')+';font-weight:700">'+(delta>0?'+ ':'')+delta.toFixed(1)+' '+t.unit+' desde el primer registro</div>':'')+
+    '</div>';
+  }).join('');
+  return sel+(cards||'<div style="color:#999;font-size:12px">Sin datos para este jugador.</div>');
+}
+function tstSparkline(vals,t){
+  if(vals.length<2)return '<div style="font-size:10px;color:#bbb">1 registro (necesitas 2+ para la tendencia)</div>';
+  var W=Math.max(200,vals.length*44), H=52, pad=6;
+  var nums=vals.map(function(x){return x.v;});
+  var mn=Math.min.apply(null,nums), mx=Math.max.apply(null,nums), rng=(mx-mn)||1;
+  var pts=vals.map(function(x,i){
+    var px=pad+i*((W-2*pad)/(vals.length-1));
+    var py=H-pad-((x.v-mn)/rng)*(H-2*pad);
+    return [px,py];
+  });
+  var poly=pts.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ');
+  var dots=pts.map(function(p,i){
+    var isBest=(t.better==='down'?nums[i]===mn:nums[i]===mx);
+    return '<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isBest?4:3)+'" fill="'+(isBest?'#1D9E75':'#3B4D88')+'"/>';
+  }).join('');
+  return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:'+W+'px;height:'+H+'px"><polyline points="'+poly+'" fill="none" stroke="#3B4D88" stroke-width="2"/>'+dots+'</svg>';
+}
+function tstSetIndiv(n){ _tstIndivPlayer=n; tstRender(); }
+window.tstSetIndiv=tstSetIndiv;
+
+function tstRenderTeam(){
+  var testsWithData=TST_CATALOG.filter(function(t){ return TST_DATA.some(function(r){return r.testId===t.id;}); });
+  if(!testsWithData.length)return '<div style="padding:24px;text-align:center;color:#999;font-size:12px">Sin registros todavía.</div>';
+  if(!_tstTeamTest||!testsWithData.some(function(t){return t.id===_tstTeamTest;}))_tstTeamTest=testsWithData[0].id;
+  var t=tstById(_tstTeamTest);
+  var sel='<select onchange="tstSetTeamTest(this.value)" style="padding:6px 12px;border:1px solid #ccc;border-radius:6px;font-size:12px;font-weight:600;min-width:200px;margin-bottom:14px">'+
+    testsWithData.map(function(x){return '<option value="'+x.id+'"'+(x.id===_tstTeamTest?' selected':'')+'>'+tstEsc(x.name)+' ('+x.unit+')</option>';}).join('')+'</select>';
+  var latest={};
+  TST_DATA.filter(function(r){return r.testId===_tstTeamTest;}).forEach(function(r){
+    var k=tstNorm(r.name);
+    if(!latest[k]||r.date>latest[k].date)latest[k]={name:r.name,date:r.date,v:tstVal(r),asy:tstAsym(r)};
+  });
+  var arr=Object.keys(latest).map(function(k){return latest[k];}).filter(function(x){return x.v!=null;});
+  if(!arr.length)return sel+'<div style="color:#999;font-size:12px">Sin datos.</div>';
+  var nums=arr.map(function(x){return x.v;});
+  var mean=nums.reduce(function(a,b){return a+b;},0)/nums.length;
+  var sd=Math.sqrt(nums.map(function(v){return (v-mean)*(v-mean);}).reduce(function(a,b){return a+b;},0)/nums.length)||1;
+  arr.sort(function(a,b){ return t.better==='down'?(a.v-b.v):(b.v-a.v); });
+  var rows=arr.map(function(x,i){
+    var z=(x.v-mean)/sd; if(t.better==='down')z=-z;
+    var zc=z>=0.8?'#1D9E75':(z<=-0.8?'#D9534F':'#888');
+    return '<tr>'+
+      '<td style="padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0f0;color:#999;width:28px">'+(i+1)+'</td>'+
+      '<td style="padding:7px 10px;font-size:12px;font-weight:600;border-bottom:1px solid #f0f0f0">'+tstEsc(x.name)+'</td>'+
+      '<td style="padding:7px 10px;font-size:13px;font-weight:800;border-bottom:1px solid #f0f0f0;color:#0D1B2A">'+x.v.toFixed(1)+' <span style="font-size:9px;color:#aaa;font-weight:500">'+t.unit+'</span></td>'+
+      '<td style="padding:7px 10px;font-size:11px;border-bottom:1px solid #f0f0f0;color:'+zc+';font-weight:700">'+(z>0?'+':'')+z.toFixed(2)+' z</td>'+
+      '<td style="padding:7px 10px;font-size:10px;border-bottom:1px solid #f0f0f0;color:#999">'+x.date.slice(5)+(x.asy!=null?' · D'+(x.asy>0?'+':'')+x.asy.toFixed(0)+'%':'')+'</td>'+
+    '</tr>';
+  }).join('');
+  return sel+'<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;overflow:hidden">'+
+    '<div style="padding:10px 12px;background:#f6f8fd;font-size:11px;color:#555;border-bottom:1px solid #e4e6ec">Promedio del plantel: <b>'+mean.toFixed(1)+' '+t.unit+'</b> · ultimo valor de cada jugador · z-score dentro del grupo</div>'+
+    '<table style="border-collapse:collapse;width:100%"><tbody>'+rows+'</tbody></table></div>';
+}
+function tstSetTeamTest(id){ _tstTeamTest=id; tstRender(); }
+window.tstSetTeamTest=tstSetTeamTest;
+
+function tstRenderCat(){
+  var byGroup={};
+  TST_CATALOG.forEach(function(t){ (byGroup[t.group]=byGroup[t.group]||[]).push(t); });
+  var groups=TST_CAT_GROUPS.filter(function(g){return byGroup[g.k];}).map(function(g){
+    var items=byGroup[g.k].map(function(t){
+      var usos=TST_DATA.filter(function(r){return r.testId===t.id;}).length;
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #f2f2f2">'+
+        '<div style="flex:1"><b style="font-size:12.5px">'+tstEsc(t.name)+'</b>'+
+        '<div style="font-size:10px;color:#999">'+t.unit+' · '+(t.lat==='uni'?'unilateral (I/D)':'bilateral')+' · '+(t.mode==='multi'?'multiple->promedio':'unico')+' · '+(t.better==='down'?'menos = mejor':'mas = mejor')+(usos?' · '+usos+' registros':'')+'</div></div>'+
+        '<button onclick="tstEditTest(\''+t.id+'\')" style="background:#eef1f8;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;color:#3B4D88;font-weight:600">Editar</button>'+
+        '<button onclick="tstDelTest(\''+t.id+'\')" style="background:none;border:none;color:#ccc;font-size:14px;cursor:pointer" title="Eliminar">X</button>'+
+      '</div>';
+    }).join('');
+    return '<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:800;color:#3B4D88;text-transform:uppercase;letter-spacing:.05em;padding:4px 0">'+g.lbl+'</div><div style="background:#fff;border:1px solid #e4e6ec;border-radius:9px;overflow:hidden">'+items+'</div></div>';
+  }).join('');
+  return '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'+
+      '<button onclick="tstEditTest(\'\')" style="background:#1D9E75;color:#fff;border:none;border-radius:9px;padding:10px 18px;font-size:12px;font-weight:800;cursor:pointer">+ Nuevo test</button>'+
+      (TST_CATALOG.length===0?'<button onclick="tstLoadSeed()" style="background:#eef1f8;color:#3B4D88;border:none;border-radius:9px;padding:10px 18px;font-size:12px;font-weight:700;cursor:pointer">Cargar catalogo semilla</button>':'')+
+    '</div>'+
+    (groups||'<div style="color:#999;font-size:12px;padding:10px">Catalogo vacio. Crea tu primer test o carga el semilla.</div>');
+}
+function tstLoadSeed(){
+  if(TST_CATALOG.length&&!confirm('Esto agrega los tests del catalogo semilla. Continuar?'))return;
+  TST_CATALOG_SEED.forEach(function(s){ if(!TST_CATALOG.some(function(t){return t.id===s.id;}))TST_CATALOG.push(Object.assign({},s)); });
+  tstSaveCatalog(); tstRender();
+}
+window.tstLoadSeed=tstLoadSeed;
+function tstEditTest(id){
+  var t=id?tstById(id):null;
+  var isNew=!t;
+  var old=document.getElementById('tst-edit'); if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='tst-edit';
+  m.style.cssText='position:fixed;inset:0;background:rgba(13,27,42,.7);z-index:10600;display:flex;align-items:center;justify-content:center;padding:16px';
+  function opt(v,cur,lbl){ return '<option value="'+v+'"'+(v===cur?' selected':'')+'>'+lbl+'</option>'; }
+  m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto;padding:18px 20px" onclick="event.stopPropagation()">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b style="font-size:15px;color:#0D1B2A">'+(isNew?'Nuevo test':'Editar test')+'</b>'+
+      '<button onclick="document.getElementById(\'tst-edit\').remove()" style="background:#f0f0f0;border:none;border-radius:6px;padding:5px 12px;font-size:14px;cursor:pointer;font-weight:700">X</button></div>'+
+    '<label style="display:block;font-size:11px;font-weight:700;color:#555">Nombre del test'+
+      '<input id="tst-f-name" value="'+(t?tstEsc(t.name):'')+'" placeholder="ej: CMJ, Sprint 20m, IMTP" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px"></label>'+
+    '<label style="display:block;font-size:11px;font-weight:700;color:#555;margin-top:10px">Categoria'+
+      '<select id="tst-f-group" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+
+        TST_CAT_GROUPS.map(function(g){return opt(g.k,t?t.group:'salto_v',g.lbl);}).join('')+'</select></label>'+
+    '<div style="display:flex;gap:10px;margin-top:10px">'+
+      '<label style="flex:1;font-size:11px;font-weight:700;color:#555">Unidad'+
+        '<select id="tst-f-unit" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+
+          TST_UNITS.map(function(u){return opt(u,t?t.unit:'cm',u);}).join('')+'</select></label>'+
+      '<label style="flex:1;font-size:11px;font-weight:700;color:#555">Mejora'+
+        '<select id="tst-f-better" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+
+          opt('up',t?t.better:'up','Mas = mejor')+opt('down',t?t.better:'up','Menos = mejor')+'</select></label>'+
+    '</div>'+
+    '<div style="display:flex;gap:10px;margin-top:10px">'+
+      '<label style="flex:1;font-size:11px;font-weight:700;color:#555">Lateralidad'+
+        '<select id="tst-f-lat" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+
+          opt('bi',t?t.lat:'bi','Bilateral (1 valor)')+opt('uni',t?t.lat:'bi','Unilateral (Izq/Der)')+'</select></label>'+
+      '<label style="flex:1;font-size:11px;font-weight:700;color:#555">Registro'+
+        '<select id="tst-f-mode" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+
+          opt('single',t?t.mode:'single','Unico')+opt('multi',t?t.mode:'single','Multiple -> promedio')+'</select></label>'+
+    '</div>'+
+    '<div style="font-size:10px;color:#999;margin-top:8px;line-height:1.5">Unilateral captura Izq y Der y calcula la asimetria (D-I)/mayor x100. Multiple promedia los intentos que cargues (ej: "38 40 39").</div>'+
+    '<button onclick="tstSaveTest(\''+(t?t.id:'')+'\')" style="width:100%;margin-top:14px;background:#1D9E75;color:#fff;border:none;border-radius:9px;padding:12px;font-size:13px;font-weight:800;cursor:pointer">Guardar test</button>'+
+  '</div>';
+  m.onclick=function(){ m.remove(); };
+  document.body.appendChild(m);
+}
+window.tstEditTest=tstEditTest;
+function tstSaveTest(id){
+  var g=function(i){var el=document.getElementById(i);return el?el.value:'';};
+  var name=g('tst-f-name').trim();
+  if(!name){ alert('El nombre es obligatorio.'); return; }
+  var obj={name:name.slice(0,40),group:g('tst-f-group'),unit:g('tst-f-unit'),better:g('tst-f-better'),lat:g('tst-f-lat'),mode:g('tst-f-mode')};
+  if(id){ var t=tstById(id); if(t)Object.assign(t,obj); }
+  else{
+    var base=tstNorm(name).replace(/[^a-z0-9]+/g,'_').slice(0,20)||'test';
+    var nid=base, k=1; while(TST_CATALOG.some(function(t){return t.id===nid;})){ nid=base+'_'+(k++); }
+    obj.id=nid; TST_CATALOG.push(obj);
+  }
+  tstSaveCatalog();
+  var mm=document.getElementById('tst-edit'); if(mm)mm.remove();
+  tstRender();
+}
+window.tstSaveTest=tstSaveTest;
+function tstDelTest(id){
+  var t=tstById(id); if(!t)return;
+  var usos=TST_DATA.filter(function(r){return r.testId===id;}).length;
+  var msg=usos?('El test "'+t.name+'" tiene '+usos+' registros. Si lo eliminas, esos registros quedan huerfanos (no se borran, pero no se muestran). Continuar?'):('Eliminar el test "'+t.name+'"?');
+  if(!confirm(msg))return;
+  var i=TST_CATALOG.findIndex(function(x){return x.id===id;});
+  if(i>=0)TST_CATALOG.splice(i,1);
+  tstSaveCatalog(); tstRender();
+}
+window.tstDelTest=tstDelTest;
+
+document.addEventListener('DOMContentLoaded',function(){
+  try{
+    if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_CATALOG')<0)SB_SETTINGS_KEYS.push('TST_CATALOG');
+    if(typeof window._sbApplySettingRow==='function'&&!window._sbApplySettingRowTstWrapped){
+      var _origTst=window._sbApplySettingRow;
+      window._sbApplySettingRow=function(row){
+        _origTst(row);
+        if(row&&row.key==='TST_CATALOG'){
+          try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+          try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests')tstRender(); }catch(e){}
+        }
+      };
+      window._sbApplySettingRowTstWrapped=true;
+    }
+  }catch(e){}
+});
+
 var _pfTab = 'gym';
 function pfSetTab(tab){
   _pfTab = tab;
-  ['gym','resistencia'].forEach(function(t){
+  ['gym','resistencia','tests'].forEach(function(t){
     var btn = document.getElementById('pf-tab-'+t+'-btn');
     var pane = document.getElementById('pf-tab-'+t);
     var isActive = (t===tab);
@@ -29983,6 +30377,8 @@ function pfSetTab(tab){
     try{ if(typeof gymRender==='function') gymRender(); }catch(e){}
   } else if(tab==='resistencia'){
     try{ resiRender(); }catch(e){ console.warn('Resistencia render:', e); }
+  } else if(tab==='tests'){
+    try{ tstRender(); }catch(e){ console.warn('Tests render:', e); }
   }
 }
 window.pfSetTab = pfSetTab;
