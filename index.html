@@ -32403,13 +32403,19 @@ var _xdOrigPaint = window.drwPaintShape;
 if(typeof _xdOrigPaint==='function'){
   window.drwPaintShape=function(ctx,s,selected,isPreview,noSel){
     if(!s){ return _xdOrigPaint(ctx,s,selected,isPreview,noSel); }
+    // Escala de objetos puntuales: transformar el contexto alrededor del centro
+    var _sc=s.scale||1;
+    var _scObj=(_sc!==1 && (s.type==='player'||s.type==='cone'||s.type==='ball'||s.type==='goal'||s.type==='minigoal'||s.type==='circle'));
+    if(_scObj){ ctx.save(); ctx.translate(s.x,s.y); ctx.scale(_sc,_sc); ctx.translate(-s.x,-s.y); }
     ctx.globalAlpha=isPreview?0.55:1;
     if(s.type==='player'||s.type==='cone'||s.type==='minigoal'||s.type==='zone'||s.type==='text'){
-      xdPaintCanvas(ctx,s); ctx.globalAlpha=1; return;
+      xdPaintCanvas(ctx,s); ctx.globalAlpha=1; if(_scObj)ctx.restore(); return;
     }
-    if(s.type==='arrow'&&s.kind){ xdPaintArrowCanvas(ctx,s); ctx.globalAlpha=1; return; }
+    if(s.type==='arrow'&&s.kind){ xdPaintArrowCanvas(ctx,s); ctx.globalAlpha=1; if(_scObj)ctx.restore(); return; }
     ctx.globalAlpha=1;
-    return _xdOrigPaint(ctx,s,selected,isPreview,noSel);
+    var _r=_xdOrigPaint(ctx,s,selected,isPreview,noSel);
+    if(_scObj)ctx.restore();
+    return _r;
   };
 }
 
@@ -32466,6 +32472,10 @@ function xdSvgBall(x,y,r){
 function xdSvgShape(s,i){
   var sel=(i>=0 && i===X.sel), col=xdCol(s.color), g='';
   var halo=sel?' filter="url(#xd-halo)"':'';
+  // Escala de objetos puntuales (jugador, cono, pelota, arco, minigoal, círculo).
+  // Los tipos con dimensiones propias (zona, rect, líneas) se redimensionan por arrastre.
+  var _sc=s.scale||1;
+  var _scaleWrap=(_sc!==1 && (s.type==='player'||s.type==='cone'||s.type==='ball'||s.type==='goal'||s.type==='minigoal'||s.type==='circle'));
   if(s.type==='player'){
     var tc=XD2_TEAM[s.team]||XD2_TEAM.a, txtc=(s.team==='c')?'#333':'#fff';
     g='<circle cx="'+s.x+'" cy="'+s.y+'" r="13" fill="'+tc+'" stroke="#fff" stroke-width="2"/>'+
@@ -32515,6 +32525,11 @@ function xdSvgShape(s,i){
     else if(s.type==='zone'||s.type==='rect'){lx=s.x+10;ly=s.y+14;}
     else {lx=s.x+12;ly=s.y-10;}
     g+='<text x="'+lx+'" y="'+ly+'" font-size="10" opacity="0.85">\ud83d\udd12</text>';
+  }
+  if(_scaleWrap){
+    // Escalar alrededor del centro del objeto (arco/minigoal usan su base y=s.y)
+    var cx=s.x, cy=(s.type==='goal'||s.type==='minigoal')?s.y:s.y;
+    g='<g transform="translate('+cx+' '+cy+') scale('+_sc+') translate('+(-cx)+' '+(-cy)+')">'+g+'</g>';
   }
   return '<g data-i="'+i+'"'+halo+'>'+g+'</g>';
 }
@@ -32567,7 +32582,13 @@ function xdCtxBar(){
   if(s.type==='player') extra='<button class="xd2-cbtn" onclick="xd2EditNum()">N° '+xdEsc(s.num||'')+'</button>';
   if(s.type==='zone'||s.type==='text') extra='<button class="xd2-cbtn" onclick="xd2EditLabel()">✎ Rótulo</button>';
   if(s.type==='goal'||s.type==='minigoal'||s.type==='rect') extra='<button class="xd2-cbtn" onclick="xd2Rotate()">↻ 90°</button>';
-  bar.innerHTML=extra+
+  // Reescalado: para objetos puntuales usa factor s.scale; para zona/rect/líneas ajusta dimensiones
+  var canScale=(s.type!=='text');
+  var scaleBtns=canScale?('<button class="xd2-cbtn" onclick="xd2Scale(0.85)" title="Achicar">➖</button>'+
+    '<button class="xd2-cbtn" onclick="xd2Scale(1.18)" title="Agrandar">➕</button>'):'';
+  bar.innerHTML=
+    '<button class="xd2-cbtn" onclick="xd2Undo()" title="Deshacer" '+(X.hist.length?'':'style="opacity:0.4"')+'>↶ Deshacer</button>'+
+    extra+scaleBtns+
     '<button class="xd2-cbtn" onclick="xd2Lock()">🔒 Bloquear</button>'+
     '<button class="xd2-cbtn" onclick="xd2Dup()">⧉ Duplicar</button>'+
     '<button class="xd2-cbtn" style="color:#E24B4A;border-color:#E24B4A66" onclick="xd2Del()">🗑 Eliminar</button>';
@@ -32585,12 +32606,13 @@ function xdHit(x,y,mode){
     var s=X.shapes[i];
     if(mode==='unlock'){ if(!s.lock)continue; }
     else if(s.lock)continue;
-    if(s.type==='player'&&Math.hypot(x-s.x,y-s.y)<=16)return i;
-    if(s.type==='cone'&&Math.hypot(x-s.x,y-s.y)<=13)return i;
-    if(s.type==='ball'&&Math.hypot(x-s.x,y-s.y)<=(s.r||11)+4)return i;
-    if(s.type==='circle'&&Math.hypot(x-s.x,y-s.y)<=(s.r||14)+4)return i;
-    if(s.type==='minigoal'&&Math.abs(x-s.x)<=20&&Math.abs(y-s.y)<=12)return i;
-    if(s.type==='goal'&&Math.abs(x-s.x)<=(s.w||44)/2+6&&y<=s.y+6&&y>=s.y-(s.h||22)-6)return i;
+    var _hs=s.scale||1;
+    if(s.type==='player'&&Math.hypot(x-s.x,y-s.y)<=16*_hs)return i;
+    if(s.type==='cone'&&Math.hypot(x-s.x,y-s.y)<=13*_hs)return i;
+    if(s.type==='ball'&&Math.hypot(x-s.x,y-s.y)<=((s.r||11)+4)*_hs)return i;
+    if(s.type==='circle'&&Math.hypot(x-s.x,y-s.y)<=((s.r||14)+4)*_hs)return i;
+    if(s.type==='minigoal'&&Math.abs(x-s.x)<=20*_hs&&Math.abs(y-s.y)<=12*_hs)return i;
+    if(s.type==='goal'&&Math.abs(x-s.x)<=((s.w||44)/2+6)*_hs&&y<=s.y+6&&y>=s.y-((s.h||22)+6)*_hs)return i;
     if(s.type==='text'&&Math.abs(x-s.x-30)<=44&&Math.abs(y-s.y+5)<=12)return i;
     if((s.type==='zone'||s.type==='rect')&&x>=s.x-5&&x<=s.x+s.w+5&&y>=s.y-5&&y<=s.y+s.h+5){
       var onEdge=(x<=s.x+7||x>=s.x+s.w-7||y<=s.y+7||y>=s.y+s.h-7);
@@ -32738,6 +32760,26 @@ window.xd2Rotate=function(){
   var s=X.shapes[X.sel]; if(!s)return;
   if(s.type==='goal'||s.type==='minigoal'||s.type==='rect'){ xdSnap(); s.angle=((s.angle||0)+Math.PI/2)%(Math.PI*2); xdRender(); }
 };
+// Reescalar el objeto seleccionado. Objetos puntuales usan s.scale (0.4–3×);
+// zona/rect/líneas escalan sus dimensiones alrededor de su centro.
+window.xd2Scale=function(factor){
+  var s=X.shapes[X.sel]; if(!s)return;
+  xdSnap();
+  if(s.type==='zone'||s.type==='rect'){
+    var cx=s.x+s.w/2, cy=s.y+s.h/2;
+    var nw=Math.max(14,s.w*factor), nh=Math.max(14,s.h*factor);
+    s.w=nw; s.h=nh; s.x=cx-nw/2; s.y=cy-nh/2;
+  } else if(s.type==='line'||s.type==='arrow'){
+    var mx=(s.x1+s.x2)/2, my=(s.y1+s.y2)/2;
+    s.x1=mx+(s.x1-mx)*factor; s.y1=my+(s.y1-my)*factor;
+    s.x2=mx+(s.x2-mx)*factor; s.y2=my+(s.y2-my)*factor;
+  } else {
+    var ns=Math.max(0.4,Math.min(3,(s.scale||1)*factor));
+    s.scale=Math.round(ns*100)/100;
+  }
+  xdRender();
+};
+window.xd2Undo=function(){ xdUndo(); };
 window.xd2EditNum=function(){
   var s=X.shapes[X.sel]; if(!s||s.type!=='player')return;
   var n=prompt('Número / etiqueta del jugador:',s.num||'');
