@@ -15227,18 +15227,16 @@ document.addEventListener('DOMContentLoaded',function(){
 </div><!-- end panel-evals -->
 
 <div id="gym-panel-library">
-<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
 
-  <!-- Listado de ejercicios -->
-  <div style="flex:1;min-width:260px">
-    <div style="font-size:11px;font-weight:700;color:#333;margin-bottom:8px">Ejercicios registrados</div>
-    <!-- Filtro por categoría -->
-    <div id="gym-lib-cats" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px"></div>
-    <div id="gym-lib-list" style="display:flex;flex-direction:column;gap:4px;max-height:420px;overflow-y:auto"></div>
-  </div>
+<!-- ═══ Barra de acciones: los paneles se despliegan a demanda ═══ -->
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+  <button id="gym-form-toggle-btn" onclick="gymToggleFormPanel()" style="display:flex;align-items:center;gap:7px;background:#1D9E75;color:#fff;border:none;border-radius:9px;padding:9px 16px;font-size:12px;font-weight:800;cursor:pointer">➕ Agregar ejercicio</button>
+  <button onclick="gymToggleCatsPanel()" style="display:flex;align-items:center;gap:7px;background:#fff;color:var(--club-c2,#3B4D88);border:1px solid #cdd4e4;border-radius:9px;padding:9px 16px;font-size:12px;font-weight:700;cursor:pointer">🗂 Categorías</button>
+</div>
 
-  <!-- Agregar / Editar ejercicio -->
-  <div style="min-width:270px;background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:12px">
+<!-- Panel: Agregar / Editar ejercicio (desplegable) -->
+<div id="gym-ex-form-wrap" style="display:none;margin-bottom:12px">
+  <div style="max-width:520px;background:#f9f9f9;border:1px solid #eee;border-radius:10px;padding:14px">
     <div style="font-size:11px;font-weight:700;color:#333;margin-bottom:8px" id="gym-ex-form-title">➕ Agregar ejercicio</div>
     <input type="hidden" id="gym-ex-edit-id" value="">
     <div class="fg" style="flex-direction:column;gap:7px">
@@ -15279,8 +15277,11 @@ document.addEventListener('DOMContentLoaded',function(){
     </div>
   </div>
 
-  <!-- Gestión de categorías con grupos y subgrupos -->
-  <div style="min-width:240px;background:#f0f5ff;border:1px solid #d0e0ff;border-radius:8px;padding:12px">
+  </div><!-- /gym-ex-form-wrap -->
+
+  <!-- Gestión de categorías con grupos y subgrupos (desplegable) -->
+  <div id="gym-cats-wrap" style="display:none;margin-bottom:12px">
+  <div style="max-width:420px;background:#f0f5ff;border:1px solid #d0e0ff;border-radius:10px;padding:14px">
     <div style="font-size:11px;font-weight:700;color:#333;margin-bottom:8px">🗂 Categorías de ejercicios</div>
     <div id="gym-cats-list" style="display:flex;flex-direction:column;gap:3px;margin-bottom:10px"></div>
     <!-- Nueva categoría -->
@@ -15302,8 +15303,12 @@ document.addEventListener('DOMContentLoaded',function(){
       <span id="gym-cat-msg" style="font-size:10px;color:#1D9E75;display:block;margin-top:5px"></span>
     </div>
   </div>
+  </div><!-- /gym-cats-wrap -->
 
-</div>
+<!-- ═══ Grid de tarjetas a ancho completo ═══ -->
+<div id="gym-lib-cats" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px"></div>
+<div id="gym-lib-list" class="lib-cards"></div>
+
 </div><!-- end panel-library -->
 
 <!-- Modal importar evaluaciones desde Excel/Sheets -->
@@ -17406,32 +17411,69 @@ function gymRenderLibCats(){
 function gymLibSetCat(c){ _gymLibCat=c; gymRenderLibCats(); gymRenderLibList(); }
 window.gymLibSetCat = gymLibSetCat;
 
+// ── Paneles desplegables (agregar ejercicio / categorías) ──
+function gymToggleFormPanel(force){
+  var w=document.getElementById('gym-ex-form-wrap'); if(!w)return;
+  var show=(force!==undefined)?force:(w.style.display==='none');
+  w.style.display=show?'':'none';
+  var btn=document.getElementById('gym-form-toggle-btn');
+  if(btn)btn.textContent=show?'✕ Cerrar formulario':'➕ Agregar ejercicio';
+}
+window.gymToggleFormPanel=gymToggleFormPanel;
+function gymToggleCatsPanel(){
+  var w=document.getElementById('gym-cats-wrap'); if(!w)return;
+  w.style.display=(w.style.display==='none')?'':'none';
+}
+window.gymToggleCatsPanel=gymToggleCatsPanel;
+
+// Miniatura del video: YouTube expone thumbs públicos por id (sin API)
+function gymVidThumb(url){
+  if(!url)return null;
+  var m=String(url).match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{6,})/);
+  return m?('https://img.youtube.com/vi/'+m[1]+'/hqdefault.jpg'):null;
+}
+
 function gymRenderLibList(){
   var cont = document.getElementById('gym-lib-list');
   if(!cont) return;
   var list = GYM_EXERCISES.filter(function(e){return _gymLibCat==='all'||e.cat===_gymLibCat;})
     .sort(function(a,b){return a.cat.localeCompare(b.cat)||a.name.localeCompare(b.name);});
-  if(!list.length){ cont.innerHTML='<div style="color:#aaa;font-size:11px;padding:8px">Sin ejercicios en esta categoría.</div>'; return; }
+  if(!list.length){ cont.innerHTML='<div style="grid-column:1/-1;color:#aaa;font-size:11px;padding:14px;text-align:center;background:#fff;border:2px dashed #e5e5e5;border-radius:12px">Sin ejercicios en esta categoría.</div>'; return; }
   cont.innerHTML = list.map(function(e){
     var col = gymCatColor(e.cat);
-    var itLabel = {pct1rm:'% 1RM',rpe:'RPE',rir:'RIR',sec:'seg',kg:'kg',none:'Sin carga'}[e.inttype]||e.inttype;
-    return '<div style="background:#fff;border:1px solid #eee;border-radius:6px;padding:7px 10px;display:flex;align-items:center;gap:8px">'
-      +'<span style="width:8px;height:8px;border-radius:50%;background:'+col+';flex-shrink:0;display:inline-block"></span>'
-      +'<div style="flex:1;min-width:0">'
-      +'<div style="font-size:11px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+e.name+'</div>'
-      +'<div style="font-size:10px;color:#888">'+(e.muscle||'')+(e.notes?' · '+e.notes:'')+'</div>'
-      +'</div>'
-      +'<span style="font-size:9px;background:'+col+'18;color:'+col+';border-radius:4px;padding:1px 5px;font-weight:600;white-space:nowrap">'+itLabel+'</span>'
-      +(e.videoUrl?'<a href="'+e.videoUrl+'" target="_blank" rel="noopener" title="Ver video" style="font-size:14px;text-decoration:none;line-height:1;flex-shrink:0">🎬</a>':'')
-      +'<button onclick="gymStartEditExercise('+e.id+')" style="border:none;background:none;cursor:pointer;color:var(--club-c2,#3B4D88);font-size:12px;padding:0 2px" title="Editar">✏️</button>'
-      +'<button onclick="gymDeleteExercise('+e.id+')" style="border:none;background:none;cursor:pointer;color:#ddd;font-size:12px;padding:0 2px" title="Eliminar">🗑</button>'
-      +'</div>';
+    var itLabel = {pct1rm:'% 1RM',rpe:'RPE',rir:'RIR',sec:'seg',kg:'kg',none:'Sin carga',derived:'derivado'}[e.inttype]||e.inttype;
+    var thumb = gymVidThumb(e.videoUrl);
+    var media;
+    if(thumb){ media='<img src="'+thumb+'" loading="lazy" alt="" onerror="this.style.display=\'none\'">'; }
+    else {
+      var ini=(e.name||'').split(/\s+/).slice(0,2).map(function(w){return (w[0]||'').toUpperCase();}).join('');
+      media='<svg class="lib-ph" viewBox="0 0 160 100" preserveAspectRatio="xMidYMid slice">'+
+        '<rect width="160" height="100" fill="'+col+'14"/>'+
+        '<text x="80" y="44" text-anchor="middle" font-size="26" opacity="0.5">🏋️</text>'+
+        '<text x="80" y="72" text-anchor="middle" font-size="15" fill="'+col+'" font-weight="800">'+ini+'</text></svg>';
+    }
+    var playOverlay=e.videoUrl?('<button onclick="event.stopPropagation();vidOpen(\''+String(e.videoUrl).replace(/'/g,"\\'")+'\')" title="Ver video" '+
+      'style="position:absolute;inset:0;margin:auto;width:44px;height:44px;border-radius:50%;border:none;background:rgba(13,27,42,0.72);color:#fff;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding-left:4px">▶</button>'):'';
+    return '<div class="lib-card" onclick="gymStartEditExercise('+e.id+')" title="Tocar para editar">'+
+      '<div class="lib-card-img">'+media+playOverlay+
+        '<span class="lib-chip" style="position:absolute;top:7px;left:7px;background:'+col+';color:#fff;max-width:calc(100% - 44px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+e.cat+'</span>'+
+        '<button onclick="event.stopPropagation();gymDeleteExercise('+e.id+')" style="position:absolute;top:7px;right:7px;border:none;background:rgba(255,255,255,0.92);color:#c99;border-radius:7px;width:24px;height:24px;font-size:11px;cursor:pointer" title="Eliminar">🗑</button>'+
+      '</div>'+
+      '<div style="padding:8px 10px 10px">'+
+        '<div style="font-size:12px;font-weight:800;color:#0D1B2A;line-height:1.25;margin-bottom:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+e.name+'</div>'+
+        '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+
+          '<span class="lib-chip" style="background:'+col+'18;color:'+col+'">'+itLabel+'</span>'+
+          (e.muscle?'<span class="lib-chip" style="background:#eef1f8;color:var(--club-c3,#304483)">'+e.muscle+'</span>':'')+
+        '</div>'+
+        (e.notes?'<div style="font-size:9.5px;color:#999;margin-top:5px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">'+e.notes+'</div>':'')+
+      '</div></div>';
   }).join('');
 }
 
 function gymStartEditExercise(id){
   var e = GYM_EXERCISES.find(function(ex){return ex.id===id;});
   if(!e) return;
+  gymToggleFormPanel(true); // el formulario vive plegado: abrirlo para editar
   document.getElementById('gym-ex-edit-id').value = id;
   document.getElementById('gym-ex-name').value = e.name;
   document.getElementById('gym-ex-cat').value = e.cat;
@@ -17467,7 +17509,9 @@ function gymExVideoPreview(url){
 }
 window.gymExVideoPreview = gymExVideoPreview;
 
+function _gymFormPanelClose(){ try{ gymToggleFormPanel(false); }catch(e){} }
 function gymCancelEditExercise(){
+  _gymFormPanelClose();
   document.getElementById('gym-ex-edit-id').value='';
   document.getElementById('gym-ex-name').value='';
   document.getElementById('gym-ex-cat').value=GYM_CATS.length?GYM_CATS[0].name:'';
@@ -17506,6 +17550,7 @@ function gymSaveExercise(){
       saveData();
       msg.style.color='#1D9E75'; msg.textContent='"'+name+'" actualizado.';
       setTimeout(function(){msg.textContent='';},3000);
+      setTimeout(_gymFormPanelClose, 700);
       gymCancelEditExercise();
       gymRenderLibList();
       gymRebuildCatSelects();
@@ -17515,6 +17560,7 @@ function gymSaveExercise(){
     GYM_EXERCISES.push({id:newId, name:name, cat:cat, muscle:muscle, inttype:inttype, notes:notes, videoUrl:videoUrl});
     saveData();
     msg.style.color='#1D9E75'; msg.textContent='"'+name+'" agregado.'; setTimeout(function(){msg.textContent='';},3000);
+    setTimeout(_gymFormPanelClose, 700);
     document.getElementById('gym-ex-name').value='';
     document.getElementById('gym-ex-muscle').value='';
     document.getElementById('gym-ex-notes').value='';
