@@ -17523,9 +17523,42 @@ function gymRenderLibList(){
   var cont = document.getElementById('gym-lib-list');
   if(!cont) return;
   var list = GYM_EXERCISES.filter(function(e){return _gymLibCat==='all'||e.cat===_gymLibCat;})
-    .sort(function(a,b){return a.cat.localeCompare(b.cat)||a.name.localeCompare(b.name);});
+    .sort(function(a,b){return a.name.localeCompare(b.name,'es');});
   if(!list.length){ cont.innerHTML='<div style="grid-column:1/-1;color:#aaa;font-size:11px;padding:14px;text-align:center;background:#fff;border:2px dashed #e5e5e5;border-radius:12px">Sin ejercicios en esta categoría.</div>'; return; }
-  cont.innerHTML = list.map(function(e){
+
+  // Vista "Todas": secciones por categoría (en el orden del gestor: raíces y
+  // sus subgrupos), con encabezado y ejercicios alfabéticos adentro. Así la
+  // grilla deja de ser una mezcla plana. Filtrando una categoría: solo alfabético.
+  if(_gymLibCat==='all'){
+    var roots=GYM_CATS.filter(function(c){return !c.parent;});
+    var orderedCats=[];
+    roots.forEach(function(root){
+      orderedCats.push(root);
+      GYM_CATS.filter(function(c){return c.parent===root.name;}).forEach(function(ch){orderedCats.push(ch);});
+    });
+    var byCat={};
+    list.forEach(function(e){ (byCat[e.cat]=byCat[e.cat]||[]).push(e); });
+    var htmlOut='';
+    var emit=function(catName,color,isSub){
+      var exs=byCat[catName]; if(!exs||!exs.length)return;
+      delete byCat[catName];
+      htmlOut+='<div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;margin:'+(htmlOut?'10px':'0')+' 0 2px;padding-left:'+(isSub?'14px':'0')+'">'+
+        '<span style="width:'+(isSub?'8':'10')+'px;height:'+(isSub?'8':'10')+'px;border-radius:'+(isSub?'50%':'3px')+';background:'+color+'"></span>'+
+        '<span style="font-size:'+(isSub?'10':'11')+'px;font-weight:800;color:'+color+';text-transform:uppercase;letter-spacing:.04em">'+catName+'</span>'+
+        '<span style="font-size:9px;color:#aaa;font-weight:600">'+exs.length+'</span>'+
+        '<span style="flex:1;height:1px;background:'+color+'33"></span>'+
+      '</div>';
+      htmlOut+=exs.map(gymLibCardHtml).join('');
+    };
+    orderedCats.forEach(function(c){ emit(c.name, c.color, !!c.parent); });
+    // Ejercicios cuya categoría ya no existe en el gestor
+    Object.keys(byCat).sort().forEach(function(cn){ emit(cn, '#999', false); });
+    cont.innerHTML=htmlOut;
+    return;
+  }
+  cont.innerHTML = list.map(gymLibCardHtml).join('');
+}
+function gymLibCardHtml(e){
     var col = gymCatColor(e.cat);
     var itLabel = {pct1rm:'% 1RM',rpe:'RPE',rir:'RIR',sec:'seg',kg:'kg',none:'Sin carga',derived:'derivado'}[e.inttype]||e.inttype;
     var thumb = gymVidThumb(e.videoUrl);
@@ -17553,7 +17586,6 @@ function gymRenderLibList(){
         '</div>'+
         (e.notes?'<div style="font-size:9.5px;color:#999;margin-top:5px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">'+e.notes+'</div>':'')+
       '</div></div>';
-  }).join('');
 }
 
 function gymStartEditExercise(id){
