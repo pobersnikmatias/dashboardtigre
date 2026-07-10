@@ -101,6 +101,12 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
    muestra en el slot común de los paneles cuando el botón lo abre. */
 #form-det{display:none!important}
 #form-det > summary{display:none!important}
+@media print{
+  body *{visibility:hidden}
+  #inf-sheet, #inf-sheet *{visibility:visible}
+  #inf-sheet{position:absolute!important;left:0;top:0;width:100%!important;box-shadow:none!important}
+  @page{margin:8mm}
+}
 .lib-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:12px;margin-top:10px}
 .lib-card{background:#fff;border:1px solid #e2e5ee;border-radius:12px;overflow:hidden;cursor:pointer;transition:box-shadow .15s, transform .15s;display:flex;flex-direction:column;position:relative}
 .lib-card:hover{box-shadow:0 6px 22px rgba(30,42,82,0.14);transform:translateY(-2px)}
@@ -7128,6 +7134,19 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   <button id="prof-subtab-competencia" onclick="profSetSubtab('competencia')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🏆 Perfil de competencia</button>
   <button id="prof-subtab-nutricional" onclick="profSetSubtab('nutricional')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🥗 Nutricional</button>
   <button id="prof-subtab-movilidad" onclick="profSetSubtab('movilidad')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🦵 Movilidad</button>
+  <button id="prof-subtab-informes" onclick="profSetSubtab('informes')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">📄 Informes</button>
+</div>
+
+<!-- SUBTAB: Informes (ficha élite del jugador) -->
+<div id="prof-subview-informes" style="display:none">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <select id="inf-player-sel" onchange="infRender()" style="padding:7px 12px;border:1px solid #ccc;border-radius:8px;font-size:12px;font-weight:700;min-width:220px;background:#fff"></select>
+    <label style="background:#fff;border:1px solid #cdd4e4;border-radius:8px;padding:7px 14px;font-size:11px;font-weight:700;color:var(--club-c2,#3B4D88);cursor:pointer">📷 Foto del jugador
+      <input type="file" accept="image/*" onchange="infPhotoUpload(this)" style="display:none">
+    </label>
+    <button onclick="infPrint()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:12px;font-weight:800;cursor:pointer;margin-left:auto">🖨 Exportar PDF / Imprimir</button>
+  </div>
+  <div id="inf-sheet-wrap" style="display:flex;justify-content:center"><div id="inf-sheet"></div></div>
 </div>
 
 <!-- SUBTAB: General (contenido original) -->
@@ -25550,6 +25569,10 @@ window.cargaRenderDolores=cargaRenderDolores;
 
 // Subtab switcher de Perfiles (general / nutricional / movilidad)
 function profSetSubtab(t){
+  var iv=document.getElementById('prof-subview-informes'); if(iv)iv.style.display=t==='informes'?'':'none';
+  var bi=document.getElementById('prof-subtab-informes');
+  if(bi){bi.style.color=t==='informes'?'#0D1B2A':'#aaa';bi.style.borderBottomColor=t==='informes'?'#304483':'transparent';}
+  if(t==='informes'){ try{ infBoot(); }catch(e){ console.warn('Informes:',e); } }
   document.getElementById('prof-subview-general').style.display=t==='general'?'':'none';
   var cv=document.getElementById('prof-subview-competencia'); if(cv)cv.style.display=t==='competencia'?'':'none';
   document.getElementById('prof-subview-nutricional').style.display=t==='nutricional'?'':'none';
@@ -25567,6 +25590,254 @@ function profSetSubtab(t){
   if(t==='movilidad'){if(typeof mobRender==='function')mobRender();}
 }
 window.profSetSubtab=profSetSubtab;
+
+// ════════════════════════════════════════════════════════════════════
+// INFORMES — Ficha élite del jugador (una hoja con TODO: física, GPS,
+// tests, gimnasio, wellness, nutrición, movilidad). Pensada para
+// compartir con la comisión directiva. Exporta a PDF vía impresión.
+// ════════════════════════════════════════════════════════════════════
+function infNorm(s){ return (typeof cargaNormName==='function')?cargaNormName(s):String(s||'').toLowerCase().trim(); }
+function infC1(){ return (typeof CLUB_SETTINGS!=='undefined'&&CLUB_SETTINGS.c1)||'#1E2A52'; }
+function infC2(){ return (typeof CLUB_SETTINGS!=='undefined'&&CLUB_SETTINGS.c2)||'#3B4D88'; }
+
+function infBoot(){
+  var sel=document.getElementById('inf-player-sel'); if(!sel)return;
+  var keys=Object.keys(PLAYER_PROFILES).sort(function(a,b){
+    return (PLAYER_PROFILES[a].name||a).localeCompare(PLAYER_PROFILES[b].name||b,'es');
+  });
+  var cur=sel.value;
+  sel.innerHTML=keys.map(function(k){
+    var p=PLAYER_PROFILES[k];
+    return '<option value="'+k+'"'+(k===cur?' selected':'')+'>'+(p.name||k)+'</option>';
+  }).join('');
+  if(!keys.length){ document.getElementById('inf-sheet').innerHTML='<div style="padding:30px;color:#999;font-size:12px">No hay perfiles de jugadores cargados.</div>'; return; }
+  infRender();
+}
+window.infBoot=infBoot;
+
+function infPhotoUpload(input){
+  var f=input.files&&input.files[0]; if(!f)return;
+  var key=(document.getElementById('inf-player-sel')||{}).value; if(!key)return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var img=new Image();
+    img.onload=function(){
+      // Comprimir a 360px de alto (la foto viaja en el payload; liviana)
+      var h=360, w=Math.round(img.width*h/img.height);
+      var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+      cv.getContext('2d').drawImage(img,0,0,w,h);
+      PLAYER_PROFILES[key].photo=cv.toDataURL('image/jpeg',0.82);
+      saveData(); infRender();
+    };
+    img.src=rd.result;
+  };
+  rd.readAsDataURL(f);
+  input.value='';
+}
+window.infPhotoUpload=infPhotoUpload;
+
+function infPrint(){ window.print(); }
+window.infPrint=infPrint;
+
+// ── Agregadores por jugador ──
+function infGpsStats(norm){
+  var days=[], best={mts_min:0, vmax:0, mtsDay:0, hsrDay:0}, tot={mts:0,ses:0};
+  (MICROCICLO||[]).forEach(function(s){
+    var p=(s.players||[]).find(function(x){return infNorm(x.name)===norm;});
+    if(!p)return;
+    tot.ses++;
+    tot.mts+=(p.mts||0);
+    var mm=p.mts_min||((p.tot_dur>0)?(p.mts||0)/p.tot_dur:0);
+    if(mm>best.mts_min)best.mts_min=mm;
+    if((p.vmax||0)>best.vmax)best.vmax=p.vmax;
+    if((p.mts||0)>best.mtsDay)best.mtsDay=p.mts;
+    if((p.hsr||0)>best.hsrDay)best.hsrDay=p.hsr;
+  });
+  return {tot:tot,best:best};
+}
+function infWellStats(norm){
+  var cutoff=new Date(); cutoff.setDate(cutoff.getDate()-30);
+  var cutISO=cutoff.toISOString().slice(0,10);
+  var wl=(typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:[]).filter(function(r){
+    return infNorm(r.name)===norm && (cargaParseDate(r.date)||r.date)>=cutISO;
+  });
+  var ps=(typeof PSE_DATA!=='undefined'?PSE_DATA:[]).filter(function(r){
+    return infNorm(r.name)===norm && (cargaParseDate(r.date)||r.date)>=cutISO;
+  });
+  var rd=wl.map(function(r){return r.readiness;}).filter(function(v){return v!=null&&!isNaN(v);});
+  var pv=ps.map(function(r){return parseFloat(r.pse);}).filter(function(v){return !isNaN(v);});
+  var avg=function(a){return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null;};
+  return {n:wl.length+ps.length, readiness:avg(rd), pse:avg(pv)};
+}
+function infAsistStats(norm){
+  if(typeof HOY_ASIST==='undefined')return null;
+  var p=0,t=0;
+  Object.keys(HOY_ASIST).forEach(function(d){
+    var v=HOY_ASIST[d][norm]; if(!v)return;
+    t++; if(v==='P')p++;
+  });
+  return t?{pct:Math.round(p*100/t),t:t}:null;
+}
+function infSec(title,inner,color){
+  return '<div style="margin-bottom:13px;break-inside:avoid">'+
+    '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">'+
+      '<span style="width:4px;height:15px;border-radius:2px;background:'+(color||infC2())+'"></span>'+
+      '<span style="font-size:11.5px;font-weight:800;color:'+infC1()+';text-transform:uppercase;letter-spacing:.05em">'+title+'</span>'+
+    '</div>'+inner+'</div>';
+}
+function infKpi(v,l,sub){
+  return '<div style="text-align:center;flex:1;min-width:74px">'+
+    '<div style="font-size:19px;font-weight:800;color:'+infC1()+';line-height:1.1">'+v+'</div>'+
+    '<div style="font-size:8.5px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.04em;margin-top:2px">'+l+'</div>'+
+    (sub?'<div style="font-size:8px;color:#bbb">'+sub+'</div>':'')+
+  '</div>';
+}
+function infRow(l,v,extra){
+  return '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0;border-bottom:1px solid #f2f2f2;font-size:10.5px">'+
+    '<span style="color:#555">'+l+'</span><span style="font-weight:700;color:#1a1a1a">'+v+(extra?' <span style="font-weight:400;font-size:9px;color:#999">'+extra+'</span>':'')+'</span></div>';
+}
+
+function infRender(){
+  var out=document.getElementById('inf-sheet'); if(!out)return;
+  var key=(document.getElementById('inf-player-sel')||{}).value;
+  var prof=PLAYER_PROFILES[key]; if(!prof){ out.innerHTML=''; return; }
+  var name=prof.name||key, norm=infNorm(name);
+  var c1=infC1(), c2=infC2();
+  var clubName=(typeof CLUB_SETTINGS!=='undefined'&&CLUB_SETTINGS.name)||'Club Atlético Tigre';
+  var clubCat=(typeof CLUB_SETTINGS!=='undefined'&&CLUB_SETTINGS.category)||'';
+  var escudo=(function(){ var el=document.querySelector('#boot-splash img'); return el?el.src:null; })();
+  var estados={disponible:['DISPONIBLE','#1D9E75'],lesion:['LESIONADO','#D9534F'],reserva:['RESERVA','#3B4D88'],primera:['PRIMERA','#E8A13C']};
+  var est=estados[prof.estado||'disponible']||estados.disponible;
+
+  var gps=infGpsStats(norm);
+  var well=infWellStats(norm);
+  var asist=infAsistStats(norm);
+
+  // Tests físicos: último + PB por test
+  var testRows='';
+  if(typeof TST_DATA!=='undefined'&&typeof TST_CATALOG!=='undefined'){
+    var byTest={};
+    TST_DATA.filter(function(r){return infNorm(r.name)===norm;}).forEach(function(r){(byTest[r.testId]=byTest[r.testId]||[]).push(r);});
+    testRows=Object.keys(byTest).map(function(tid){
+      var t=(typeof tstById==='function')?tstById(tid):null; if(!t)return '';
+      var series=byTest[tid].sort(function(a,b){return a.date<b.date?-1:1;});
+      var vals=series.map(function(r){return {v:tstVal(r),asy:tstAsym(r),date:r.date};}).filter(function(x){return x.v!=null;});
+      if(!vals.length)return '';
+      var nums=vals.map(function(x){return x.v;});
+      var pb=t.better==='down'?Math.min.apply(null,nums):Math.max.apply(null,nums);
+      var last=vals[vals.length-1];
+      var asyTxt=last.asy!=null?(' · Δ'+(last.asy>0?'+':'')+last.asy.toFixed(0)+'%'):'';
+      return infRow(t.name, last.v.toFixed(1)+' '+t.unit, 'PB '+pb.toFixed(1)+asyTxt+' · '+last.date.slice(5));
+    }).join('');
+  }
+
+  // Gimnasio: mejores cargas (rm1 más reciente por ejercicio, top 6)
+  var gymRows='';
+  if(typeof GYM_EVALS!=='undefined'){
+    var evals=GYM_EVALS[key]||[];
+    var latestByEx={};
+    evals.forEach(function(ev){
+      if(ev.rm1==null||isNaN(parseFloat(ev.rm1)))return;
+      var ex=(typeof evalResolveEx==='function')?evalResolveEx(ev.exercise):ev.exercise;
+      if(!latestByEx[ex]||ev.date>latestByEx[ex].date)latestByEx[ex]={rm1:parseFloat(ev.rm1),date:ev.date};
+    });
+    gymRows=Object.keys(latestByEx).sort(function(a,b){return latestByEx[b].rm1-latestByEx[a].rm1;}).slice(0,6).map(function(ex){
+      return infRow(ex, latestByEx[ex].rm1.toFixed(0)+' kg', '1RM · '+String(latestByEx[ex].date).slice(5));
+    }).join('');
+  }
+
+  // Nutrición: última medición + delta
+  var nutRows='';
+  var nut=(typeof NUTRITION_DATA!=='undefined'?(NUTRITION_DATA[key]||[]):[]).slice().sort(function(a,b){return a.date<b.date?-1:1;});
+  if(nut.length){
+    var n0=nut[nut.length-1], nPrev=nut.length>1?nut[nut.length-2]:null;
+    var d=function(k){ if(!nPrev||n0[k]==null||nPrev[k]==null)return ''; var dd=n0[k]-nPrev[k]; return (dd>0?'▲+':'▼')+dd.toFixed(1); };
+    if(n0.peso!=null)nutRows+=infRow('Peso',n0.peso.toFixed(1)+' kg',d('peso'));
+    if(n0.adiposa!=null)nutRows+=infRow('Masa adiposa',n0.adiposa.toFixed(1)+' %',d('adiposa'));
+    if(n0.muscular!=null)nutRows+=infRow('Masa muscular',n0.muscular.toFixed(1)+' %',d('muscular'));
+    if(n0.imo!=null)nutRows+=infRow('Índice M/O',n0.imo.toFixed(2),d('imo'));
+    if(n0.suma6!=null)nutRows+=infRow('Suma 6 pliegues',n0.suma6.toFixed(1)+' mm',d('suma6'));
+    nutRows+='<div style="font-size:8.5px;color:#aaa;margin-top:3px">Medición: '+String(n0.date).slice(0,10)+'</div>';
+  }
+
+  // Movilidad: última medición con asimetrías
+  var mobRows='';
+  var mob=(typeof MOBILITY_DATA!=='undefined'?(MOBILITY_DATA[key]||[]):[]).slice().sort(function(a,b){return a.date<b.date?-1:1;});
+  if(mob.length){
+    var m0=mob[mob.length-1];
+    var pair=function(l,a,b,unit){
+      if(a==null&&b==null)return '';
+      return infRow(l,(a!=null?a:'—')+' / '+(b!=null?b:'—')+(unit?' '+unit:''),'I / D');
+    };
+    mobRows+=pair('Cadena posterior',m0.cpL,m0.cpR,'');
+    mobRows+=pair('Rotación interna',m0.riL,m0.riR,'°');
+    mobRows+=pair('Rotación externa',m0.reL,m0.reR,'°');
+    mobRows+=pair('Tobillo (lunge)',m0.tobL,m0.tobR,'cm');
+    mobRows+='<div style="font-size:8.5px;color:#aaa;margin-top:3px">Medición: '+String(m0.date).slice(0,10)+'</div>';
+  }
+
+  var today=new Date();
+  var fecha=String(today.getDate()).padStart(2,'0')+'/'+String(today.getMonth()+1).padStart(2,'0')+'/'+today.getFullYear();
+
+  out.style.cssText='width:820px;max-width:100%;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 10px 40px rgba(20,30,60,0.15);font-family:inherit';
+  out.innerHTML=
+    // ── Cabecera institucional ──
+    '<div style="background:linear-gradient(115deg,'+c1+','+c2+');padding:22px 26px;display:flex;align-items:center;gap:18px;color:#fff">'+
+      (escudo?'<img src="'+escudo+'" style="height:56px;flex-shrink:0">':'')+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.14em;opacity:.75;text-transform:uppercase">'+clubName+(clubCat?' · '+clubCat:'')+'</div>'+
+        '<div style="font-size:26px;font-weight:800;line-height:1.1;margin-top:2px">'+name+'</div>'+
+        '<div style="display:flex;gap:7px;margin-top:6px;align-items:center;flex-wrap:wrap">'+
+          (prof.pos?'<span style="font-size:10px;font-weight:800;background:rgba(255,255,255,0.18);border-radius:10px;padding:2px 10px">'+prof.pos+'</span>':'')+
+          '<span style="font-size:10px;font-weight:800;background:'+est[1]+';border-radius:10px;padding:2px 10px">'+est[0]+'</span>'+
+        '</div>'+
+      '</div>'+
+      '<div style="width:96px;height:96px;border-radius:50%;flex-shrink:0;border:3px solid rgba(255,255,255,0.55);overflow:hidden;background:rgba(255,255,255,0.14);display:flex;align-items:center;justify-content:center">'+
+        (prof.photo?'<img src="'+prof.photo+'" style="width:100%;height:100%;object-fit:cover">':'<span style="font-size:34px;opacity:.6">👤</span>')+
+      '</div>'+
+    '</div>'+
+    // ── Franja de KPIs ──
+    '<div style="display:flex;gap:6px;padding:14px 22px;background:#f7f9fd;border-bottom:1px solid #e8ecf4;flex-wrap:wrap">'+
+      infKpi(prof.vmax?prof.vmax.toFixed(1):'—','Vmax km/h','perfil')+
+      infKpi(prof.accmax?prof.accmax.toFixed(1):'—','AccMáx m/s²','perfil')+
+      infKpi(prof.dccmax?prof.dccmax.toFixed(1):'—','DccMáx m/s²','perfil')+
+      infKpi(asist?asist.pct+'%':'—','Disponibilidad',asist?asist.t+' días':'')+
+      infKpi(gps.tot.ses||'—','Sesiones GPS','registradas')+
+      infKpi(gps.tot.mts?(gps.tot.mts/1000).toFixed(1)+' km':'—','Dist. acumulada','GPS')+
+    '</div>'+
+    // ── Cuerpo en 2 columnas ──
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 22px;padding:16px 22px 8px">'+
+      '<div>'+
+        infSec('🛰 Mejores rendimientos GPS',
+          (gps.tot.ses?(
+            infRow('Máx intensidad (día)',gps.best.mts_min?gps.best.mts_min.toFixed(1)+' m/min':'—','')+
+            infRow('Vmax en sesión',gps.best.vmax?gps.best.vmax.toFixed(1)+' km/h':'—','')+
+            infRow('Máx distancia (día)',gps.best.mtsDay?Math.round(gps.best.mtsDay)+' m':'—','')+
+            infRow('Máx alta intensidad 18-21 (día)',gps.best.hsrDay?Math.round(gps.best.hsrDay)+' m':'—','')
+          ):'<div style="font-size:10px;color:#aaa">Sin sesiones GPS registradas.</div>'))+
+        infSec('🧪 Tests físicos', testRows||'<div style="font-size:10px;color:#aaa">Sin tests registrados.</div>')+
+        infSec('🏋️ Fuerza — mejores cargas', gymRows||'<div style="font-size:10px;color:#aaa">Sin evaluaciones de gimnasio.</div>')+
+      '</div>'+
+      '<div>'+
+        infSec('💚 Wellness y carga interna (30 días)',
+          (well.n?(
+            infRow('Check-ins registrados',well.n,'')+
+            (well.readiness!=null?infRow('Readiness promedio',well.readiness.toFixed(1),''):'')+
+            (well.pse!=null?infRow('PSE promedio',well.pse.toFixed(1),'Foster'):'')
+          ):'<div style="font-size:10px;color:#aaa">Sin registros en los últimos 30 días.</div>'))+
+        infSec('🥗 Composición corporal', nutRows||'<div style="font-size:10px;color:#aaa">Sin mediciones nutricionales.</div>')+
+        infSec('🦵 Movilidad', mobRows||'<div style="font-size:10px;color:#aaa">Sin mediciones de movilidad.</div>')+
+      '</div>'+
+    '</div>'+
+    // ── Pie institucional ──
+    '<div style="display:flex;align-items:center;gap:10px;padding:10px 22px;background:'+c1+';color:#fff">'+
+      (escudo?'<img src="'+escudo+'" style="height:20px">':'')+
+      '<span style="font-size:9px;opacity:.8">Informe individual de rendimiento · '+clubName+(clubCat?' '+clubCat:'')+' · Emitido el '+fecha+'</span>'+
+      '<span style="margin-left:auto;font-size:9px;opacity:.6">Preparación Física</span>'+
+    '</div>';
+}
+window.infRender=infRender;
+
 
 // ═══════════════════════════════════════════════════════════════
 // PERFIL DE COMPETENCIA — registros máximos y promedios en partidos
