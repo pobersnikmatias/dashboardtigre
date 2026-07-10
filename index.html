@@ -85,6 +85,16 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 .csv-prev th{background:#f5f5f5;padding:3px 5px;border-bottom:1px solid #ddd;font-weight:600;color:#333}
 .csv-prev td{padding:2px 5px;border-bottom:0.5px solid #f0f0f0}
 .dup{background:#fff8f0!important}.ok{background:#f8fff8!important}
+.lib-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:12px;margin-top:10px}
+.lib-card{background:#fff;border:1px solid #e2e5ee;border-radius:12px;overflow:hidden;cursor:pointer;transition:box-shadow .15s, transform .15s;display:flex;flex-direction:column;position:relative}
+.lib-card:hover{box-shadow:0 6px 22px rgba(30,42,82,0.14);transform:translateY(-2px)}
+.lib-card-img{position:relative;width:100%;padding-bottom:62%;background:#f2f4f9;overflow:hidden}
+.lib-card-img img,.lib-card-img canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.lib-card-img svg.lib-ph{position:absolute;inset:0;width:100%;height:100%}
+.lib-chip{display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:10px;line-height:1.4}
+.lib-band{display:inline-flex;flex-direction:column;align-items:center;min-width:32px;padding:3px 4px;border-radius:7px;font-size:8px;font-weight:700;line-height:1.25}
+.lib-band b{font-size:10px}
+@media(max-width:620px){.lib-cards{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:9px}}
 .leg-row{display:flex;gap:5px;align-items:center;flex-wrap:wrap;font-size:10px;color:#555;margin-bottom:7px}
 .leg-box{background:#fff;border:1px solid #eee;border-radius:6px;padding:5px 10px;font-size:10px;color:#666;margin-top:6px}
 .cat-rename-row{display:flex;align-items:center;gap:5px;background:#f7f7f7;border-radius:5px;padding:4px 7px}
@@ -1085,6 +1095,10 @@ document.addEventListener('click',function(e){
 </div>
 
 <div class="leg-row">
+  <span style="display:inline-flex;border:1px solid #cdd4e4;border-radius:8px;overflow:hidden">
+    <button id="lib-view-cards" onclick="libSetView('cards')" style="border:none;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;background:var(--club-c2,#3B4D88);color:#fff">⊞ Tarjetas</button>
+    <button id="lib-view-table" onclick="libSetView('table')" style="border:none;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#666">☰ Tabla</button>
+  </span>
   <span style="font-weight:600;color:#333">Ordenar:</span>
   <select id="ord" style="font-size:11px;padding:2px 6px;border:1px solid #ccc;border-radius:4px">
     <option value="date" selected>Fecha</option><option value="nombre">Nombre A-Z</option><option value="mts">Mts/min</option><option value="hsr">18-21</option><option value="h2">21-25</option>
@@ -1102,6 +1116,7 @@ document.addEventListener('click',function(e){
   </span>
 </div>
 
+<div id="lib-cards" class="lib-cards" style="display:none"></div>
 <div class="tbl-wrap library-table">
 <table><thead><tr>
   <th style="width:14px"></th>
@@ -2083,7 +2098,123 @@ let showDates=true;
 function toggleDates(){showDates=!showDates;document.getElementById('btn-toggle-dates').textContent=showDates?'Ocultar fechas':'Mostrar fechas';drawTable(gf());}
 window.toggleDates=toggleDates;
 
+// ── Vista de la biblioteca: 'cards' (tarjetas visuales) o 'table' (tabla) ──
+var libView=localStorage.getItem('libView_v1')||'cards';
+function libSetView(v){
+  libView=(v==='table')?'table':'cards';
+  try{ localStorage.setItem('libView_v1', libView); }catch(e){}
+  drawTable(typeof gf==='function'?gf():D);
+}
+window.libSetView=libSetView;
+function libSyncViewUI(){
+  var bc=document.getElementById('lib-view-cards'), bt=document.getElementById('lib-view-table');
+  var cards=document.getElementById('lib-cards');
+  var wrap=document.querySelector('#view-train .tbl-wrap.library-table');
+  var on='background:var(--club-c2,#3B4D88);color:#fff', off='background:#fff;color:#666';
+  if(bc)bc.style.cssText='border:none;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;'+(libView==='cards'?on:off);
+  if(bt)bt.style.cssText='border:none;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;'+(libView==='table'?on:off);
+  if(cards)cards.style.display=(libView==='cards')?'grid':'none';
+  if(wrap)wrap.style.display=(libView==='cards')?'none':'';
+}
+
+// Valor por minuto de una métrica: raw directo o ratio×REF
+function _libPerMin(r,key){
+  if(r.raw && r.raw[key]!=null)return r.raw[key];
+  var ratio=r[key];
+  if(ratio==null||isNaN(ratio)||!REF||REF[key]==null)return null;
+  return ratio*REF[key];
+}
+function _libChipCol(ratio,cap){
+  if(ratio==null||isNaN(ratio))return {bg:'#f4f4f4',tx:'#999',bd:'#e5e5e5'};
+  var u=cap&&ratio>cap?1.6:ratio;
+  return cc(u);
+}
+
+function drawCards(rows){
+  var box=document.getElementById('lib-cards'); if(!box)return;
+  var parseDateSort=function(d){if(!d)return 0;var p=d.split('/');if(p.length===3)return parseInt(p[2])*10000+parseInt(p[1])*100+parseInt(p[0]);return 0;};
+  // Respetar el selector "Ordenar" (mismos criterios que la tabla)
+  var _sf={
+    date:function(a,b){return parseDateSort(b.date)-parseDateSort(a.date)||a.n.localeCompare(b.n);},
+    nombre:function(a,b){return a.n.localeCompare(b.n);},
+    mts:function(a,b){return (b.mts||0)-(a.mts||0)||a.n.localeCompare(b.n);},
+    hsr:function(a,b){return (b.hsr||0)-(a.hsr||0)||a.n.localeCompare(b.n);},
+    h2:function(a,b){return (b.h2||0)-(a.h2||0)||a.n.localeCompare(b.n);},
+    h25:function(a,b){return (b.h25||0)-(a.h25||0)||a.n.localeCompare(b.n);},
+    acc:function(a,b){return (b.acc||0)-(a.acc||0)||a.n.localeCompare(b.n);},
+    dcc:function(a,b){return (b.dcc||0)-(a.dcc||0)||a.n.localeCompare(b.n);},
+    rhie:function(a,b){return (b.rhie||0)-(a.rhie||0)||a.n.localeCompare(b.n);},
+    vmax:function(a,b){return (b.vmax||0)-(a.vmax||0)||a.n.localeCompare(b.n);},
+    eii:function(a,b){return (calcEII(a)||99999)-(calcEII(b)||99999)||a.n.localeCompare(b.n);}
+  };
+  var sorted=rows.slice().sort(_sf[typeof sk!=='undefined'?sk:'date']||_sf.date);
+  if(!sorted.length){
+    box.innerHTML='<div style="grid-column:1/-1;padding:26px;text-align:center;color:#999;font-size:12px;background:#fff;border:2px dashed #e0e0e0;border-radius:12px">No hay ejercicios en esta categoría todavía.<br><span style="font-size:11px">Creá el primero con <b>🎨 Diseñá tu ejercicio</b>.</span></div>';
+    return;
+  }
+  var BANDS=[['hsr','18-21',5],['h2','21-25',5],['h25','+25',10],['acc','Acc',8],['dcc','Dec',8],['rhie','RHIE',3]];
+  box.innerHTML=sorted.map(function(r){
+    var c=BC[r.cat]||'#888';
+    var e=calcEII(r);
+    var o=(typeof gpsExerciseOrientation==='function')?gpsExerciseOrientation(r):null;
+    var mtsPM=_libPerMin(r,'mts');
+    var mcc=_libChipCol(r.mts,2);
+    // Imagen: foto > diagrama (canvas post-render) > placeholder mini-cancha
+    var media;
+    if(r.img){ media='<img src="'+r.img+'" loading="lazy" alt="">'; }
+    else if(r.diag){ media='<canvas class="lib-card-cv" data-diag-id="'+r.id+'"></canvas>'; }
+    else {
+      media='<svg class="lib-ph" viewBox="0 0 160 100" preserveAspectRatio="xMidYMid slice">'+
+        '<rect width="160" height="100" fill="'+c+'18"/>'+
+        '<rect x="14" y="10" width="132" height="80" fill="none" stroke="'+c+'55" stroke-width="2" rx="3"/>'+
+        '<line x1="80" y1="10" x2="80" y2="90" stroke="'+c+'55" stroke-width="2"/>'+
+        '<circle cx="80" cy="50" r="13" fill="none" stroke="'+c+'55" stroke-width="2"/>'+
+        '<text x="80" y="55" text-anchor="middle" font-size="13" fill="'+c+'99" font-weight="700">'+(r.n||'').slice(0,2).toUpperCase()+'</text></svg>';
+    }
+    var badges='<div style="position:absolute;top:7px;left:7px;display:flex;gap:5px;align-items:center;max-width:calc(100% - 60px)">'+
+      '<span class="lib-chip" style="background:'+c+';color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(r.cat||'—')+'</span>'+
+      (o?'<span class="lib-chip" style="background:rgba(255,255,255,0.92);color:'+o.color+'">▸ '+o.label+'</span>':'')+
+    '</div>'+
+    '<div style="position:absolute;top:7px;right:7px;display:flex;gap:4px">'+
+      (r.video?'<button onclick="event.stopPropagation();vidOpen(\''+String(r.video).replace(/'/g,"\\'")+'\')" style="border:none;background:rgba(255,255,255,0.94);color:#D9534F;border-radius:7px;width:26px;height:26px;font-size:12px;cursor:pointer;font-weight:800" title="Ver video">▶</button>':'')+
+      '<span onclick="event.stopPropagation();toggleStarred('+r.id+')" style="background:rgba(255,255,255,0.94);border-radius:7px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;color:'+(r.starred?'#FFD700':'#ccc')+'" title="Destacado">★</span>'+
+    '</div>';
+    var chips='<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+
+      '<span class="lib-chip" style="background:'+mcc.bg+';color:'+mcc.tx+';border:1px solid '+mcc.bd+'" title="Metros por minuto (color vs partido)">'+(mtsPM!=null?Math.round(mtsPM)+' m/min':'—')+'</span>'+
+      '<span class="lib-chip" style="background:#eef1f8;color:var(--club-c3,#304483)">'+(r.jug||'—')+' jug</span>'+
+      '<span class="lib-chip" style="background:#eef1f8;color:var(--club-c3,#304483)">'+(r.L&&r.A?(r.L+'×'+r.A+'m'):'—')+'</span>'+
+      '<span class="lib-chip" style="background:#eef1f8;color:var(--club-c3,#304483)">'+(r.min||'—')+"'"+'</span>'+
+      (e?'<span class="lib-chip" style="background:'+ecol(e)+'22;color:'+ecol(e)+'" title="EII: m²/jugador">EII '+Math.round(e)+'</span>':'')+
+    '</div>';
+    var bands='<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:6px">'+BANDS.map(function(bd){
+      var k=bd[0], lbl=bd[1], cap=bd[2];
+      var v=_libPerMin(r,k);
+      var col=_libChipCol(r[k],cap);
+      var txt=(v==null)?'—':(v>=10?v.toFixed(0):(v>=1?v.toFixed(1):v.toFixed(2)));
+      return '<span class="lib-band" style="background:'+col.bg+';color:'+col.tx+';border:1px solid '+col.bd+'" title="'+lbl+' por minuto (color vs partido)">'+lbl+'<b>'+txt+'</b></span>';
+    }).join('')+'</div>';
+    return '<div class="lib-card" onclick="exEditInfo('+r.id+')" title="Tocar para ver/editar">'+
+      '<div class="lib-card-img">'+media+badges+'</div>'+
+      '<div style="padding:9px 11px 11px">'+
+        '<div style="font-size:12.5px;font-weight:800;color:#0D1B2A;line-height:1.25;margin-bottom:7px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+r.n+(r.raw?' <span style="color:#1D9E75;font-size:8px">●</span>':'')+'</div>'+
+        chips+bands+
+      '</div></div>';
+  }).join('');
+  // Renderizar diagramas en los canvas (post-inserción, como hace el modal)
+  setTimeout(function(){
+    box.querySelectorAll('canvas[data-diag-id]').forEach(function(cv){
+      var id=parseInt(cv.getAttribute('data-diag-id'));
+      var row=D.find(function(x){return x.id===id;});
+      if(row&&row.diag){ try{ drwRenderTo(cv,row.diag); }catch(e){} }
+    });
+  },30);
+}
+window.drawCards=drawCards;
+
 function drawTable(rows){
+  // Vista tarjetas: renderizar el grid y saltear la tabla
+  libSyncViewUI();
+  if(libView==='cards'){ drawCards(rows); return; }
   // Update headers based on mode
   const isVol=viewMode==='vol';
 
