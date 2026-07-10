@@ -12545,10 +12545,26 @@ var PLAN_GROUP_DEFAULTS=[
   {id:'no_conv',name:'No convocados',color:'#EF9F27'},
 ];
 
+// ── Plantilla GLOBAL de grupos ──
+// Los grupos que definís quedan fijos: cada semana nueva los hereda (además
+// de "Todos"), sin tener que recrearlos. Editable: agregar/quitar actualiza
+// la plantilla. Viaja a la nube por app_settings.
+var PLAN_GROUP_DEFAULTS=[];
+try{ PLAN_GROUP_DEFAULTS=JSON.parse(localStorage.getItem('planGroupDefaults_v1')||'[]')||[]; }catch(e){ PLAN_GROUP_DEFAULTS=[]; }
+function planSaveGroupDefaults(){
+  try{ localStorage.setItem('planGroupDefaults_v1', JSON.stringify(PLAN_GROUP_DEFAULTS)); }catch(e){}
+  if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} }
+}
 function planGetGroups(){
   if(!_planEditData) return [];
-  if(!_planEditData.groups||!_planEditData.groups.length)
-    _planEditData.groups=[{id:'todos',name:'Todos',color:'#555'}];
+  if(!_planEditData.groups||!_planEditData.groups.length){
+    // Semana sin grupos: heredar la plantilla global (Todos siempre primero)
+    var inherited=[{id:'todos',name:'Todos',color:'#555'}];
+    (PLAN_GROUP_DEFAULTS||[]).forEach(function(g){
+      if(g&&g.name&&g.name.toLowerCase()!=='todos')inherited.push({id:g.id||('grp_'+Date.now()+Math.random().toString(36).slice(2,6)),name:g.name,color:g.color||'#3B4D88'});
+    });
+    _planEditData.groups=inherited;
+  }
   return _planEditData.groups;
 }
 
@@ -12596,6 +12612,11 @@ function planAddGroup(){
     alert('Ya existe un grupo con ese nombre.');return;
   }
   groups.push({id:'grp_'+Date.now(),name:name,color:color});
+  // La plantilla global también lo incorpora: las próximas semanas lo heredan
+  if(!PLAN_GROUP_DEFAULTS.find(function(g){return g.name.toLowerCase()===name.toLowerCase();})){
+    PLAN_GROUP_DEFAULTS.push({id:'grp_'+Date.now(),name:name,color:color});
+    planSaveGroupDefaults();
+  }
   if(nameEl)nameEl.value='';
   // Auto-save the current week so subgroups persist even without clicking "Guardar semana"
   if(_planEditIdx!==null){
@@ -12617,6 +12638,12 @@ function planRemoveGroup(gi){
   var g=groups[gi];
   if(!g||g.id==='todos') return;
   if(!confirm('¿Eliminar "'+g.name+'"? Los ejercicios asignados pasarán a "Todos".')) return;
+  // ¿También de la plantilla global (para que las próximas semanas no lo hereden)?
+  var di2=PLAN_GROUP_DEFAULTS.findIndex(function(x){return x.name.toLowerCase()===g.name.toLowerCase();});
+  if(di2>=0 && confirm('¿Quitarlo también de la plantilla para las próximas semanas?\n(Aceptar = no aparece más · Cancelar = solo lo saco de esta semana)')){
+    PLAN_GROUP_DEFAULTS.splice(di2,1);
+    planSaveGroupDefaults();
+  }
   _planEditData.days.forEach(function(day){
     planMigrateDay(day);
     (day.blocks||[]).forEach(function(block){
@@ -12742,9 +12769,17 @@ function planRenderDays(){
 
         // Dim the row if parallel and not counting
         var dimmed=isParallel&&!item.countVolume;
+        // Miniatura visual: la foto o el diagrama del ejercicio (tocable → ficha completa)
+        var thumbHtml='';
+        if(ex&&ex.img){
+          thumbHtml='<img src="'+ex.img+'" loading="lazy" onclick="event.stopPropagation();exEditInfo('+ex.id+')" title="Ver ficha del ejercicio" style="width:48px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0;cursor:pointer;border:1px solid #e5e5e5">';
+        } else if(ex&&ex.diag){
+          thumbHtml='<canvas data-plan-diag="'+ex.id+'" onclick="event.stopPropagation();exEditInfo('+ex.id+')" title="Ver ficha del ejercicio" style="width:48px;height:36px;border-radius:5px;flex-shrink:0;cursor:pointer;border:1px solid #e5e5e5;background:#eef3ea"></canvas>';
+        }
         return '<div style="background:'+(dimmed?'#f9f9f9':'#fff')+';border:1px solid '+(dimmed?'#eee':'#e0e0e0')+';border-radius:5px;padding:5px 7px;margin-bottom:4px;opacity:'+(dimmed?'0.6':'1')+';min-width:0;overflow:hidden">'+
           '<div style="display:flex;align-items:flex-start;gap:4px">'+
-            '<span style="width:6px;height:6px;border-radius:50%;background:'+catCol+';flex-shrink:0;margin-top:3px"></span>'+
+            thumbHtml+
+            (thumbHtml?'':'<span style="width:6px;height:6px;border-radius:50%;background:'+catCol+';flex-shrink:0;margin-top:3px"></span>')+
             '<div style="flex:1;min-width:0">'+
               '<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'+
                 '<span style="font-size:10px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+exName+'">'+exName+'</span>'+
@@ -12879,6 +12914,14 @@ function planRenderDays(){
   }
   // Aplicar el filtro de visibilidad (móvil)
   planApplyMobileDayFilter();
+  // Renderizar las miniaturas de diagramas (post-inserción, como en la biblioteca)
+  setTimeout(function(){
+    grid.querySelectorAll('canvas[data-plan-diag]').forEach(function(cv){
+      var id=parseInt(cv.getAttribute('data-plan-diag'));
+      var row=D.find(function(x){return x.id===id;});
+      if(row&&row.diag){ try{ drwRenderTo(cv,row.diag); }catch(e){} }
+    });
+  },30);
 }
 
 // Estado del día visible en móvil
@@ -30704,6 +30747,7 @@ window.tstDelTest=tstDelTest;
 document.addEventListener('DOMContentLoaded',function(){
   try{
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_CATALOG')<0)SB_SETTINGS_KEYS.push('TST_CATALOG');
+    if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('PLAN_GROUP_DEFAULTS')<0)SB_SETTINGS_KEYS.push('PLAN_GROUP_DEFAULTS');
     if(typeof window._sbApplySettingRow==='function'&&!window._sbApplySettingRowTstWrapped){
       var _origTst=window._sbApplySettingRow;
       window._sbApplySettingRow=function(row){
@@ -30711,6 +30755,9 @@ document.addEventListener('DOMContentLoaded',function(){
         if(row&&row.key==='TST_CATALOG'){
           try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
           try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests')tstRender(); }catch(e){}
+        }
+        if(row&&row.key==='PLAN_GROUP_DEFAULTS'){
+          try{ localStorage.setItem('planGroupDefaults_v1',JSON.stringify(PLAN_GROUP_DEFAULTS)); }catch(e){}
         }
       };
       window._sbApplySettingRowTstWrapped=true;
