@@ -2198,13 +2198,23 @@ function drawCards(rows){
         '<circle cx="80" cy="50" r="13" fill="none" stroke="'+c+'55" stroke-width="2"/>'+
         '<text x="80" y="55" text-anchor="middle" font-size="13" fill="'+c+'99" font-weight="700">'+(r.n||'').slice(0,2).toUpperCase()+'</text></svg>';
     }
+    // Chips EDITABLES: tipo de tarea (categoría) y tipo de dinámica (orientación)
+    var catSel='<select class="lib-chip" data-id="'+r.id+'" onclick="event.stopPropagation()" onchange="event.stopPropagation();changeCat(this)" '+
+      'style="background:'+c+';color:#fff;border:none;cursor:pointer;max-width:120px;appearance:none;-webkit-appearance:none" title="Tipo de tarea (tocá para cambiar)">'+
+      CATS.filter(function(x){return x!=='all';}).map(function(x){return '<option value="'+x+'"'+(x===r.cat?' selected':'')+' style="background:#fff;color:#333">'+x+'</option>';}).join('')+
+    '</select>';
+    var orientSel='<select onclick="event.stopPropagation()" onchange="event.stopPropagation();setOrientOverride('+r.id+',this.value)" '+
+      'style="font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:10px;border:none;background:rgba(255,255,255,0.92);color:'+(o?o.color:'#999')+';cursor:pointer;appearance:none;-webkit-appearance:none" title="Tipo de dinámica (tocá para cambiar)">'+
+      '<option value=""'+(!r.orientOverride?' selected':'')+' style="color:#333">▸ '+(o?o.label+' (auto)':'auto')+'</option>'+
+      ['Resistencia','Velocidad','Fuerza','Sin orientación'].map(function(x){return '<option value="'+x+'"'+(r.orientOverride===x?' selected':'')+' style="color:#333">▸ '+x+'</option>';}).join('')+
+    '</select>';
     var badges='<div style="position:absolute;top:7px;left:7px;display:flex;gap:5px;align-items:center;max-width:calc(100% - 60px)">'+
-      '<span class="lib-chip" style="background:'+c+';color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(r.cat||'—')+'</span>'+
-      (o?'<span class="lib-chip" style="background:rgba(255,255,255,0.92);color:'+o.color+'">▸ '+o.label+'</span>':'')+
+      catSel+orientSel+
     '</div>'+
     '<div style="position:absolute;top:7px;right:7px;display:flex;gap:4px">'+
       (r.video?'<button onclick="event.stopPropagation();vidOpen(\''+String(r.video).replace(/'/g,"\\'")+'\')" style="border:none;background:rgba(255,255,255,0.94);color:#D9534F;border-radius:7px;width:26px;height:26px;font-size:12px;cursor:pointer;font-weight:800" title="Ver video">▶</button>':'')+
       '<span onclick="event.stopPropagation();toggleStarred('+r.id+')" style="background:rgba(255,255,255,0.94);border-radius:7px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;color:'+(r.starred?'#FFD700':'#ccc')+'" title="Destacado">★</span>'+
+      '<span onclick="event.stopPropagation();delRow('+r.id+')" style="background:rgba(255,255,255,0.94);border-radius:7px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;color:#c99" title="Eliminar ejercicio">🗑</span>'+
     '</div>';
     var chips='<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+
       '<span class="lib-chip" style="background:'+mcc.bg+';color:'+mcc.tx+';border:1px solid '+mcc.bd+'" title="Metros por minuto (color vs partido)">'+(mtsPM!=null?Math.round(mtsPM)+' m/min':'—')+'</span>'+
@@ -25641,8 +25651,12 @@ window.infPrint=infPrint;
 
 // ── Agregadores por jugador ──
 function infGpsStats(norm){
-  var days=[], best={mts_min:0, vmax:0, mtsDay:0, hsrDay:0}, tot={mts:0,ses:0};
+  // SOLO partidos (day MD o "Partido"): los mejores rendimientos de la ficha
+  // élite son de competencia, no de entrenamientos.
+  var best={mts_min:0, vmax:0, mtsDay:0, hsrDay:0}, tot={mts:0,ses:0};
   (MICROCICLO||[]).forEach(function(s){
+    var dl=String(s.day||'').toUpperCase();
+    if(dl!=='MD' && !/PARTIDO/.test(dl))return;
     var p=(s.players||[]).find(function(x){return infNorm(x.name)===norm;});
     if(!p)return;
     tot.ses++;
@@ -25654,6 +25668,39 @@ function infGpsStats(norm){
     if((p.hsr||0)>best.hsrDay)best.hsrDay=p.hsr;
   });
   return {tot:tot,best:best};
+}
+// ¿El nombre de la planilla (puede ser apellido solo) corresponde a este perfil?
+function infNameMatch(plName, norm, profParts){
+  var n=infNorm(plName);
+  if(!n)return false;
+  if(n===norm)return true;
+  if(n.split(/\s+/).length===1 && profParts.indexOf(n)>=0)return true;
+  return false;
+}
+// Registros de competencia del jugador contra los partidos posibles
+function infMatchStats(norm, fullName){
+  var P=(typeof FIX_PLANILLAS!=='undefined'&&FIX_PLANILLAS)?FIX_PLANILLAS:{};
+  var profParts=infNorm(fullName).split(/\s+/).filter(Boolean);
+  var tot=0, tit=0, ing=0, banco=0, mins=0, jugados=0, rendS=0, rendN=0, ama=0, roj=0;
+  Object.keys(P).forEach(function(k){
+    var pl=P[k];
+    if(!pl||!Array.isArray(pl.titulares)||!pl.titulares.length)return; // planilla sin cargar no cuenta
+    tot++;
+    var find=function(arr){ return (arr||[]).find(function(x){return x&&x.j&&infNameMatch(x.j,norm,profParts);}); };
+    var t=find(pl.titulares), s=find(pl.suplentes);
+    if(t)tit++;
+    if(s){ if(s.min>0)ing++; else banco++; }
+    var entry=t||s;
+    if(entry){
+      if(entry.min>0){ jugados++; mins+=entry.min; }
+      else if(t){ jugados++; } // titular sin minutos cargados: jugó igual
+      if(entry.rend!=null&&!isNaN(entry.rend)){ rendS+=Number(entry.rend); rendN++; }
+    }
+    (pl.amarillas||[]).forEach(function(n){ if(infNameMatch(n,norm,profParts))ama++; });
+    (pl.rojas||[]).forEach(function(n){ if(infNameMatch(n,norm,profParts))roj++; });
+  });
+  return {tot:tot,tit:tit,ing:ing,banco:banco,mins:mins,jugados:jugados,
+          rend:rendN?(rendS/rendN):null,ama:ama,roj:roj};
 }
 function infWellStats(norm){
   var cutoff=new Date(); cutoff.setDate(cutoff.getDate()-30);
@@ -25710,8 +25757,7 @@ function infRender(){
   var est=estados[prof.estado||'disponible']||estados.disponible;
 
   var gps=infGpsStats(norm);
-  var well=infWellStats(norm);
-  var asist=infAsistStats(norm);
+  var comp=infMatchStats(norm, name);
 
   // Tests físicos: último + PB por test
   var testRows='';
@@ -25801,30 +25847,34 @@ function infRender(){
       infKpi(prof.vmax?prof.vmax.toFixed(1):'—','Vmax km/h','perfil')+
       infKpi(prof.accmax?prof.accmax.toFixed(1):'—','AccMáx m/s²','perfil')+
       infKpi(prof.dccmax?prof.dccmax.toFixed(1):'—','DccMáx m/s²','perfil')+
-      infKpi(asist?asist.pct+'%':'—','Disponibilidad',asist?asist.t+' días':'')+
-      infKpi(gps.tot.ses||'—','Sesiones GPS','registradas')+
-      infKpi(gps.tot.mts?(gps.tot.mts/1000).toFixed(1)+' km':'—','Dist. acumulada','GPS')+
+      infKpi(comp.tot?comp.jugados+'/'+comp.tot:'—','Partidos jugados','planillas')+
+      infKpi(comp.tot?comp.tit+'/'+comp.tot:'—','Titularidades','')+
+      infKpi(comp.mins?comp.mins+"'":'—','Minutos',comp.tot?('de '+(comp.tot*90)+"' posibles"):'')+
     '</div>'+
     // ── Cuerpo en 2 columnas ──
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 22px;padding:16px 22px 8px">'+
       '<div>'+
-        infSec('🛰 Mejores rendimientos GPS',
+        infSec('⚽ Competencia — registros de partido',
+          (comp.tot?(
+            infRow('Partidos jugados',comp.jugados+' / '+comp.tot,Math.round(comp.jugados*100/comp.tot)+'%')+
+            infRow('Titularidades',comp.tit+' / '+comp.tot,Math.round(comp.tit*100/comp.tot)+'%')+
+            infRow('Ingresos desde el banco',comp.ing,'')+
+            infRow('Al banco sin ingresar',comp.banco,'')+
+            infRow('Minutos disputados',comp.mins+"'",'de '+(comp.tot*90)+"' posibles ("+Math.round(comp.mins*100/(comp.tot*90))+'%)')+
+            (comp.rend!=null?infRow('Rendimiento promedio',comp.rend.toFixed(1),'escala 1-10'):'')+
+            ((comp.ama||comp.roj)?infRow('Tarjetas','🟨 '+comp.ama+(comp.roj?' · 🟥 '+comp.roj:''),''):'')
+          ):'<div style="font-size:10px;color:#aaa">Sin planillas de partido cargadas en el Fixture.</div>'))+
+        infSec('🛰 Mejores rendimientos GPS — en partidos',
           (gps.tot.ses?(
             infRow('Máx intensidad (día)',gps.best.mts_min?gps.best.mts_min.toFixed(1)+' m/min':'—','')+
             infRow('Vmax en sesión',gps.best.vmax?gps.best.vmax.toFixed(1)+' km/h':'—','')+
             infRow('Máx distancia (día)',gps.best.mtsDay?Math.round(gps.best.mtsDay)+' m':'—','')+
             infRow('Máx alta intensidad 18-21 (día)',gps.best.hsrDay?Math.round(gps.best.hsrDay)+' m':'—','')
-          ):'<div style="font-size:10px;color:#aaa">Sin sesiones GPS registradas.</div>'))+
+          ):'<div style="font-size:10px;color:#aaa">Sin GPS de partidos registrado.</div>'))+
         infSec('🧪 Tests físicos', testRows||'<div style="font-size:10px;color:#aaa">Sin tests registrados.</div>')+
-        infSec('🏋️ Fuerza — mejores cargas', gymRows||'<div style="font-size:10px;color:#aaa">Sin evaluaciones de gimnasio.</div>')+
       '</div>'+
       '<div>'+
-        infSec('💚 Wellness y carga interna (30 días)',
-          (well.n?(
-            infRow('Check-ins registrados',well.n,'')+
-            (well.readiness!=null?infRow('Readiness promedio',well.readiness.toFixed(1),''):'')+
-            (well.pse!=null?infRow('PSE promedio',well.pse.toFixed(1),'Foster'):'')
-          ):'<div style="font-size:10px;color:#aaa">Sin registros en los últimos 30 días.</div>'))+
+        infSec('🏋️ Fuerza — mejores cargas', gymRows||'<div style="font-size:10px;color:#aaa">Sin evaluaciones de gimnasio.</div>')+
         infSec('🥗 Composición corporal', nutRows||'<div style="font-size:10px;color:#aaa">Sin mediciones nutricionales.</div>')+
         infSec('🦵 Movilidad', mobRows||'<div style="font-size:10px;color:#aaa">Sin mediciones de movilidad.</div>')+
       '</div>'+
@@ -30077,18 +30127,66 @@ function sbDeleteOneDrill(id){
       var tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]');
       if(tomb.indexOf(idNum)<0){ tomb.push(idNum); localStorage.setItem('drills_deleted', JSON.stringify(tomb)); }
     }catch(e){}
-    if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return Promise.resolve();
+    if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser){
+      // Sesión no lista: el tombstone ya quedó registrado. Programar el flush
+      // para que el borrado en la nube ocurra apenas haya sesión (antes se
+      // tragaba en silencio → el ejercicio seguía en Supabase y "revivía"
+      // en otros dispositivos o al limpiar el almacenamiento local).
+      _sbScheduleTombFlush();
+      return Promise.resolve();
+    }
     return sbClient.from('drills_exercises')
       .delete()
       .eq('id', idNum)
       .eq('categoria', SB_CATEGORIA)
       .then(function(res){
-        if(res.error) console.error('[Supabase] Borrado ejercicio error (id '+idNum+'):', res.error);
-        else console.log('[Supabase] Ejercicio borrado de la nube (id '+idNum+')');
+        if(res.error){
+          console.error('[Supabase] Borrado ejercicio error (id '+idNum+'):', res.error);
+          _sbScheduleTombFlush(); // reintentar
+        } else {
+          console.log('[Supabase] Ejercicio borrado de la nube (id '+idNum+')');
+          _sbTombRemove(idNum); // el tombstone cumplió su misión
+        }
       });
   }catch(e){ console.warn('sbDeleteOneDrill error:', e); return Promise.resolve(); }
 }
 window.sbDeleteOneDrill = sbDeleteOneDrill;
+
+function _sbTombRemove(idNum){
+  try{
+    var tomb=JSON.parse(localStorage.getItem('drills_deleted')||'[]');
+    var i=tomb.indexOf(idNum);
+    if(i>-1){ tomb.splice(i,1); localStorage.setItem('drills_deleted', JSON.stringify(tomb)); }
+  }catch(e){}
+}
+// Flush de tombstones: re-ejecuta en la nube los borrados que quedaron
+// pendientes (sesión caída, error de red, o zombies de versiones anteriores).
+// Se corre tras el fetch inicial y con reintentos si la sesión no está lista.
+var _sbTombFlushTimer=null, _sbTombFlushRetries=0;
+function _sbScheduleTombFlush(){
+  if(_sbTombFlushTimer)clearTimeout(_sbTombFlushTimer);
+  _sbTombFlushTimer=setTimeout(_sbFlushDrillTombstones, 2500);
+}
+function _sbFlushDrillTombstones(){
+  _sbTombFlushTimer=null;
+  var tomb=[];
+  try{ tomb=JSON.parse(localStorage.getItem('drills_deleted')||'[]'); }catch(e){}
+  if(!tomb.length)return;
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser){
+    if(_sbTombFlushRetries<30){ _sbTombFlushRetries++; setTimeout(_sbFlushDrillTombstones, 4000); }
+    return;
+  }
+  _sbTombFlushRetries=0;
+  console.log('[Supabase] Purgando '+tomb.length+' ejercicio(s) borrados pendientes de la nube…');
+  tomb.slice().forEach(function(id){
+    sbClient.from('drills_exercises').delete().eq('id', Number(id)).eq('categoria', SB_CATEGORIA)
+      .then(function(res){
+        if(!res.error)_sbTombRemove(Number(id));
+        else console.warn('[Supabase] Purga id '+id+' falló:', res.error);
+      });
+  });
+}
+window._sbFlushDrillTombstones=_sbFlushDrillTombstones;
 // Sube TODA la biblioteca de ejercicios a Supabase de inmediato (sin debounce).
 // Útil tras importar un CSV con varias filas nuevas/modificadas.
 function sbSyncAllDrillsNow(){
@@ -30222,6 +30320,7 @@ sbLoadInitialData = function(){
       // Tombstones: ids que el usuario borró localmente. No revivirlos desde la nube.
       var tomb = [];
       try{ tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]'); }catch(e){}
+      if(tomb.length)_sbScheduleTombFlush(); // sanar la nube: purgar zombies pendientes
       var tombSet = {};
       tomb.forEach(function(t){ tombSet[Number(t)]=true; });
       // Pendientes: ejercicios creados/combinados recién que quizá no llegaron a subir.
@@ -33145,13 +33244,14 @@ if(typeof _xdOrigPaint==='function'){
 // ── ESTADO DEL EDITOR ──
 var X={open:false,shapes:[],bg:'plain',hist:[],redo:[],tool:'select',color:'red',
       sel:-1,drag:null,dirty:false,onSave:null,title:'',
-      frames:[[]],cur:0,playing:false,playRAF:null,gscale:1};
+      frames:[[]],cur:0,playing:false,playRAF:null,gscale:1,seqOpen:false};
 
 // Compromete el frame actual (los shapes en edición) a su slot
 function xdCommit(){ X.frames[X.cur]=JSON.parse(JSON.stringify(X.shapes)); }
 
 // Interpolación entre dos listas de shapes (por índice + tipo; ease in-out)
-function xdEase(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+// Easing cúbico (estilo Tactical Pad): arranque y llegada suaves, centro fluido
+function xdEase(t){ return t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
 function xdLerpShapes(a,b,t){
   t=xdEase(Math.max(0,Math.min(1,t)));
   var n=Math.max(a.length,b.length), out=[];
@@ -33570,7 +33670,7 @@ window.xd2ExportPNG=function(){
 window.xd2Open=function(data,onSave,opts){
   opts=opts||{};
   X.shapes=[]; X.bg='plain'; X.hist=[]; X.redo=[]; X.sel=-1; X.drag=null; X.dirty=false;
-  X.frames=[[]]; X.cur=0; X.gscale=1; xd2StopPlay();
+  X.frames=[[]]; X.cur=0; X.gscale=1; X.seqOpen=false; xd2StopPlay();
   X.onSave=onSave||null; X.title=opts.title||'Ejercicio';
   var legacyImg=false;
   if(data){
@@ -33579,7 +33679,7 @@ window.xd2Open=function(data,onSave,opts){
       var d=JSON.parse(data);
       if(Array.isArray(d)){X.shapes=d;}
       else {X.shapes=d.shapes||[]; X.bg=d.bg||'plain';
-            if(Array.isArray(d.seq)&&d.seq.length) X.frames=[JSON.parse(JSON.stringify(X.shapes))].concat(d.seq.map(function(f){return JSON.parse(JSON.stringify(f));}));}
+            if(Array.isArray(d.seq)&&d.seq.length){ X.frames=[JSON.parse(JSON.stringify(X.shapes))].concat(d.seq.map(function(f){return JSON.parse(JSON.stringify(f));})); X.seqOpen=true; }}
     }catch(e){} }
   }
   if(X.frames.length===1) X.frames=[JSON.parse(JSON.stringify(X.shapes))];
@@ -33613,7 +33713,7 @@ window.xd2Save=function(){
 };
 
 // ── SECUENCIA DE MOMENTOS ──
-var XD2_MAX_FRAMES=6;
+var XD2_MAX_FRAMES=12;
 window.xd2SeqGo=function(k){
   if(X.playing)xd2StopPlay();
   if(k===X.cur||k<0||k>=X.frames.length)return;
@@ -33646,8 +33746,18 @@ window.xd2SeqDel=function(){
 };
 
 // Barra de secuencia (se refresca en cada render)
+window.xd2SeqToggle=function(){
+  X.seqOpen=!X.seqOpen;
+  xdSeqBar();
+};
 function xdSeqBar(){
   var bar=document.getElementById('xd2-seq'); if(!bar)return;
+  // Plegable: al crear molesta abajo; se abre con 🎞 SECUENCIA (o sola si el
+  // ejercicio ya tiene animación guardada).
+  bar.style.display=X.seqOpen?'':'none';
+  var tg=document.getElementById('xd2-seq-toggle');
+  if(tg)tg.style.background=X.seqOpen?'rgba(255,255,255,0.16)':'';
+  if(!X.seqOpen)return;
   var chips=X.frames.map(function(f,i){
     var on=(i===X.cur);
     return '<button class="xd2-schip'+(on?' on':'')+'" onclick="xd2SeqGo('+i+')">'+(i+1)+
@@ -33659,11 +33769,14 @@ function xdSeqBar(){
     '<button class="xd2-schip" onclick="xd2SeqAdd()" title="Agregar momento (copia el actual)">＋</button>'+
     '<span style="flex:1"></span>'+
     '<button class="xd2-sbtn" onclick="xd2Play()" '+(canAnim?'':'disabled style="opacity:.4"')+'>'+(X.playing?'■ Parar':'▶ Reproducir')+'</button>'+
-    '<button class="xd2-sbtn" onclick="xd2ExportGIF()" '+(canAnim?'':'disabled style="opacity:.4"')+' title="Exportar GIF animado para WhatsApp">🎞 GIF</button>';
+    '<button class="xd2-sbtn" onclick="xd2ExportGIF()" '+(canAnim?'':'disabled style="opacity:.4"')+' title="Exportar GIF animado para WhatsApp">🎞 GIF</button>'+
+    '<button class="xd2-sbtn" onclick="xd2ExportVideo()" '+(canAnim?'':'disabled style="opacity:.4"')+' title="Exportar video MP4/WebM (liviano, mejor calidad que el GIF)">🎥 Video</button>';
 }
 
 // ── REPRODUCCIÓN (en el SVG del editor o de la pizarra) ──
-var XD2_TRANS_MS=900, XD2_HOLD_MS=500;
+// Transición larga + pausa corta = movimiento continuo y fluido (antes 900/500
+// se sentía a los saltos). El video/GIF usan los mismos tiempos.
+var XD2_TRANS_MS=1300, XD2_HOLD_MS=260;
 function xdPlayInto(svgEl,frames,bg,onEnd){
   var seq=[], i;
   for(i=0;i<frames.length;i++){
@@ -33763,6 +33876,72 @@ window.xd2ExportGIF=function(){
   });
 };
 
+// ── EXPORT VIDEO (MP4/WebM nativo del navegador, sin librerías) ──
+// canvas.captureStream + MediaRecorder: pesa poco (~200-600 KB) y se ve más
+// fluido que el GIF (60 fps con el mismo motor de animación de la pizarra).
+window.xd2ExportVideo=function(){
+  if(X.frames.length<2){ alert('Agregá al menos 2 momentos para animar (botón ＋ de la secuencia).'); return; }
+  if(typeof MediaRecorder==='undefined'){ alert('Este navegador no soporta grabación de video. Usá el GIF.'); return; }
+  var mime=['video/mp4','video/webm;codecs=vp9','video/webm'].find(function(m){
+    try{ return MediaRecorder.isTypeSupported(m); }catch(e){ return false; }
+  });
+  if(!mime){ alert('Este navegador no soporta grabación de video. Usá el GIF.'); return; }
+  xd2StopPlay(); xdCommit();
+  var hint=document.getElementById('xd2-hint');
+  function say(t){ if(hint)hint.textContent=t; }
+  say('Grabando video…');
+  try{
+    var SC=2, W=XD2_W*SC, H=XD2_H*SC;
+    var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+    var ctx=cv.getContext('2d');
+    function paint(shapes){
+      ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,W,H); ctx.scale(SC,SC);
+      if(typeof drwDrawBg==='function')drwDrawBg(ctx,XD2_W,XD2_H,X.bg);
+      shapes.forEach(function(s){ window.drwPaintShape(ctx,s,-1,false,true); });
+    }
+    var stream=cv.captureStream(60);
+    var rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:2800000});
+    var chunks=[];
+    rec.ondataavailable=function(e){ if(e.data&&e.data.size)chunks.push(e.data); };
+    rec.onstop=function(){
+      say('');
+      var ext=/mp4/.test(mime)?'mp4':'webm';
+      var blob=new Blob(chunks,{type:mime.split(';')[0]});
+      var a=document.createElement('a');
+      a.download=(X.title||'ejercicio').replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g,'').trim().replace(/\s+/g,'_')+'.'+ext;
+      a.href=URL.createObjectURL(blob);
+      a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); },5000);
+    };
+    // Mismo motor de secuencia que la reproducción en vivo
+    var seq=[], i;
+    for(i=0;i<X.frames.length;i++){
+      seq.push({type:'hold',f:X.frames[i]});
+      if(i<X.frames.length-1)seq.push({type:'trans',a:X.frames[i],b:X.frames[i+1]});
+    }
+    var idx=0, t0=null;
+    rec.start();
+    paint(X.frames[0]);
+    function step(ts){
+      if(t0===null)t0=ts;
+      var st=seq[idx], dur=(st.type==='hold')?XD2_HOLD_MS:XD2_TRANS_MS;
+      var t=(ts-t0)/dur;
+      if(t>=1){
+        idx++; t0=ts;
+        if(idx>=seq.length){
+          paint(X.frames[X.frames.length-1]);
+          setTimeout(function(){ try{rec.stop();}catch(e){} },350); // colita final
+          return;
+        }
+        st=seq[idx]; t=0;
+      }
+      paint(st.type==='hold'?st.f:xdLerpShapes(st.a,st.b,t));
+      requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }catch(e){ say(''); alert('No se pudo grabar el video: '+e.message); }
+};
+
 // ── UI DEL MODAL ──
 function xdBuildModal(){
   var old=document.getElementById('xd2-modal'); if(old)old.remove();
@@ -33842,6 +34021,9 @@ function xdBuildModal(){
       '<button class="xd2-tbtn xd2-bgbtn" data-b="plain" onclick="xd2SetBg(\'plain\')">🟩<small>LIBRE</small></button>'+
       '<button class="xd2-tbtn xd2-bgbtn" data-b="half" onclick="xd2SetBg(\'half\')">◧<small>MEDIA</small></button>'+
       '<button class="xd2-tbtn xd2-bgbtn" data-b="full" onclick="xd2SetBg(\'full\')">▣<small>COMPLETA</small></button>'+
+    '</div>'+
+    '<div class="xd2-grp">'+
+      '<button class="xd2-tbtn" id="xd2-seq-toggle" onclick="xd2SeqToggle()" title="Secuencia de movimientos (animación)">🎞<small>SECUENCIA</small></button>'+
     '</div>'+
     '<div class="xd2-grp">'+
       '<button class="xd2-tbtn" onclick="xd2GScale(-1)" title="Achicar todos los objetos">➖<small>TAMAÑO</small></button>'+
