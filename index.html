@@ -2208,7 +2208,7 @@ function drawCards(rows){
       '<option value=""'+(!r.orientOverride?' selected':'')+' style="color:#333">▸ '+(o?o.label+' (auto)':'auto')+'</option>'+
       ['Resistencia','Velocidad','Fuerza','Sin orientación'].map(function(x){return '<option value="'+x+'"'+(r.orientOverride===x?' selected':'')+' style="color:#333">▸ '+x+'</option>';}).join('')+
     '</select>';
-    var badges='<div style="position:absolute;top:7px;left:7px;display:flex;gap:5px;align-items:center;max-width:calc(100% - 60px)">'+
+    var badges='<div style="position:absolute;top:7px;left:7px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;max-width:calc(100% - 100px)">'+
       catSel+orientSel+
     '</div>'+
     '<div style="position:absolute;top:7px;right:7px;display:flex;gap:4px">'+
