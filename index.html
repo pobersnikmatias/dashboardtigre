@@ -34459,10 +34459,30 @@ function hoyEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/<
 var HOY_TODOS=[];
 try{ HOY_TODOS=JSON.parse(localStorage.getItem('hoyTodos_v1')||'[]')||[]; }catch(e){ HOY_TODOS=[]; }
 function hoySaveTodos(){ try{ localStorage.setItem('hoyTodos_v1', JSON.stringify(HOY_TODOS)); }catch(e){} hoySyncCloud(); }
+// ── Calendario semanal de pendientes ──
+var _hoyTodoWeekOff=0; // 0 = semana actual; ±1 = semanas vecinas
+function hoyTodoWeekNav(d){ _hoyTodoWeekOff+=d; hoyRender(); }
+window.hoyTodoWeekNav=hoyTodoWeekNav;
+function hoyTodoWeekReset(){ _hoyTodoWeekOff=0; hoyRender(); }
+window.hoyTodoWeekReset=hoyTodoWeekReset;
+function hoyTodoMonday(off){
+  var d=new Date(hoyLocalISO()+'T12:00:00');
+  var dow=(d.getDay()+6)%7; // lunes=0
+  d.setDate(d.getDate()-dow+off*7);
+  return d;
+}
+function hoyTodoAddOn(iso){
+  var txt=prompt('Pendiente para el '+iso.slice(8,10)+'/'+iso.slice(5,7)+':');
+  if(txt===null)return;
+  txt=(txt||'').trim(); if(!txt)return;
+  HOY_TODOS.push({id:Date.now(), txt:txt.slice(0,120), done:false, date:iso});
+  hoySaveTodos(); hoyRender();
+}
+window.hoyTodoAddOn=hoyTodoAddOn;
 function hoyTodoAdd(){
   var inp=document.getElementById('hoy-todo-inp'); if(!inp)return;
   var txt=(inp.value||'').trim(); if(!txt)return;
-  HOY_TODOS.push({id:Date.now(), txt:txt.slice(0,120), done:false});
+  HOY_TODOS.push({id:Date.now(), txt:txt.slice(0,120), done:false, date:hoyLocalISO()});
   inp.value='';
   hoySaveTodos(); hoyRender();
 }
@@ -34654,18 +34674,50 @@ function hoyRender(){
     if(hasSession && pseToday<withWellness){
       h+='<div class="hoy-alert"><div class="ic" style="background:#f0f5ff">📋</div><div>Cargar PSE post-sesión en el kiosco — respondieron <b>'+pseToday+' de '+withWellness+'</b>.</div></div>';
     }
-    // Checklist manual
-    var items=HOY_TODOS.slice().sort(function(a,b){ return (a.done?1:0)-(b.done?1:0) || a.id-b.id; });
-    h+=items.map(function(t){
-      return '<div class="hoy-alert" style="align-items:center">'+
-        '<div class="ic" style="background:'+(t.done?'#edfaf3':'#f5f5f5')+';cursor:pointer;font-size:13px" onclick="hoyTodoToggle('+t.id+')">'+(t.done?'✅':'⬜')+'</div>'+
-        '<div style="flex:1;'+(t.done?'text-decoration:line-through;color:#aaa':'')+'">'+hoyEsc(t.txt)+'</div>'+
-        '<button onclick="hoyTodoDel('+t.id+')" style="border:none;background:none;color:#ccc;font-size:13px;cursor:pointer;padding:2px 4px" title="Eliminar">✕</button>'+
+    // ── Calendario semanal de pendientes (compacto, con ◀ ▶) ──
+    var mon=hoyTodoMonday(_hoyTodoWeekOff);
+    var days=[], di;
+    for(di=0;di<7;di++){
+      var dd=new Date(mon); dd.setDate(mon.getDate()+di);
+      days.push(hoyLocalISO(dd));
+    }
+    var DIAS=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+    var monTxt=days[0].slice(8,10)+'/'+days[0].slice(5,7), sunTxt=days[6].slice(8,10)+'/'+days[6].slice(5,7);
+    var chip=function(t){
+      return '<span style="display:inline-flex;align-items:center;gap:4px;max-width:100%;background:'+(t.done?'#edfaf3':'#f2f5fb')+';border:1px solid '+(t.done?'#bfe5d2':'#dde3f0')+';border-radius:9px;padding:2px 7px;font-size:10px;line-height:1.5">'+
+        '<span onclick="hoyTodoToggle('+t.id+')" style="cursor:pointer">'+(t.done?'✅':'⬜')+'</span>'+
+        '<span style="min-width:0;overflow-wrap:anywhere;'+(t.done?'text-decoration:line-through;color:#9bb5a5':'color:#2a3550')+'">'+hoyEsc(t.txt)+'</span>'+
+        '<span onclick="hoyTodoDel('+t.id+')" style="cursor:pointer;color:#c5c5c5;font-size:10px" title="Eliminar">✕</span>'+
+      '</span>';
+    };
+    // Encabezado de navegación
+    h+='<div style="display:flex;align-items:center;gap:6px;margin:'+(h?'10px':'0')+' 0 6px">'+
+      '<button onclick="hoyTodoWeekNav(-1)" style="border:1px solid #dde3f0;background:#fff;border-radius:7px;width:26px;height:26px;cursor:pointer;font-size:11px;color:var(--club-c2,#3B4D88)" title="Semana anterior">◀</button>'+
+      '<span style="flex:1;text-align:center;font-size:11px;font-weight:800;color:var(--club-c1,#1E2A52)">'+
+        (_hoyTodoWeekOff===0?'Esta semana':(_hoyTodoWeekOff===1?'Semana próxima':(_hoyTodoWeekOff===-1?'Semana pasada':(_hoyTodoWeekOff>0?'+':'')+_hoyTodoWeekOff+' semanas')))+
+        ' <span style="font-weight:600;color:#98a2b8">· '+monTxt+' → '+sunTxt+'</span></span>'+
+      '<button onclick="hoyTodoWeekNav(1)" style="border:1px solid #dde3f0;background:#fff;border-radius:7px;width:26px;height:26px;cursor:pointer;font-size:11px;color:var(--club-c2,#3B4D88)" title="Semana siguiente">▶</button>'+
+      (_hoyTodoWeekOff!==0?'<button onclick="hoyTodoWeekReset()" style="border:none;background:var(--club-c2,#3B4D88);color:#fff;border-radius:7px;padding:5px 10px;cursor:pointer;font-size:10px;font-weight:700">Hoy</button>':'')+
+    '</div>';
+    // Sin fecha (pendientes viejos): fila especial arriba, para que no se pierdan
+    var undated=HOY_TODOS.filter(function(t){return !t.date;});
+    if(undated.length && _hoyTodoWeekOff===0){
+      h+='<div style="display:flex;gap:5px;align-items:flex-start;padding:4px 0;border-bottom:1px dashed #eee">'+
+        '<span style="width:44px;flex-shrink:0;font-size:9.5px;font-weight:700;color:#b5915a;padding-top:3px">📌 s/f</span>'+
+        '<div style="flex:1;display:flex;gap:4px;flex-wrap:wrap">'+undated.map(chip).join('')+'</div></div>';
+    }
+    // 7 filas de días
+    days.forEach(function(iso,ix){
+      var isToday=(iso===today);
+      var its=HOY_TODOS.filter(function(t){return t.date===iso;}).sort(function(a,b){return (a.done?1:0)-(b.done?1:0)||a.id-b.id;});
+      h+='<div style="display:flex;gap:5px;align-items:flex-start;padding:3.5px 0'+(ix<6?';border-bottom:1px solid #f4f5f8':'')+(isToday?';background:#f2f7ff;border-radius:7px;padding-left:4px;padding-right:2px':'')+'">'+
+        '<span style="width:44px;flex-shrink:0;font-size:9.5px;font-weight:'+(isToday?'800':'700')+';color:'+(isToday?'var(--club-c2,#3B4D88)':'#98a2b8')+';padding-top:3px">'+DIAS[ix]+' '+iso.slice(8,10)+'</span>'+
+        '<div style="flex:1;display:flex;gap:4px;flex-wrap:wrap;min-height:20px">'+(its.length?its.map(chip).join(''):'')+'</div>'+
+        '<span onclick="hoyTodoAddOn(\''+iso+'\')" style="flex-shrink:0;width:20px;height:20px;border-radius:6px;background:#f0f2f8;color:var(--club-c2,#3B4D88);font-size:12px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;cursor:pointer" title="Agregar pendiente este día">＋</span>'+
       '</div>';
-    }).join('');
-    if(!h)h='<div style="font-size:11.5px;color:#aaa;padding:4px 0">Sin pendientes. Agregá tareas del día para el cuerpo técnico.</div>';
-    h+='<div style="display:flex;gap:6px;margin-top:10px">'+
-      '<input id="hoy-todo-inp" placeholder="Nueva tarea… (ej: hablar con kinesiólogo por Ferro)" onkeydown="hoyTodoKey(event)" style="flex:1;padding:8px 10px;font-size:11.5px;border:1px solid #ddd;border-radius:8px;min-width:0">'+
+    });
+    h+='<div style="display:flex;gap:6px;margin-top:9px">'+
+      '<input id="hoy-todo-inp" placeholder="Pendiente rápido para hoy…" onkeydown="hoyTodoKey(event)" style="flex:1;padding:8px 10px;font-size:11.5px;border:1px solid #ddd;border-radius:8px;min-width:0">'+
       '<button class="hoy-btn" style="background:var(--club-c1,#1E2A52);padding:8px 14px" onclick="hoyTodoAdd()">＋</button>'+
     '</div>';
     return h;
