@@ -791,7 +791,7 @@ body.sb-show{visibility:visible}
     <button class="mobile-nav-item" onclick="setMainView('hoy')" data-view="hoy"><span class="mn-icon">🏠</span><span class="mn-label">Hoy</span></button>
     <button class="mobile-nav-item" onclick="setMainView('fixture')" data-view="fixture"><span class="mn-icon">⚽</span><span class="mn-label">Equipo</span></button>
     <button class="mobile-nav-item" onclick="setMainView('plan')" data-view="plan"><span class="mn-icon">🗓️</span><span class="mn-label">Planificación</span></button>
-    <button class="mobile-nav-item" onclick="setMainView('carga')" data-view="carga"><span class="mn-icon">📊</span><span class="mn-label">Carga interna</span></button>
+    <button class="mobile-nav-item" onclick="setMainView('carga')" data-view="carga"><span class="mn-icon">📊</span><span class="mn-label">Análisis de carga</span></button>
     <button class="mobile-nav-item" onclick="setMainView('profiles')" data-view="profiles"><span class="mn-icon">👤</span><span class="mn-label">Perfiles</span></button>
     <button class="mobile-nav-item" onclick="setMainView('gym')" data-view="gym"><span class="mn-icon">💪</span><span class="mn-label">Prep. física</span></button>
     <button class="mobile-nav-item" onclick="setMainView('train')" data-view="train"><span class="mn-icon">🎬</span><span class="mn-label">Videoteca</span></button>
@@ -805,7 +805,7 @@ body.sb-show{visibility:visible}
   <button id="nav-hoy" onclick="setMainView('hoy')" style="padding:7px 18px;border:none;border-bottom:2px solid var(--club-c1,#1E2A52);margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:var(--club-c1,#1E2A52);cursor:pointer">🏠 Hoy</button>
   <button id="nav-fixture" onclick="setMainView('fixture')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">&#9917; Equipo</button>
   <button id="nav-plan" onclick="setMainView('plan')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🗓️ Planificación</button>
-  <button id="nav-carga" onclick="setMainView('carga')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📊 Carga interna</button>
+  <button id="nav-carga" onclick="setMainView('carga')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">📊 Análisis de carga</button>
   <button id="nav-profiles" onclick="setMainView('profiles')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">👤 Perfiles</button>
   <button id="nav-gym" onclick="setMainView('gym')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">💪 Prep. física</button>
   <button id="nav-train" onclick="setMainView('train')" style="padding:7px 18px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;font-size:12px;font-weight:700;color:#aaa;cursor:pointer">🎬 Videoteca</button>
@@ -3963,19 +3963,10 @@ function setMainView(v){
   if(v==='profiles'){if(typeof renderProfilesTable==='function')renderProfilesTable();}
   if(v==='players'){if(typeof plRebuild==='function')plRebuild();}
   if(v==='plan'){
-    // La subpestaña por default es "Microciclo GPS" → inicializar ese contenido.
-    // El auto-abrir editor de Planificación semanal se hace dentro de planSwitchSubtab('weeks').
+    // Microciclo GPS se mudó a Análisis de carga → Carga externa (v112).
+    // Planificación abre directamente en "Planificación semanal".
     if(typeof planRenderWeeksList==='function') planRenderWeeksList();
-    // Mover view-micro al slot y renderizar todo Microciclo
-    try{
-      if(typeof _planMoveMicroToSlot==='function') _planMoveMicroToSlot();
-      if(typeof mcRebuildWeekSel==='function') mcRebuildWeekSel();
-      if(typeof mcRebuildLoadMetricSelector==='function') mcRebuildLoadMetricSelector();
-      if(typeof mcRenderWeek==='function') mcRenderWeek();
-      if(typeof mcRenderLoad==='function') mcRenderLoad();
-      if(typeof mcRenderBandConfig==='function') mcRenderBandConfig();
-      if(typeof mcEstInit==='function') mcEstInit();
-    }catch(e){ console.warn('Microciclo init on plan view:', e); }
+    try{ if(typeof planSwitchSubtab==='function') planSwitchSubtab('weeks'); }catch(e){}
   }
   if(v==='gym'){
     // Prep. física tiene 2 subpestañas internas: Gimnasio (default) y Resistencia.
@@ -6929,16 +6920,14 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
 
   <!-- Sub-tabs -->
   <div class="subtabs-bar" style="display:flex;gap:0;border-bottom:1px solid #ddd;margin-bottom:12px;flex-wrap:wrap">
-    <button id="plan-subtab-micro" class="plan-subtab" onclick="planSwitchSubtab('micro')"
-      style="background:none;border:none;border-bottom:3px solid #0D1B2A;color:#0D1B2A;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📡 Microciclo GPS</button>
     <button id="plan-subtab-weeks" class="plan-subtab" onclick="planSwitchSubtab('weeks')"
-      style="background:none;border:none;border-bottom:3px solid transparent;color:#666;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📅 Planificación semanal</button>
+      style="background:none;border:none;border-bottom:3px solid #0D1B2A;color:#0D1B2A;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📅 Planificación semanal</button>
     <button id="plan-subtab-compare" class="plan-subtab" onclick="planSwitchSubtab('compare')"
       style="background:none;border:none;border-bottom:3px solid transparent;color:#666;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600">📊 Comparativo semanal</button>
   </div>
 
   <!-- TAB: Semanas guardadas -->
-  <div id="plan-tab-weeks" style="display:none">
+  <div id="plan-tab-weeks">
     <!-- Saved weeks list -->
     <div id="plan-weeks-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:14px"></div>
 
@@ -6993,8 +6982,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   </div>
 
   <!-- TAB: Microciclo GPS — acá se mueve todo el contenido de view-micro -->
-  <div id="plan-tab-micro">
-    <div id="plan-micro-slot"></div>
+  <div id="plan-tab-micro" style="display:none">
   </div>
 
 </div></div>
@@ -10881,18 +10869,47 @@ var PLAN_CMP_METRICS = [
   {k:'rhie',    lbl:'RHIE',           color:'#37474F'}
 ];
 
-// Variable de control: mueve el contenido de view-micro al slot Microciclo GPS la primera vez
-var _planMovedMicro = false;
-function _planMoveMicroToSlot(){
-  if(_planMovedMicro) return;
-  var slot = document.getElementById('plan-micro-slot');
-  var src  = document.getElementById('view-micro');
-  if(!slot || !src) return;
-  while(src.firstChild){
-    slot.appendChild(src.firstChild);
-  }
-  _planMovedMicro = true;
+// ── Análisis de carga: subpestañas Carga interna / Carga externa ──
+// "Carga externa" es el viejo Microciclo GPS: su contenido se muda acá la
+// primera vez que se abre (mismo truco de mover nodos que usaba Planificación).
+var _acMovedMicro=false;
+function _acMoveMicroToSlot(){
+  if(_acMovedMicro)return;
+  var slot=document.getElementById('ac-micro-slot');
+  if(!slot)return;
+  ['view-micro','plan-micro-slot'].forEach(function(srcId){
+    var src=document.getElementById(srcId);
+    if(!src)return;
+    while(src.firstChild){ slot.appendChild(src.firstChild); }
+  });
+  _acMovedMicro=true;
 }
+function acSetSub(t){
+  var si=document.getElementById('ac-sub-interna');
+  var se=document.getElementById('ac-sub-externa');
+  var bi=document.getElementById('ac-sub-btn-interna');
+  var be=document.getElementById('ac-sub-btn-externa');
+  var on='background:none;border:none;padding:8px 18px;font-size:12px;font-weight:800;color:#0D1B2A;cursor:pointer;border-bottom:2.5px solid var(--club-c2,#3B4D88);margin-bottom:-1.5px';
+  var off='background:none;border:none;padding:8px 18px;font-size:12px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px';
+  if(si)si.style.display=(t==='interna')?'':'none';
+  if(se)se.style.display=(t==='externa')?'':'none';
+  if(bi)bi.style.cssText=(t==='interna')?on:off;
+  if(be)be.style.cssText=(t==='externa')?on:off;
+  if(t==='externa'){
+    try{
+      _acMoveMicroToSlot();
+      if(typeof mcRebuildWeekSel==='function')mcRebuildWeekSel();
+      if(typeof mcRebuildLoadMetricSelector==='function')mcRebuildLoadMetricSelector();
+      if(typeof mcRenderWeek==='function')mcRenderWeek();
+      if(typeof mcRenderLoad==='function')mcRenderLoad();
+      if(typeof mcRenderBandConfig==='function')mcRenderBandConfig();
+      if(typeof mcEstInit==='function')mcEstInit();
+    }catch(e){ console.warn('Carga externa init:',e); }
+  }
+}
+window.acSetSub=acSetSub;
+// Compatibilidad: si algo viejo llama al mover de plan, redirige al nuevo
+function _planMoveMicroToSlot(){ _acMoveMicroToSlot(); }
 
 // Switch between plan sub-tabs
 function planSwitchSubtab(tab){
@@ -15647,6 +15664,14 @@ document.addEventListener('DOMContentLoaded',function(){
 <!-- ── VISTA CARGA ── -->
 <div id="view-carga" style="display:none">
 
+<!-- ═══ ANÁLISIS DE CARGA: subpestañas ═══ -->
+<div style="display:flex;gap:2px;border-bottom:1.5px solid #e0e3ec;margin-bottom:14px">
+  <button id="ac-sub-btn-interna" onclick="acSetSub('interna')" style="background:none;border:none;padding:8px 18px;font-size:12px;font-weight:800;color:#0D1B2A;cursor:pointer;border-bottom:2.5px solid var(--club-c2,#3B4D88);margin-bottom:-1.5px">🫀 Carga interna</button>
+  <button id="ac-sub-btn-externa" onclick="acSetSub('externa')" style="background:none;border:none;padding:8px 18px;font-size:12px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px">🛰 Carga externa</button>
+</div>
+
+<div id="ac-sub-interna">
+
 <!-- Bloque de carga del jugador retirado: ahora vive en el modo Check IN-OUT (pestaña Hoy) -->
 
 <!-- Import panels (collapsible) -->
@@ -15734,6 +15759,13 @@ document.addEventListener('DOMContentLoaded',function(){
     <div style="font-size:13px;font-weight:600;color:#555">Cargá datos de wellness e importá el GPS desde microciclo</div>
     <div style="font-size:11px;color:#aaa;margin-top:5px">Seleccioná una semana y los jugadores aparecerán en los cuadrantes de carga vs bienestar</div>
   </div>
+</div>
+
+</div><!-- /ac-sub-interna -->
+
+<!-- ═══ CARGA EXTERNA (contenido de Microciclo GPS movido acá) ═══ -->
+<div id="ac-sub-externa" style="display:none">
+  <div id="ac-micro-slot"></div>
 </div>
 
 </div><!-- end view-carga -->
@@ -34616,7 +34648,7 @@ function hoyTodaysPlan(){
   blocks.forEach(function(b){
     (b.exercises||[]).forEach(function(it){
       var ex=(typeof planResolveEx==='function')?planResolveEx(it):null;
-      items.push({name:(ex&&ex.n)?ex.n:'Ejercicio', mins:it.mins||0, parallel:!!b.parallel});
+      items.push({name:(ex&&ex.n)?ex.n:'Ejercicio', mins:it.mins||0, parallel:!!b.parallel, group:it.group||'Todos'});
     });
   });
   var sum=(typeof planSumDay==='function')?planSumDay(day):{totalMins:items.reduce(function(a,i){return a+i.mins;},0)};
@@ -34907,8 +34939,17 @@ function hoyRender(){
       '</div></div>'):'';
   var sesHtml;
   if(plan && plan.day && plan.items && plan.items.length){
+    // Color estable por grupo (para diferenciar de un vistazo a quién va cada tarea)
+    var _grpColors=['#3B4D88','#1D9E75','#D9534F','#E8A13C','#9C59D1','#2E8B9A'];
+    var _grpSeen=[];
+    var _grpChip=function(g){
+      if(!g||g==='Todos')return '';
+      var gi=_grpSeen.indexOf(g); if(gi<0){ _grpSeen.push(g); gi=_grpSeen.length-1; }
+      var gc=_grpColors[gi%_grpColors.length];
+      return ' <span style="font-size:8.5px;font-weight:800;color:'+gc+';background:'+gc+'16;border:1px solid '+gc+'44;border-radius:8px;padding:1px 6px;white-space:nowrap">'+hoyEsc(g)+'</span>';
+    };
     sesHtml=plan.items.map(function(it,i){
-      return '<div class="hoy-row"><span>'+(i+1)+' · '+it.name+(it.parallel?' <span style="font-size:9px;color:#9C59D1">∥</span>':'')+'</span><b>'+it.mins+'\'</b></div>';
+      return '<div class="hoy-row"><span>'+(i+1)+' · '+it.name+(it.parallel?' <span style="font-size:9px;color:#9C59D1">∥</span>':'')+_grpChip(it.group)+'</span><b>'+it.mins+'\'</b></div>';
     }).join('');
     var tm=plan.sum&&plan.sum.totalMins?Math.round(plan.sum.totalMins):plan.items.reduce(function(a,i){return a+i.mins;},0);
     sesHtml+='<div class="hoy-kpis">'+
