@@ -25845,12 +25845,22 @@ function infRender(){
     testRows=Object.keys(byTest).map(function(tid){
       var t=(typeof tstById==='function')?tstById(tid):null; if(!t)return '';
       var series=byTest[tid].sort(function(a,b){return a.date<b.date?-1:1;});
-      var vals=series.map(function(r){return {v:tstVal(r),asy:tstAsym(r),date:r.date};}).filter(function(x){return x.v!=null;});
+      var vals=series.map(function(r){return {v:tstVal(r),vI:(r.valI!=null?r.valI:null),vD:(r.valD!=null?r.valD:null),asy:tstAsym(r),date:r.date};}).filter(function(x){return x.v!=null;});
       if(!vals.length)return '';
       var nums=vals.map(function(x){return x.v;});
       var pb=t.better==='down'?Math.min.apply(null,nums):Math.max.apply(null,nums);
       var last=vals[vals.length-1];
       var asyTxt=last.asy!=null?(' · Δ'+(last.asy>0?'+':'')+last.asy.toFixed(0)+'%'):'';
+      // v116: en unilaterales, mostrar ambas piernas y PB por pierna
+      if(t.lat==='uni'&&(last.vI!=null||last.vD!=null)){
+        var nI=vals.map(function(x){return x.vI;}).filter(function(n){return n!=null;});
+        var nD=vals.map(function(x){return x.vD;}).filter(function(n){return n!=null;});
+        var pbI=nI.length?(t.better==='down'?Math.min.apply(null,nI):Math.max.apply(null,nI)):null;
+        var pbD=nD.length?(t.better==='down'?Math.min.apply(null,nD):Math.max.apply(null,nD)):null;
+        return infRow(t.name,
+          'I '+(last.vI!=null?last.vI.toFixed(1):'—')+' / D '+(last.vD!=null?last.vD.toFixed(1):'—')+' '+t.unit,
+          'PB I '+(pbI!=null?pbI.toFixed(1):'—')+' · D '+(pbD!=null?pbD.toFixed(1):'—')+asyTxt+' · '+last.date.slice(5));
+      }
       return infRow(t.name, last.v.toFixed(1)+' '+t.unit, 'PB '+pb.toFixed(1)+asyTxt+' · '+last.date.slice(5));
     }).join('');
   }
@@ -31185,25 +31195,54 @@ function tstRenderIndiv(){
   var cards=Object.keys(byTest).map(function(testId){
     var t=tstById(testId); if(!t)return '';
     var series=byTest[testId].slice().sort(function(a,b){return a.date<b.date?-1:1;});
-    var vals=series.map(function(r){return {date:r.date, v:tstVal(r), asy:tstAsym(r)};}).filter(function(x){return x.v!=null;});
+    var isUni=(t.lat==='uni');
+    var vals=series.map(function(r){return {date:r.date, v:tstVal(r), vI:(r.valI!=null?r.valI:null), vD:(r.valD!=null?r.valD:null), asy:tstAsym(r)};}).filter(function(x){return x.v!=null;});
     if(!vals.length)return '';
     var nums=vals.map(function(x){return x.v;});
     var best=t.better==='down'?Math.min.apply(null,nums):Math.max.apply(null,nums);
+    // v116: en tests unilaterales, mostrar mejor de CADA pierna (no el promedio)
+    var bestTxt;
+    if(isUni){
+      var numsI=vals.map(function(x){return x.vI;}).filter(function(n){return n!=null;});
+      var numsD=vals.map(function(x){return x.vD;}).filter(function(n){return n!=null;});
+      var bI=numsI.length?(t.better==='down'?Math.min.apply(null,numsI):Math.max.apply(null,numsI)):null;
+      var bD=numsD.length?(t.better==='down'?Math.min.apply(null,numsD):Math.max.apply(null,numsD)):null;
+      bestTxt='Mejor · <b style="color:#3B4D88">I '+(bI!=null?bI.toFixed(1):'—')+'</b> / <b style="color:#D85A30">D '+(bD!=null?bD.toFixed(1):'—')+'</b> '+t.unit;
+    } else {
+      bestTxt='Mejor: <b style="color:#1D9E75">'+best.toFixed(1)+' '+t.unit+'</b>';
+    }
     var last=vals[vals.length-1], first=vals[0];
     var delta=last.v-first.v;
     var deltaGood=(t.better==='down')?(delta<0):(delta>0);
+    var deltaTxt='';
+    if(vals.length>1){
+      if(isUni){
+        var dI=(last.vI!=null&&first.vI!=null)?(last.vI-first.vI):null;
+        var dD=(last.vD!=null&&first.vD!=null)?(last.vD-first.vD):null;
+        var fmtD=function(d){return d==null?'—':((d>0?'+':'')+d.toFixed(1));};
+        deltaTxt='<div style="font-size:10px;margin-top:6px;font-weight:700;color:#555">Desde el primer registro: <span style="color:#3B4D88">I '+fmtD(dI)+'</span> · <span style="color:#D85A30">D '+fmtD(dD)+'</span> '+t.unit+'</div>';
+      } else {
+        deltaTxt='<div style="font-size:10px;margin-top:6px;color:'+(deltaGood?'#1D9E75':'#D9534F')+';font-weight:700">'+(delta>0?'+ ':'')+delta.toFixed(1)+' '+t.unit+' desde el primer registro</div>';
+      }
+    }
+    var asyChip=function(asy){
+      if(asy==null)return '';
+      return ' <span style="color:'+(Math.abs(asy)>=15?'#D9534F':(Math.abs(asy)>=10?'#E8A13C':'#1D9E75'))+'">(D'+(asy>0?'+':'')+asy.toFixed(0)+'%)</span>';
+    };
+    var chips=vals.map(function(x){
+      if(isUni&&(x.vI!=null||x.vD!=null)){
+        return '<span title="'+x.date+'">'+x.date.slice(5)+': <b style="color:#3B4D88">I '+(x.vI!=null?x.vI.toFixed(1):'—')+'</b> / <b style="color:#D85A30">D '+(x.vD!=null?x.vD.toFixed(1):'—')+'</b>'+asyChip(x.asy)+'</span>';
+      }
+      return '<span title="'+x.date+'">'+x.date.slice(5)+': <b>'+x.v.toFixed(1)+'</b>'+asyChip(x.asy)+'</span>';
+    }).join('');
     return '<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;padding:14px;margin-bottom:10px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;gap:8px;flex-wrap:wrap">'+
         '<b style="font-size:13px;color:#0D1B2A">'+tstEsc(t.name)+' <span style="font-size:10px;color:#999;font-weight:500">'+tstGroupLbl(t.group)+' · '+t.unit+'</span></b>'+
-        '<span style="font-size:11px;color:#666">Mejor: <b style="color:#1D9E75">'+best.toFixed(1)+' '+t.unit+'</b></span>'+
+        '<span style="font-size:11px;color:#666">'+bestTxt+'</span>'+
       '</div>'+
       tstSparkline(vals,t)+
-      '<div style="display:flex;gap:14px;margin-top:8px;font-size:10.5px;color:#666;flex-wrap:wrap">'+
-        vals.map(function(x){
-          return '<span title="'+x.date+'">'+x.date.slice(5)+': <b>'+x.v.toFixed(1)+'</b>'+(x.asy!=null?' <span style="color:'+(Math.abs(x.asy)>=15?'#D9534F':(Math.abs(x.asy)>=10?'#E8A13C':'#1D9E75'))+'">(D'+(x.asy>0?'+':'')+x.asy.toFixed(0)+'%)</span>':'')+'</span>';
-        }).join('')+
-      '</div>'+
-      (vals.length>1?'<div style="font-size:10px;margin-top:6px;color:'+(deltaGood?'#1D9E75':'#D9534F')+';font-weight:700">'+(delta>0?'+ ':'')+delta.toFixed(1)+' '+t.unit+' desde el primer registro</div>':'')+
+      '<div style="display:flex;gap:14px;margin-top:8px;font-size:10.5px;color:#666;flex-wrap:wrap">'+chips+'</div>'+
+      deltaTxt+
     '</div>';
   }).join('');
   return sel+(cards||'<div style="color:#999;font-size:12px">Sin datos para este jugador.</div>');
@@ -31211,6 +31250,29 @@ function tstRenderIndiv(){
 function tstSparkline(vals,t){
   if(vals.length<2)return '<div style="font-size:10px;color:#bbb">1 registro (necesitas 2+ para la tendencia)</div>';
   var W=Math.max(200,vals.length*44), H=52, pad=6;
+  // v116: en unilaterales, dos líneas — Izquierda (azul) y Derecha (naranja)
+  var isUni=t&&t.lat==='uni'&&vals.some(function(x){return x.vI!=null||x.vD!=null;});
+  if(isUni){
+    var all=[];
+    vals.forEach(function(x){ if(x.vI!=null)all.push(x.vI); if(x.vD!=null)all.push(x.vD); });
+    if(!all.length)return '';
+    var mnU=Math.min.apply(null,all), mxU=Math.max.apply(null,all), rngU=(mxU-mnU)||1;
+    var X=function(i){return pad+i*((W-2*pad)/(vals.length-1));};
+    var Y=function(v){return H-pad-((v-mnU)/rngU)*(H-2*pad);};
+    var mk=function(key,color){
+      var pts=[],dots='';
+      vals.forEach(function(x,i){
+        var v=x[key]; if(v==null)return;
+        var px=X(i),py=Y(v);
+        pts.push(px.toFixed(1)+','+py.toFixed(1));
+        dots+='<circle cx="'+px.toFixed(1)+'" cy="'+py.toFixed(1)+'" r="3" fill="'+color+'"/>';
+      });
+      return (pts.length>1?'<polyline points="'+pts.join(' ')+'" fill="none" stroke="'+color+'" stroke-width="2"/>':'')+dots;
+    };
+    return '<div style="display:flex;gap:12px;font-size:9px;font-weight:700;margin-bottom:2px">'+
+      '<span style="color:#3B4D88">━ Izquierda</span><span style="color:#D85A30">━ Derecha</span></div>'+
+      '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:'+W+'px;height:'+H+'px">'+mk('vI','#3B4D88')+mk('vD','#D85A30')+'</svg>';
+  }
   var nums=vals.map(function(x){return x.v;});
   var mn=Math.min.apply(null,nums), mx=Math.max.apply(null,nums), rng=(mx-mn)||1;
   var pts=vals.map(function(x,i){
@@ -31238,10 +31300,11 @@ function tstRenderTeam(){
   var latest={};
   TST_DATA.filter(function(r){return r.testId===_tstTeamTest;}).forEach(function(r){
     var k=tstNorm(r.name);
-    if(!latest[k]||r.date>latest[k].date)latest[k]={name:r.name,date:r.date,v:tstVal(r),asy:tstAsym(r)};
+    if(!latest[k]||r.date>latest[k].date)latest[k]={name:r.name,date:r.date,v:tstVal(r),vI:(r.valI!=null?r.valI:null),vD:(r.valD!=null?r.valD:null),asy:tstAsym(r)};
   });
   var arr=Object.keys(latest).map(function(k){return latest[k];}).filter(function(x){return x.v!=null;});
   if(!arr.length)return sel+'<div style="color:#999;font-size:12px">Sin datos.</div>';
+  var isUni=(t.lat==='uni');
   var nums=arr.map(function(x){return x.v;});
   var mean=nums.reduce(function(a,b){return a+b;},0)/nums.length;
   var sd=Math.sqrt(nums.map(function(v){return (v-mean)*(v-mean);}).reduce(function(a,b){return a+b;},0)/nums.length)||1;
@@ -31249,16 +31312,23 @@ function tstRenderTeam(){
   var rows=arr.map(function(x,i){
     var z=(x.v-mean)/sd; if(t.better==='down')z=-z;
     var zc=z>=0.8?'#1D9E75':(z<=-0.8?'#D9534F':'#888');
+    // v116: en unilaterales, mostrar ambas piernas en la columna de valor
+    var valCell;
+    if(isUni&&(x.vI!=null||x.vD!=null)){
+      valCell='<span style="color:#3B4D88">I '+(x.vI!=null?x.vI.toFixed(1):'—')+'</span> / <span style="color:#D85A30">D '+(x.vD!=null?x.vD.toFixed(1):'—')+'</span> <span style="font-size:9px;color:#aaa;font-weight:500">'+t.unit+'</span>';
+    } else {
+      valCell=x.v.toFixed(1)+' <span style="font-size:9px;color:#aaa;font-weight:500">'+t.unit+'</span>';
+    }
     return '<tr>'+
       '<td style="padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0f0;color:#999;width:28px">'+(i+1)+'</td>'+
       '<td style="padding:7px 10px;font-size:12px;font-weight:600;border-bottom:1px solid #f0f0f0">'+tstEsc(x.name)+'</td>'+
-      '<td style="padding:7px 10px;font-size:13px;font-weight:800;border-bottom:1px solid #f0f0f0;color:#0D1B2A">'+x.v.toFixed(1)+' <span style="font-size:9px;color:#aaa;font-weight:500">'+t.unit+'</span></td>'+
+      '<td style="padding:7px 10px;font-size:13px;font-weight:800;border-bottom:1px solid #f0f0f0;color:#0D1B2A;white-space:nowrap">'+valCell+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;border-bottom:1px solid #f0f0f0;color:'+zc+';font-weight:700">'+(z>0?'+':'')+z.toFixed(2)+' z</td>'+
       '<td style="padding:7px 10px;font-size:10px;border-bottom:1px solid #f0f0f0;color:#999">'+x.date.slice(5)+(x.asy!=null?' · D'+(x.asy>0?'+':'')+x.asy.toFixed(0)+'%':'')+'</td>'+
     '</tr>';
   }).join('');
   return sel+'<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;overflow:hidden">'+
-    '<div style="padding:10px 12px;background:#f6f8fd;font-size:11px;color:#555;border-bottom:1px solid #e4e6ec">Promedio del plantel: <b>'+mean.toFixed(1)+' '+t.unit+'</b> · ultimo valor de cada jugador · z-score dentro del grupo</div>'+
+    '<div style="padding:10px 12px;background:#f6f8fd;font-size:11px;color:#555;border-bottom:1px solid #e4e6ec">Promedio del plantel: <b>'+mean.toFixed(1)+' '+t.unit+'</b> · ultimo valor de cada jugador'+(isUni?' · <span style="color:#3B4D88;font-weight:700">I</span>/<span style="color:#D85A30;font-weight:700">D</span> por pierna (orden y z-score por promedio I-D)':' · z-score dentro del grupo')+'</div>'+
     '<table style="border-collapse:collapse;width:100%"><tbody>'+rows+'</tbody></table></div>';
 }
 function tstSetTeamTest(id){ _tstTeamTest=id; tstRender(); }
