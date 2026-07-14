@@ -2229,10 +2229,10 @@ function drawCards(rows){
       '<span onclick="event.stopPropagation();toggleStarred('+r.id+')" style="background:rgba(255,255,255,0.94);border-radius:7px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;color:'+(r.starred?'#FFD700':'#ccc')+'" title="Destacado">★</span>'+
       '<span onclick="event.stopPropagation();delRow('+r.id+')" style="background:rgba(255,255,255,0.94);border-radius:7px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;color:#c99" title="Eliminar ejercicio">🗑</span>'+
     '</div>';
-    var chips='<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+
+    var chips='<div data-dims-row="'+r.id+'" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+
       '<span class="lib-chip" style="background:'+mcc.bg+';color:'+mcc.tx+';border:1px solid '+mcc.bd+'" title="Metros por minuto (color vs partido)">'+(mtsPM!=null?Math.round(mtsPM)+' m/min':'—')+'</span>'+
-      '<span class="lib-chip" style="background:#eef1f8;color:var(--club-c3,#304483)">'+(r.jug||'—')+' jug</span>'+
-      '<span class="lib-chip" style="background:#eef1f8;color:var(--club-c3,#304483)">'+(r.L&&r.A?(r.L+'×'+r.A+'m'):'—')+'</span>'+
+      '<span class="lib-chip" onclick="event.stopPropagation();libEditDims('+r.id+')" style="background:#eef1f8;color:var(--club-c3,#304483);cursor:pointer;border:1px dashed #b9c3dd" title="Tocá para editar jugadores y medidas">'+(r.jug||'—')+' jug ✎</span>'+
+      '<span class="lib-chip" onclick="event.stopPropagation();libEditDims('+r.id+')" style="background:#eef1f8;color:var(--club-c3,#304483);cursor:pointer;border:1px dashed #b9c3dd" title="Tocá para editar jugadores y medidas">'+(r.L&&r.A?(r.L+'×'+r.A+'m'):'—')+' ✎</span>'+
       '<span class="lib-chip" style="background:#eef1f8;color:var(--club-c3,#304483)">'+(r.min||'—')+"'"+'</span>'+
       (e?'<span class="lib-chip" style="background:'+ecol(e)+'22;color:'+ecol(e)+'" title="EII: m²/jugador">EII '+Math.round(e)+'</span>':'')+
     '</div>';
@@ -2264,6 +2264,42 @@ function drawCards(rows){
   },30);
 }
 window.drawCards=drawCards;
+
+// ── v117: editor inline de jugadores/largo/ancho en la tarjeta ──
+// Al tocar los chips "X jug" o "L×A m", la fila de chips se convierte en tres
+// inputs chicos con ✓/✕. Guardar recalcula EII y cuadrante, y re-renderiza.
+function libEditDims(id){
+  var r=D.find(function(x){return x.id===id;}); if(!r)return;
+  var wrap=document.querySelector('[data-dims-row="'+id+'"]'); if(!wrap)return;
+  var inp=function(iid,val,ph,w){
+    return '<input id="'+iid+'" type="number" min="1" value="'+(val||'')+'" placeholder="'+ph+'" '+
+      'onclick="event.stopPropagation()" onkeydown="if(event.key===\'Enter\'){event.stopPropagation();libEditDimsSave('+id+');}" '+
+      'style="width:'+w+'px;padding:4px 5px;border:1px solid #b9c3dd;border-radius:5px;font-size:11px;text-align:center;background:#fff;color:#0D1B2A">';
+  };
+  wrap.innerHTML='<span onclick="event.stopPropagation()" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;font-size:10px;color:#666;font-weight:600">'+
+    inp('ld-j-'+id,r.jug,'jug',46)+'<span>jug ·</span>'+
+    inp('ld-l-'+id,r.L,'largo',48)+'<span>×</span>'+
+    inp('ld-a-'+id,r.A,'ancho',48)+'<span>m</span>'+
+    '<button onclick="event.stopPropagation();libEditDimsSave('+id+')" title="Guardar" style="border:none;background:#1D9E75;color:#fff;border-radius:5px;width:24px;height:24px;font-size:12px;font-weight:800;cursor:pointer">✓</button>'+
+    '<button onclick="event.stopPropagation();drawTable(gf())" title="Cancelar" style="border:none;background:#eee;color:#888;border-radius:5px;width:24px;height:24px;font-size:11px;cursor:pointer">✕</button>'+
+  '</span>';
+  var f=document.getElementById('ld-j-'+id); if(f){f.focus();f.select();}
+}
+window.libEditDims=libEditDims;
+function libEditDimsSave(id){
+  var r=D.find(function(x){return x.id===id;}); if(!r)return;
+  var j=parseInt((document.getElementById('ld-j-'+id)||{}).value);
+  var l=parseFloat((document.getElementById('ld-l-'+id)||{}).value);
+  var a=parseFloat((document.getElementById('ld-a-'+id)||{}).value);
+  // Solo pisar con valores válidos (>0); un campo vacío conserva el dato previo
+  if(j>0)r.jug=j;
+  if(l>0)r.L=l;
+  if(a>0)r.A=a;
+  saveData();
+  if(typeof sbUpsertOneDrill==='function'){ try{ sbUpsertOneDrill(r); }catch(e){} }
+  refresh();
+}
+window.libEditDimsSave=libEditDimsSave;
 
 function drawTable(rows){
   // Vista tarjetas: renderizar el grid y saltear la tabla
@@ -14170,6 +14206,13 @@ function exEditInfo(id){
   document.getElementById('exi-rename').value=row.n;
   document.getElementById('exi-desc').value=row.desc||'';
   var vEl=document.getElementById('exi-video'); if(vEl)vEl.value=row.video||'';
+  // v117: jugadores y dimensiones editables desde el modal
+  var jEl=document.getElementById('exi-jug'), lEl=document.getElementById('exi-largo'), aEl=document.getElementById('exi-ancho');
+  if(jEl)jEl.value=row.jug||'';
+  if(lEl)lEl.value=row.L||'';
+  if(aEl)aEl.value=row.A||'';
+  exiEiiHint();
+  if(jEl&&!jEl._eiiWired){[jEl,lEl,aEl].forEach(function(el){if(el)el.addEventListener('input',exiEiiHint);});jEl._eiiWired=true;}
   exiVideoHint();
   var prev=document.getElementById('exi-prev');
   var thumb=document.getElementById('exi-thumb');
@@ -14224,6 +14267,15 @@ function exiImgClear(){
 }
 window.exiImgClear=exiImgClear;
 
+function exiEiiHint(){
+  var h=document.getElementById('exi-eii-hint'); if(!h)return;
+  var j=parseInt((document.getElementById('exi-jug')||{}).value)||0;
+  var l=parseFloat((document.getElementById('exi-largo')||{}).value)||0;
+  var a=parseFloat((document.getElementById('exi-ancho')||{}).value)||0;
+  h.textContent=(j>0&&l>0&&a>0)?('EII: '+Math.round(l*a/j)+' m²/jugador'):'Los tres valores son necesarios para el EII y el cuadrante.';
+}
+window.exiEiiHint=exiEiiHint;
+
 function exiSave(){
   if(_exInfoId===null)return;
   var row=D.find(function(r){return r.id===_exInfoId;});
@@ -14233,9 +14285,18 @@ function exiSave(){
   row.desc=(document.getElementById('exi-desc').value||'').trim()||null;
   var vv=(document.getElementById('exi-video').value||'').trim();
   row.video=vv||null;
+  // v117: jugadores y dimensiones — solo se pisan si el valor es válido (>0),
+  // así un campo borrado por accidente no destruye el dato existente
+  var j=parseInt((document.getElementById('exi-jug')||{}).value);
+  var l=parseFloat((document.getElementById('exi-largo')||{}).value);
+  var a=parseFloat((document.getElementById('exi-ancho')||{}).value);
+  if(j>0)row.jug=j;
+  if(l>0)row.L=l;
+  if(a>0)row.A=a;
   row.img=_exInfoImg||null;
   if(row.img&&row.diag)row.diag=null;
   saveData();
+  if(typeof sbUpsertOneDrill==='function'){ try{ sbUpsertOneDrill(row); }catch(e){} }
   var msg=document.getElementById('exi-msg');
   msg.style.color='#1D9E75'; msg.textContent='✓ Guardado';
   setTimeout(function(){ exiClose(); drawTable(gf()); },700);
@@ -14823,6 +14884,23 @@ document.addEventListener('DOMContentLoaded',function(){
         </div>
       </div>
       <button onclick="exiClose()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#aaa;padding:0;line-height:1;flex-shrink:0">✕</button>
+    </div>
+
+    <!-- v117: Jugadores y dimensiones -->
+    <div>
+      <div style="font-size:11px;font-weight:700;color:#333;margin-bottom:4px">📐 Jugadores y espacio</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <label style="font-size:10px;color:#555;font-weight:600;display:flex;flex-direction:column;gap:3px">Jugadores
+          <input id="exi-jug" type="number" min="1" step="1" style="width:74px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;background:#fafafa;color:#1a1a1a">
+        </label>
+        <label style="font-size:10px;color:#555;font-weight:600;display:flex;flex-direction:column;gap:3px">Largo (m)
+          <input id="exi-largo" type="number" min="1" step="0.5" style="width:74px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;background:#fafafa;color:#1a1a1a">
+        </label>
+        <label style="font-size:10px;color:#555;font-weight:600;display:flex;flex-direction:column;gap:3px">Ancho (m)
+          <input id="exi-ancho" type="number" min="1" step="0.5" style="width:74px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;background:#fafafa;color:#1a1a1a">
+        </label>
+      </div>
+      <div id="exi-eii-hint" style="font-size:9.5px;color:#888;margin-top:3px"></div>
     </div>
 
     <!-- Descripción -->
