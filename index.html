@@ -25,6 +25,8 @@ details[open] .panel summary::before{content:"▼"}
 #gym-new-det > summary::-webkit-details-marker, #carga-imp-det > summary::-webkit-details-marker, #match-form-det > summary::-webkit-details-marker{display:none}
 #gym-new-det > summary::before, #carga-imp-det > summary::before, #match-form-det > summary::before{content:"▶";font-size:10px;color:var(--club-c2,#3B4D88)}
 #gym-new-det[open] > summary::before, #carga-imp-det[open] > summary::before, #match-form-det[open] > summary::before{content:"▼"}
+/* v118: el panel de importación de Carga interna se controla con el botón junto a la semana */
+#carga-imp-det:not([open]){display:none}
 #gym-new-det > .panel, #carga-imp-det > .panel{background:none;border:none;border-radius:0;margin-bottom:0}
 .panel-body{padding:10px 14px 14px}
 .ref-grid{display:flex;gap:7px;flex-wrap:wrap}
@@ -15757,9 +15759,35 @@ document.addEventListener('DOMContentLoaded',function(){
 
 <!-- Bloque de carga del jugador retirado: ahora vive en el modo Check IN-OUT (pestaña Hoy) -->
 
-<!-- Import panels (collapsible) -->
-<details id="carga-imp-det" style="margin-bottom:10px">
-<summary>📥 Importar datos — Wellness y PSE individual</summary>
+
+
+<!-- Review area: acá se muestra la tabla de revisión cuando importás Wellness/PSE -->
+<div id="carga-review-area" style="margin-bottom:12px"></div>
+
+<!-- Controls bar -->
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+  <label style="font-size:11px;font-weight:600;color:#333;display:flex;align-items:center;gap:6px">
+    Semana:
+    <select id="carga-week-sel" onchange="cargaWeekChange()" style="font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;min-width:160px">
+      <option value="">— elegir semana —</option>
+    </select>
+  </label>
+
+  <!-- v118: botón de importación al lado del selector de semana -->
+  <button id="carga-imp-btn" onclick="cargaToggleImport()" style="display:flex;align-items:center;gap:5px;background:#fff;color:var(--club-c2,#3B4D88);border:1px solid #cdd4e4;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">📥 Importar datos</button>
+
+  <input type="hidden" id="carga-tab-mode" value="wellpse">
+
+  <div style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto">
+    <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:var(--club-c2,#3B4D88);color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid var(--club-c2,#3B4D88)">💚 Wellness &amp; PSE</button>
+    <button id="carga-view-dia" onclick="cargaSetView('dia')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🌅 Wellness y PSE del día</button>
+    <button id="carga-view-cuadrante" onclick="cargaSetView('cuadrante')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">📊 Cuadrante</button>
+  </div>
+</div>
+
+<!-- Panel de importación (v118: se abre con el botón junto al selector de semana) -->
+<details id="carga-imp-det" style="margin-bottom:12px;margin-top:2px">
+<summary style="display:none">📥 Importar datos — Wellness y PSE individual</summary>
 <div class="panel">
 <div class="panel-body" style="padding:10px 14px">
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;flex-wrap:wrap">
@@ -15810,30 +15838,6 @@ document.addEventListener('DOMContentLoaded',function(){
     </div>
   </div>
 </div></div></details>
-
-<!-- Review area: acá se muestra la tabla de revisión cuando importás Wellness/PSE -->
-<div id="carga-review-area" style="margin-bottom:12px"></div>
-
-<!-- Controls bar -->
-<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-  <label style="font-size:11px;font-weight:600;color:#333;display:flex;align-items:center;gap:6px">
-    Semana:
-    <select id="carga-week-sel" onchange="cargaWeekChange()" style="font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;min-width:160px">
-      <option value="">— elegir semana —</option>
-    </select>
-  </label>
-
-  <input type="hidden" id="carga-tab-mode" value="wellpse">
-
-  <div style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto">
-    <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:var(--club-c2,#3B4D88);color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid var(--club-c2,#3B4D88)">💚 Wellness &amp; PSE</button>
-    <button id="carga-view-dia" onclick="cargaSetView('dia')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🌅 Wellness y PSE del día</button>
-    <button id="carga-view-cuadrante" onclick="cargaSetView('cuadrante')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">📊 Cuadrante</button>
-  </div>
-</div>
-
-<!-- Indicador de datos cargados (visible siempre, se actualiza en cada render) -->
-<div id="carga-data-indicator" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:6px 10px;background:#f0f5ff;border:1px solid #d0dff5;border-radius:6px;font-size:10px"></div>
 
 <!-- Main content area -->
 <div id="carga-main-content" style="background:#f8f9fa;border-radius:10px;padding:14px;min-height:200px">
@@ -24078,6 +24082,21 @@ window.cargaRenderWellPseIndividual = cargaRenderWellPseIndividual;
 
 // Indicador permanente de cuántos datos hay cargados.
 // Sirve para que el usuario vea de un vistazo si los datos se guardaron o no.
+// v118: el panel de importación se abre/cierra desde el botón junto a la semana
+function cargaToggleImport(force){
+  var det=document.getElementById('carga-imp-det'); if(!det)return;
+  var open=(force!==undefined)?force:!det.open;
+  det.open=open;
+  var btn=document.getElementById('carga-imp-btn');
+  if(btn){
+    btn.style.background=open?'var(--club-c2,#3B4D88)':'#fff';
+    btn.style.color=open?'#fff':'var(--club-c2,#3B4D88)';
+    btn.textContent=open?'✕ Cerrar importación':'📥 Importar datos';
+  }
+  if(open)det.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+window.cargaToggleImport=cargaToggleImport;
+
 function cargaUpdateDataIndicator(){
   var el=document.getElementById('carga-data-indicator');
   if(!el)return;
