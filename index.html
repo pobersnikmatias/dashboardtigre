@@ -15457,8 +15457,8 @@ document.addEventListener('DOMContentLoaded',function(){
   </div>
   </div><!-- /gym-cats-wrap -->
 
-<!-- ═══ Grid de tarjetas a ancho completo ═══ -->
-<div id="gym-lib-cats" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px"></div>
+<!-- ═══ Grid de tarjetas a ancho completo (v113: desplegable de categoría) ═══ -->
+<div id="gym-lib-cats" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;max-width:380px"></div>
 <div id="gym-lib-list" class="lib-cards"></div>
 
 </div><!-- end panel-library -->
@@ -15931,7 +15931,7 @@ function gymSetTab(t){
     }
   });
   if(t==='summary'){gymRebuildSumWeek();gymRenderSummary();gymProgInit();}
-  if(t==='library'){gymRenderLibList();gymRenderLibCats();gymRenderCatsList();}
+  if(t==='library'){gymRenderLibCats();gymRenderLibList();gymRenderCatsList();}
   if(t==='evals'){evalRebuildPlayerSels();evalRender();}
 }
 window.gymSetTab = gymSetTab;
@@ -17557,6 +17557,10 @@ window.gymProgInit = gymProgInit;
 
 
 // ── BIBLIOTECA ─────────────────────────────────────────────
+// v113: las categorías se eligen con un desplegable (antes: fila de píldoras).
+// La biblioteca arranca en la primera categoría con ejercicios — se muestra
+// únicamente lo de esa categoría, no la grilla mezclada de "Todas".
+var _gymLibCatAutoDone=false;
 function gymRenderLibCats(){
   gymMigrateCats();
   var cont = document.getElementById('gym-lib-cats');
@@ -17567,13 +17571,32 @@ function gymRenderLibCats(){
     ordered.push(root);
     GYM_CATS.filter(function(c){return c.parent===root.name;}).forEach(function(child){ ordered.push(child); });
   });
-  var html = '<button onclick="gymLibSetCat(\'all\')" style="padding:3px 10px;border-radius:20px;border:1.5px solid '+(_gymLibCat==='all'?'#555':'#ccc')+';background:'+(_gymLibCat==='all'?'#555':'transparent')+';cursor:pointer;font-size:10px;color:'+(_gymLibCat==='all'?'#fff':'#555')+';font-weight:600">Todas</button>';
+  // Conteo de ejercicios por categoría
+  var counts={};
+  GYM_EXERCISES.forEach(function(e){ counts[e.cat]=(counts[e.cat]||0)+1; });
+  // Auto-selección inicial: primera categoría (en el orden del gestor) con ejercicios
+  if(!_gymLibCatAutoDone && _gymLibCat==='all'){
+    var first=ordered.find(function(c){ return counts[c.name]; });
+    if(first){ _gymLibCat=first.name; _gymLibCatAutoDone=true; }
+    else if(GYM_EXERCISES.length){ _gymLibCatAutoDone=true; }
+  } else { _gymLibCatAutoDone=true; }
+  var esc=function(s){ return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;'); };
+  var opts='<option value="all">📚 Todas ('+GYM_EXERCISES.length+')</option>';
   ordered.forEach(function(c){
-    var isOn = _gymLibCat===c.name;
-    var isSub = !!c.parent;
-    html += '<button onclick="gymLibSetCat(\''+c.name+'\')" style="padding:3px 10px;border-radius:20px;border:1.5px '+(isSub?'dashed':'solid')+' '+(isOn?c.color:'#ccc')+';background:'+(isOn?c.color:'transparent')+';cursor:pointer;font-size:10px;color:'+(isOn?'#fff':c.color)+';font-weight:600;margin-left:'+(isSub?'4px':'0')+'">'+c.name+'</button>';
+    var pre=c.parent?'&nbsp;&nbsp;↳ ':'';
+    opts+='<option value="'+esc(c.name)+'">'+pre+esc(c.name)+' ('+(counts[c.name]||0)+')</option>';
   });
-  cont.innerHTML = html;
+  // Ejercicios con categoría que ya no existe en el gestor
+  Object.keys(counts).sort().forEach(function(cn){
+    if(!GYM_CATS.some(function(c){return c.name===cn;})){
+      opts+='<option value="'+esc(cn)+'">'+esc(cn)+' ('+counts[cn]+') ⚠</option>';
+    }
+  });
+  var selCol=(_gymLibCat==='all')?'#555':gymCatColor(_gymLibCat);
+  cont.innerHTML='<span style="font-size:11px;font-weight:700;color:#333;flex-shrink:0">Categoría:</span>'
+    +'<select id="gym-lib-cat-select" onchange="gymLibSetCat(this.value)" style="font-size:12px;font-weight:700;padding:6px 10px;border:1.5px solid '+selCol+';border-radius:7px;background:#fff;color:'+selCol+';min-width:0;max-width:100%;flex:1;cursor:pointer">'+opts+'</select>';
+  var s=document.getElementById('gym-lib-cat-select');
+  if(s){ s.value=_gymLibCat; if(s.value!==_gymLibCat){ s.value='all'; _gymLibCat='all'; } }
 }
 function gymLibSetCat(c){ _gymLibCat=c; gymRenderLibCats(); gymRenderLibList(); }
 window.gymLibSetCat = gymLibSetCat;
@@ -17751,6 +17774,7 @@ function gymSaveExercise(){
       setTimeout(function(){msg.textContent='';},3000);
       setTimeout(_gymFormPanelClose, 700);
       gymCancelEditExercise();
+      gymRenderLibCats();
       gymRenderLibList();
       gymRebuildCatSelects();
     }
@@ -17764,6 +17788,7 @@ function gymSaveExercise(){
     document.getElementById('gym-ex-muscle').value='';
     document.getElementById('gym-ex-notes').value='';
     var vEl = document.getElementById('gym-ex-video'); if(vEl){ vEl.value=''; gymExVideoPreview(''); }
+    gymRenderLibCats();
     gymRenderLibList();
   }
 }
@@ -17774,6 +17799,7 @@ function gymDeleteExercise(id){
   var i = GYM_EXERCISES.findIndex(function(e){return e.id===id;});
   if(i>-1) GYM_EXERCISES.splice(i,1);
   saveData();
+  gymRenderLibCats();
   gymRenderLibList();
 }
 window.gymDeleteExercise = gymDeleteExercise;
@@ -30081,6 +30107,13 @@ sbLoadInitialData = function(){
     } else {
       console.log('[Supabase] No hay eval_aliases en Supabase todavía.');
     }
+    // v113: refrescar la biblioteca de gimnasio con los datos de la nube
+    // (desplegable de categorías + auto-selección de la primera con ejercicios)
+    try{
+      if(typeof gymRenderLibCats==='function') gymRenderLibCats();
+      if(typeof gymRenderLibList==='function') gymRenderLibList();
+      if(typeof gymRebuildCatSelects==='function') gymRebuildCatSelects();
+    }catch(e){ console.warn('Re-render gym lib:', e); }
   });
 };
 
