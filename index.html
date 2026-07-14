@@ -823,12 +823,12 @@ body.sb-show{visibility:visible}
 <div id="vt-sub-ejercicios">
 
 <!-- ═══ BARRA DE ACCIONES DE LA BIBLIOTECA ═══ -->
-<div id="lib-actions" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-  <button onclick="libToggleDesign()" style="display:flex;align-items:center;gap:10px;background:linear-gradient(120deg,var(--club-c1,#1E2A52),var(--club-c2,#3B4D88));color:#fff;border:none;border-radius:12px;padding:12px 22px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(30,42,82,0.3)">
-    <span style="font-size:19px">🎨</span> Diseñá tu ejercicio
+<div id="lib-actions" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+  <button onclick="libToggleDesign()" style="display:flex;align-items:center;gap:8px;background:linear-gradient(120deg,var(--club-c1,#1E2A52),var(--club-c2,#3B4D88));color:#fff;border:none;border-radius:10px;padding:9px 16px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 3px 10px rgba(30,42,82,0.25)">
+    <span style="font-size:16px">🎨</span> Diseñá tu ejercicio
   </button>
   <div style="position:relative;margin-left:auto">
-    <button onclick="libToggleGear(event)" title="Herramientas de la biblioteca" style="background:#fff;border:1px solid #d5d8e0;border-radius:10px;padding:11px 14px;font-size:16px;cursor:pointer">⚙</button>
+    <button onclick="libToggleGear(event)" title="Herramientas de la biblioteca" style="background:#fff;border:1px solid #d5d8e0;border-radius:9px;padding:8px 12px;font-size:15px;cursor:pointer">⚙</button>
     <div id="lib-gear-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #d5d8e0;border-radius:10px;box-shadow:0 8px 28px rgba(20,30,60,0.18);z-index:500;min-width:230px;overflow:hidden">
       <button onclick="libGearOpen('cat-det')" style="display:block;width:100%;text-align:left;background:none;border:none;padding:11px 16px;font-size:12.5px;font-weight:600;color:#333;cursor:pointer;border-bottom:1px solid #f0f0f0">🏷 Gestionar categorías</button>
       <button onclick="libGearOpen('csv-det')" style="display:block;width:100%;text-align:left;background:none;border:none;padding:11px 16px;font-size:12.5px;font-weight:600;color:#333;cursor:pointer">📥 Importar ejercicios desde CSV</button>
@@ -1067,8 +1067,8 @@ document.addEventListener('click',function(e){
 <div id="top-panel-slot" class="top-panel-content"></div>
 
 
-<!-- FILTROS -->
-<div class="cats" id="cf"></div>
+<!-- FILTROS (v113: desplegable de categoría, no mini tarjetas) -->
+<div id="cf" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px;max-width:380px"></div>
 <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:9px">
 <div class="tabs">
   <!-- Tabs ocultos: el sistema sigue funcionando internamente con la "vista 2" (Ejercicio seleccionado).
@@ -1114,12 +1114,8 @@ document.addEventListener('click',function(e){
       <div id="diag-display" style="width:320px;max-width:100%"></div>
     </div>
   </div>
-  <!-- Mensaje cuando no hay selección -->
-  <div id="empty-sel-msg" style="display:none;padding:20px 18px;text-align:center;background:#f5f8ff;border:2px dashed #c0cde8;border-radius:10px;margin:0 0 8px 0">
-    <div style="font-size:26px;margin-bottom:6px;opacity:0.5">📋</div>
-    <div style="font-size:13px;font-weight:700;color:var(--club-c2,#3B4D88);margin-bottom:3px">Seleccioná uno o más ejercicios</div>
-    <div style="font-size:11px;color:#888">Marcá los ejercicios con el checkbox a la izquierda de la tabla para ver el radar, las métricas y el mapa de cancha.</div>
-  </div>
+  <!-- Mensaje cuando no hay selección (v113: línea discreta, sin cuadro) -->
+  <div id="empty-sel-msg" style="display:none;font-size:11px;color:#999;padding:2px 2px;margin:0 0 8px 0">☑️ Marcá uno o más ejercicios para ver el radar, las métricas y la cancha.</div>
   <div style="font-size:11px;color:#999;margin-top:5px;display:none" id="info2"></div>
   <div id="vol-bars" style="display:none;margin-top:10px;background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 14px"></div>
 </div>
@@ -1926,7 +1922,16 @@ function toggleStarredFromModal(id){
 window.toggleStarredFromModal = toggleStarredFromModal;
 function sTab(t){tab=2;document.getElementById('p1').style.display='none';document.getElementById('p2').style.display='';updateSel();}
 window.sTab=sTab;
-function setCat(c){af=c;window._libCatAutoDone=true;document.querySelectorAll('.cb').forEach(b=>{const on=b.dataset.cat===c;b.classList.toggle('on',on);b.style.background=on?(BC[c]||'#3B4D88'):'transparent';b.style.borderColor=on?(BC[c]||'#3B4D88'):'#ccc';b.style.color=on?'#fff':'#555';});refresh();}
+function setCat(c){af=c;window._libCatAutoDone=true;
+  // v113: las categorías ahora se eligen con un desplegable (#cf-select)
+  var s=document.getElementById('cf-select');
+  if(s){
+    if(s.value!==c) s.value=c;
+    var col=(c==='__starred')?'#E8B800':(c==='all')?'#3B4D88':(BC[c]||'#3B4D88');
+    s.style.borderColor=col;
+    s.style.color=col;
+  }
+  refresh();}
 window.setCat=setCat;
 // La biblioteca no arranca en "Todos" (no es una categoría): al iniciar se
 // selecciona la primera categoría real con ejercicios. Corre una sola vez
@@ -1960,30 +1965,23 @@ function rebuildCatBtns(){
     if(bSin && !aSin) return -1;
     return String(na).localeCompare(String(nb),'es',{sensitivity:'base'});
   });
-  const cf=document.getElementById('cf');cf.innerHTML='';
-  // Botón especial ⭐ Destacados (categoría virtual) al inicio
+  // v113: desplegable compacto en lugar de mini tarjetas (más prolijo en móvil)
+  const cf=document.getElementById('cf');if(!cf)return;
+  var counts={}; D.forEach(function(r){ counts[r.cat]=(counts[r.cat]||0)+1; });
   var nStarred = D.filter(function(x){return x.starred;}).length;
-  if(nStarred > 0){
-    var sb = document.createElement('button');
-    sb.className = 'cb' + (af==='__starred' ? ' on' : '');
-    sb.textContent = '⭐ Destacados ('+nStarred+')';
-    sb.dataset.cat = '__starred';
-    if(af==='__starred'){
-      sb.style.background = '#FFD700';
-      sb.style.borderColor = '#E8B800';
-      sb.style.color = '#5a3500';
-    }
-    sb.onclick = function(){ setCat('__starred'); };
-    cf.appendChild(sb);
-  }
+  var opts='<option value="all">📚 Todos ('+D.length+')</option>';
+  if(nStarred > 0) opts+='<option value="__starred">⭐ Destacados ('+nStarred+')</option>';
   idxs.forEach(function(i){
     var c=CATS[i];
-    const b=document.createElement('button');
-    b.className='cb'+(af===c?' on':'');
-    b.textContent=CATN[i];b.dataset.cat=c;
-    if(af===c){b.style.background=BC[c]||'#3B4D88';b.style.borderColor=BC[c]||'#3B4D88';b.style.color='#fff';}
-    b.onclick=()=>setCat(c);cf.appendChild(b);
+    if(c==='all') return;
+    opts+='<option value="'+String(c).replace(/"/g,'&quot;')+'">'+(CATN[i]||c)+' ('+(counts[c]||0)+')</option>';
   });
+  var selCol=(af==='__starred')?'#E8B800':(af==='all')?'#3B4D88':(BC[af]||'#3B4D88');
+  cf.innerHTML='<span style="font-size:11px;font-weight:700;color:#333;flex-shrink:0">Categoría:</span>'
+    +'<select id="cf-select" onchange="setCat(this.value)" style="font-size:12px;font-weight:700;padding:6px 10px;border:1.5px solid '+selCol+';border-radius:7px;background:#fff;color:'+selCol+';min-width:0;max-width:100%;flex:1;cursor:pointer">'
+    +opts+'</select>';
+  var s=document.getElementById('cf-select');
+  if(s){ s.value=af; if(s.value!==af){ s.value='all'; } }
   rebuildCatPanels();
   rebuildCatSelects();
 }
@@ -5746,13 +5744,13 @@ function mcDeleteDayPrompt(){
   var i=MICROCICLO.findIndex(function(s){return s.week===week && s.day===dayToDelete;});
   if(i<0){ alert('No encontré la sesión. Recargá la página y probá de nuevo.'); return; }
   MICROCICLO.splice(i,1);
-  // Borrar Supabase directamente (no esperamos al debounce)
-  if(typeof sbMicrocicloDelete==='function'){
-    sbMicrocicloDelete(week, dayToDelete).then(function(){
-      console.log('[Supabase] Borrado microciclo:', week, dayToDelete);
-    }).catch(function(err){
+  // v113: cola resiliente — si el delete falla o la sesión no está lista,
+  // queda encolado y se reintenta; la sesión no puede resucitar al recargar.
+  if(typeof sbMicroDeleteSafe==='function'){
+    sbMicroDeleteSafe(week, dayToDelete);
+  } else if(typeof sbMicrocicloDelete==='function'){
+    sbMicrocicloDelete(week, dayToDelete).catch(function(err){
       console.error('[Supabase] Error al borrar microciclo:', err);
-      alert('Se borró localmente, pero hubo un error al borrar de Supabase. Cuando vuelva el sync probablemente se restaure. Revisá la consola para detalles.');
     });
   }
   // Persistir local + re-render
@@ -6186,9 +6184,16 @@ function mcDeletePlayer(week,day,name){
 window.mcDeletePlayer=mcDeletePlayer;
 function mcDeleteWeek(){
   const week=document.getElementById('mc-week-view')?.value;
-  if(!week||!confirm('¿Eliminar la semana "'+week+'"?'))return;
+  if(!week||!confirm('¿Eliminar la semana "'+week+'"?\n\nSe borra de este dispositivo y de la nube.\nSi tu compañero la está mirando en este momento, que recargue para ver el cambio.'))return;
+  // Guardar los días ANTES de filtrar, para poder borrarlos de Supabase
+  var days=MICROCICLO.filter(function(s){return s.week===week;}).map(function(s){return s.day;});
   MICROCICLO=MICROCICLO.filter(s=>s.week!==week);
-  saveData();mcRebuildWeekSel();mcRenderWeek();mcRenderLoad();
+  // FIX v113: sin esto la semana solo se borraba localmente y "resucitaba"
+  // al recargar (el sync normal hace upsert, nunca delete).
+  if(typeof sbMicroDeleteSafe==='function'){ days.forEach(function(d){ sbMicroDeleteSafe(week,d); }); }
+  saveData();mcRebuildWeekSel();
+  if(typeof cargaRebuildWeekSel==='function') cargaRebuildWeekSel();
+  mcRenderWeek();mcRenderLoad();
 }
 window.mcDeleteWeek=mcDeleteWeek;
 
@@ -29135,6 +29140,66 @@ function sbMicrocicloDelete(week, day){
 }
 
 // ═══════════════════════════════════════════════════════════════
+// COLA RESILIENTE DE BORRADOS (v113)
+// ═══════════════════════════════════════════════════════════════
+// Problema que arregla: borrar una semana solo la sacaba del array local;
+// si el delete a Supabase fallaba (o directamente no se llamaba, o la sesión
+// aún no estaba lista), al recargar la semana volvía desde la nube.
+// Solución: cada borrado se encola en localStorage y se reintenta hasta que
+// Supabase confirme. Además, al cargar datos de la nube se ignoran las
+// sesiones que están pendientes de borrar — así NO pueden resucitar.
+var MC_DEL_KEY='mc_del_queue_v1';
+function _mcDelQueueGet(){ try{ var q=JSON.parse(localStorage.getItem(MC_DEL_KEY)||'[]'); return Array.isArray(q)?q:[]; }catch(e){ return []; } }
+function _mcDelQueueSet(q){ try{ localStorage.setItem(MC_DEL_KEY, JSON.stringify(q)); }catch(e){} }
+function mcDelQueuePending(week, day){
+  return _mcDelQueueGet().some(function(it){ return it.week===week && it.day===day; });
+}
+function sbMicroDeleteSafe(week, day){
+  if(week==null || day==null) return;
+  var q=_mcDelQueueGet();
+  if(!q.some(function(it){ return it.week===week && it.day===day; })){
+    q.push({week:week, day:day, t:Date.now()});
+    _mcDelQueueSet(q);
+  }
+  sbMicroFlushDeletes();
+}
+var _mcDelFlushTimer=null, _mcDelFlushBusy=false;
+function sbMicroFlushDeletes(){
+  var q=_mcDelQueueGet();
+  if(!q.length) return;
+  if(!sbReady || !sbClient || !sbCurrentUser){
+    // Todavía no hay sesión: reintentar en unos segundos
+    if(!_mcDelFlushTimer){ _mcDelFlushTimer=setTimeout(function(){ _mcDelFlushTimer=null; sbMicroFlushDeletes(); }, 4000); }
+    return;
+  }
+  if(_mcDelFlushBusy) return;
+  _mcDelFlushBusy=true;
+  var item=q[0];
+  sbClient.from('microciclo').delete()
+    .eq('week', item.week).eq('day', item.day).eq('categoria', SB_CATEGORIA)
+    .then(function(res){
+      _mcDelFlushBusy=false;
+      if(res.error){
+        console.error('[Supabase] Delete microciclo error (se reintenta):', res.error);
+        if(!_mcDelFlushTimer){ _mcDelFlushTimer=setTimeout(function(){ _mcDelFlushTimer=null; sbMicroFlushDeletes(); }, 10000); }
+        return;
+      }
+      console.log('[Supabase] Microciclo borrado de la nube:', item.week, '·', item.day);
+      var q2=_mcDelQueueGet().filter(function(it){ return !(it.week===item.week && it.day===item.day); });
+      _mcDelQueueSet(q2);
+      if(q2.length) sbMicroFlushDeletes();
+    })
+    .catch(function(err){
+      _mcDelFlushBusy=false;
+      console.error('[Supabase] Delete microciclo excepción (se reintenta):', err);
+      if(!_mcDelFlushTimer){ _mcDelFlushTimer=setTimeout(function(){ _mcDelFlushTimer=null; sbMicroFlushDeletes(); }, 10000); }
+    });
+}
+window.sbMicroDeleteSafe=sbMicroDeleteSafe;
+window.sbMicroFlushDeletes=sbMicroFlushDeletes;
+window.mcDelQueuePending=mcDelQueuePending;
+
+// ═══════════════════════════════════════════════════════════════
 // SYNC con debounce
 // ═══════════════════════════════════════════════════════════════
 var _sbMicroSyncTimer = null;
@@ -29181,8 +29246,12 @@ sbLoadInitialData = function(){
     var sbKeys = {};
     rows.forEach(function(row){
       var s = _sbMicrocicloFromRow(row);
+      // v113: si esta sesión está pendiente de borrar, NO la resucitamos
+      if(typeof mcDelQueuePending==='function' && mcDelQueuePending(s.week, s.day)) return;
       sbKeys[s.week + '||' + s.day] = s;
     });
+    // Reintentar borrados que quedaron pendientes de sesiones anteriores
+    if(typeof sbMicroFlushDeletes==='function') setTimeout(sbMicroFlushDeletes, 2000);
     var localOnly = MICROCICLO.filter(function(s){
       return !sbKeys[s.week + '||' + s.day];
     });
