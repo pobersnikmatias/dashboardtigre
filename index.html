@@ -30992,6 +30992,38 @@ try{
   TST_CATALOG=(Array.isArray(_tc)&&_tc.length)?_tc:TST_CATALOG_SEED.map(function(t){return Object.assign({},t);});
 }catch(e){ TST_CATALOG=TST_CATALOG_SEED.map(function(t){return Object.assign({},t);}); }
 var TST_DATA=[];
+// ─────────────────────────────────────────────────────────────────────────
+// FIX v115: recuperación de registros de tests al boot.
+// TST_DATA se declara en este bloque, DESPUÉS de que loadData() ya corrió en
+// el arranque, así que applyPayload la salteaba (typeof undefined) y los
+// registros se perdían en cada recarga — y el siguiente saveData() los pisaba
+// con un array vacío. Igual que hace el módulo Gimnasio con sus datos, acá
+// se re-lee el payload guardado (espejo localStorage y, si falta, IndexedDB).
+(function(){
+  function applyTst(p){
+    if(!p||!Array.isArray(p.TST_DATA)||!p.TST_DATA.length)return 0;
+    var have={}; TST_DATA.forEach(function(r){ if(r&&r.id!=null)have[r.id]=1; });
+    var n=0;
+    p.TST_DATA.forEach(function(r){ if(r&&(r.id==null||!have[r.id])){ TST_DATA.push(r); n++; } });
+    return n;
+  }
+  var gotLS=0;
+  try{ gotLS=applyTst(JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')); }catch(e){}
+  if(gotLS)console.log('[TST] '+gotLS+' registros de tests recuperados del payload local.');
+  // Fallback: si el espejo localStorage no tenía el payload (p. ej. cuota
+  // llena — el hogar real es IndexedDB), leerlo async de IndexedDB.
+  if(!gotLS && typeof dstoreGet==='function'){
+    dstoreGet(STORAGE_KEY).then(function(s){
+      if(!s)return;
+      var p=null; try{ p=JSON.parse(s); }catch(e){ return; }
+      var n=applyTst(p);
+      if(n){
+        console.log('[TST] '+n+' registros de tests recuperados de IndexedDB.');
+        try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests'&&typeof tstRender==='function')tstRender(); }catch(e){}
+      }
+    });
+  }
+})();
 var TST_UNITS=['cm','m','N','kg','N/kg','s','W','reps','%','pts'];
 
 var _tstView='load';
@@ -31135,6 +31167,8 @@ function tstSaveCell(testId,nameL,nameEnc,side,rawVal){
   if(idx>=0){ if(empty)TST_DATA.splice(idx,1); else TST_DATA[idx]=rec; }
   else if(!empty){ TST_DATA.push(rec); }
   saveData();
+  // v115: subir también los registros a la nube (viajan por app_settings)
+  if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} }
   if(t.lat==='uni')tstRender();
 }
 window.tstSaveCell=tstSaveCell;
@@ -31326,11 +31360,28 @@ window.tstDelTest=tstDelTest;
 document.addEventListener('DOMContentLoaded',function(){
   try{
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_CATALOG')<0)SB_SETTINGS_KEYS.push('TST_CATALOG');
+    if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_DATA')<0)SB_SETTINGS_KEYS.push('TST_DATA');
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('PLAN_GROUP_DEFAULTS')<0)SB_SETTINGS_KEYS.push('PLAN_GROUP_DEFAULTS');
     if(typeof window._sbApplySettingRow==='function'&&!window._sbApplySettingRowTstWrapped){
       var _origTst=window._sbApplySettingRow;
       window._sbApplySettingRow=function(row){
+        // v115: snapshot de registros locales ANTES de que la nube reemplace
+        // el array, para hacer merge y no pisar lo cargado en este dispositivo
+        var localTst=null;
+        if(row&&row.key==='TST_DATA'&&typeof TST_DATA!=='undefined'&&TST_DATA.length){ localTst=TST_DATA.slice(); }
         _origTst(row);
+        if(row&&row.key==='TST_DATA'){
+          try{
+            var added=0;
+            if(localTst){
+              var have={}; TST_DATA.forEach(function(r){ if(r&&r.id!=null)have[r.id]=1; });
+              localTst.forEach(function(r){ if(r&&r.id!=null&&!have[r.id]){ TST_DATA.push(r); added++; } });
+            }
+            if(typeof saveData==='function')saveData();
+            if(added&&typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync();
+            if(typeof _pfTab!=='undefined'&&_pfTab==='tests'&&typeof tstRender==='function')tstRender();
+          }catch(e){}
+        }
         if(row&&row.key==='TST_CATALOG'){
           try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
           try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests')tstRender(); }catch(e){}
