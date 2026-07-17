@@ -12606,13 +12606,28 @@ function planDeleteWeek(i){
 }
 
 // ── New / Edit week ───────────────────────────────────────────────────────────
+// v119: helper — arma la lista de grupos heredando la plantilla global.
+// "Todos" siempre primero; después los grupos fijos definidos por el CT.
+function planTemplateGroups(){
+  var g=[{id:'todos',name:'Todos',color:'#555'}];
+  (PLAN_GROUP_DEFAULTS||[]).forEach(function(d){
+    if(d&&d.name&&d.name.toLowerCase()!=='todos')g.push({id:d.id||('grp_'+Date.now()+Math.random().toString(36).slice(2,6)),name:d.name,color:d.color||'#3B4D88'});
+  });
+  return g;
+}
+window.planTemplateGroups=planTemplateGroups;
+
 function planNewWeek(){
   _planEditIdx=null;
   _planEditData={
     name:'',
     created:new Date().toISOString(),
     refMode:'current',
-    groups:[{id:'todos',name:'Todos',color:'#555'}],
+    // FIX v119: la semana nueva HEREDA la plantilla global de grupos.
+    // Antes arrancaba con [Todos] solamente, y como el array no estaba vacío,
+    // la herencia de planGetGroups() nunca se disparaba — había que recrear
+    // los grupos a mano en cada semana.
+    groups:planTemplateGroups(),
     days:PLAN_DAY_LABELS.map(function(lbl,i){
       return{label:lbl, mdLabel:PLAN_MD_DEFAULTS[i], blocks:[]};
     })
@@ -12633,7 +12648,7 @@ function planEditWeek(i){
   _planEditData=JSON.parse(JSON.stringify(PLAN_WEEKS[i]));
   planMigrateWeek(_planEditData);
   if(!_planEditData.groups||!_planEditData.groups.length)
-    _planEditData.groups=[{id:'todos',name:'Todos',color:'#555'}];
+    _planEditData.groups=planTemplateGroups();
   document.getElementById('plan-week-name').value=_planEditData.name;
   document.getElementById('plan-ref-mode').value=_planEditData.refMode||'current';
   planRefModeChange();
@@ -12673,11 +12688,7 @@ function planGetGroups(){
   if(!_planEditData) return [];
   if(!_planEditData.groups||!_planEditData.groups.length){
     // Semana sin grupos: heredar la plantilla global (Todos siempre primero)
-    var inherited=[{id:'todos',name:'Todos',color:'#555'}];
-    (PLAN_GROUP_DEFAULTS||[]).forEach(function(g){
-      if(g&&g.name&&g.name.toLowerCase()!=='todos')inherited.push({id:g.id||('grp_'+Date.now()+Math.random().toString(36).slice(2,6)),name:g.name,color:g.color||'#3B4D88'});
-    });
-    _planEditData.groups=inherited;
+    _planEditData.groups=planTemplateGroups();
   }
   return _planEditData.groups;
 }
@@ -32836,6 +32847,7 @@ function _planBuildPrintHTML(day, weekName, forScreen, di){
     '.pdf-exercise:last-child{margin-bottom:0}'+
     '.pdf-ex-img{flex-shrink:0;width:200px;height:140px;border-radius:6px;background:#f0f0f0;overflow:hidden;display:flex;align-items:center;justify-content:center}'+
     '.pdf-ex-img img{width:100%;height:100%;object-fit:cover}'+
+    '.pdf-ex-img img.pdf-ex-diag{object-fit:contain;background:#fff}'+
     '.pdf-ex-img-empty{color:#bbb;font-size:11px;text-align:center;padding:8px}'+
     '.pdf-ex-info{flex:1;min-width:0}'+
     '.pdf-ex-name{font-size:14px;font-weight:700;color:#0D1B2A;margin-bottom:4px;display:flex;align-items:center;gap:8px}'+
@@ -32936,6 +32948,17 @@ function _planBuildPrintHTML(day, weekName, forScreen, di){
       var ex = planResolveEx(item);
       var exName = ex ? ex.n : '(ejercicio eliminado)';
       var exImg = ex && ex.img ? ex.img : null;
+      // v119: si no hay foto pero el ejercicio tiene diagrama del diseñador,
+      // renderizarlo a imagen para que aparezca en el preview y en el PDF
+      var exImgIsDiag=false;
+      if(!exImg && ex && ex.diag && typeof drwRenderTo==='function'){
+        try{
+          var _dcv=document.createElement('canvas');
+          drwRenderTo(_dcv, ex.diag);
+          exImg=_dcv.toDataURL('image/png');
+          exImgIsDiag=true;
+        }catch(e){ exImg=null; }
+      }
       var exDesc = ex && ex.desc ? ex.desc : null;
       var exCat = ex ? (ex.cat||'') : '';
       var mins = item.mins || 0;
@@ -32959,7 +32982,7 @@ function _planBuildPrintHTML(day, weekName, forScreen, di){
       // Imagen
       html += '<div class="pdf-ex-img">';
       if(exImg){
-        html += '<img src="'+exImg+'" alt="'+_h(exName)+'">';
+        html += '<img src="'+exImg+'" alt="'+_h(exName)+'"'+(exImgIsDiag?' class="pdf-ex-diag"':'')+'>';
       } else {
         html += '<div class="pdf-ex-img-empty">Sin imagen</div>';
       }
