@@ -6958,6 +6958,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn bb" onclick="planNewWeek()" style="font-size:10px;padding:4px 12px">+ Nueva semana</button>
       <button class="btn bg" onclick="planExportPDF()" style="font-size:10px;padding:4px 12px">🖨️ Exportar PDF</button>
+      <button id="plan-prev-toggle-btn" class="btn bg" onclick="planTogglePrevWeeks()" style="font-size:10px;padding:4px 12px;display:none">📚 Microciclos anteriores</button>
     </div>
   </div>
 
@@ -10967,6 +10968,12 @@ function planSwitchSubtab(tab){
     }
     if(pane) pane.style.display = isActive?'':'none';
   });
+  // El botón "Microciclos anteriores" solo se muestra en la subpestaña de planificación semanal
+  var prevBtn = document.getElementById('plan-prev-toggle-btn');
+  if(prevBtn){
+    var hasPrev = (typeof PLAN_WEEKS!=='undefined' && PLAN_WEEKS.length > 1);
+    prevBtn.style.display = (tab==='weeks' && hasPrev) ? '' : 'none';
+  }
   if(tab==='weeks'){
     // Al entrar a "Planificación semanal", abrir directamente el editor de la última
     // semana creada — si hay alguna y no se está editando ya otra
@@ -12555,7 +12562,7 @@ function planRenderWeeksList(){
       return '<option value="'+it.i+'">'+s.name+' — '+s.dateStr+' · '+s.totalMins+' min</option>';
     }).join('');
     html +=
-      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:#fff;border:1px solid #e0e0e0;border-radius:7px;margin-top:8px">'+
+      '<div id="plan-prev-weeks-box" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:#fff;border:1px solid #e0e0e0;border-radius:7px;margin-top:8px">'+
         '<span style="font-size:11px;font-weight:700;color:#555">📚 Microciclos anteriores:</span>'+
         '<select id="plan-prev-week-sel" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;background:#fff">'+
           '<option value="">— Seleccioná uno para editar/exportar —</option>'+
@@ -12568,7 +12575,19 @@ function planRenderWeeksList(){
   }
 
   wrap.innerHTML = html;
+
+  // El botón del header solo aparece si hay microciclos anteriores
+  var prevBtn = document.getElementById('plan-prev-toggle-btn');
+  if(prevBtn) prevBtn.style.display = (indexed.length > 1) ? '' : 'none';
 }
+
+// Mostrar/ocultar el cuadro de microciclos anteriores desde el botón del header
+function planTogglePrevWeeks(){
+  var box = document.getElementById('plan-prev-weeks-box');
+  if(!box) return;
+  box.style.display = (box.style.display === 'none' || !box.style.display) ? 'flex' : 'none';
+}
+window.planTogglePrevWeeks = planTogglePrevWeeks;
 
 // Helpers para el selector de anteriores
 function _planSelectedPrevIdx(){
@@ -13278,16 +13297,13 @@ function planRenderWeekSummary(){
       })
     : '';
 
-  // Build comparison block: compare current week with the previous saved weeks
-  // (excluding the current edit if it's already saved). Same structure as the
-  // metrics × groups table, but stacked vertically for the last N weeks.
-  var cmpHtml = planRenderHistoricalCompare(weekSum, groups);
+  // (El bloque "Comparar con semanas anteriores" se removió: es redundante con
+  //  la subpestaña "Comparativo semanal" que está al lado.)
 
   wrap.innerHTML=
     '<div style="font-size:11px;font-weight:700;color:#0D1B2A;margin-bottom:8px">📊 Resumen semanal — % vs partido de referencia</div>'+
     svg+metricsHtml+groupCompHtml+
-    '<div style="margin-top:8px;font-size:10px;color:#888">Total planificado: <strong>'+weekSum.totalMins+' min</strong></div>'+
-    cmpHtml;
+    '<div style="margin-top:8px;font-size:10px;color:#888">Total planificado: <strong>'+weekSum.totalMins+' min</strong></div>';
 }
 
 // ── Reusable: build the "Métricas por grupo" cards HTML for a given week ───
