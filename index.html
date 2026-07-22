@@ -5335,7 +5335,7 @@ function mcExtraInitPlayers(csvRows){
     var p=PLAYER_PROFILES[k]; var name=p.name||k;
     var inCsv=csvNames.has(name.toLowerCase());
     var estado=p.estado||'disponible';
-    var estCol=estado==='lesion'?'#E24B4A':estado==='reserva'?'#3B4D88':estado==='primera'?'#EF9F27':'#1D9E75';
+    var estCol=estado==='lesion'?'#E24B4A':estado==='reserva'?'#3B4D88':estado==='primera'?'#EF9F27':estado==='nodisp'?'#6B7280':'#1D9E75';
     return '<label style="display:flex;align-items:center;gap:5px;padding:3px 8px;background:#fff;border:1px solid '+(inCsv?'#1D9E7544':'#eee')+';border-radius:5px;cursor:pointer;font-size:10px" title="'+(inCsv?'Ya en el GPS — le sumás trabajo extra':'Sin GPS — se agrega con métricas estimadas')+'">'
       +'<input type="checkbox" value="'+k+'" style="accent-color:#7F77DD">'
       +'<span style="font-weight:600;color:#333">'+name+'</span>'
@@ -6248,7 +6248,7 @@ function mcEstInit(){
         var p=PLAYER_PROFILES[k];
         var name=p.name||k;
         var estado=p.estado||'disponible';
-        var col=estado==='lesion'?'#E24B4A':estado==='reserva'?'#3B4D88':estado==='primera'?'#EF9F27':'#333';
+        var col=estado==='lesion'?'#E24B4A':estado==='reserva'?'#3B4D88':estado==='primera'?'#EF9F27':estado==='nodisp'?'#6B7280':'#333';
         return '<label style="display:flex;align-items:center;gap:5px;padding:3px 7px;background:#fff;border:1px solid #eee;border-radius:5px;cursor:pointer;font-size:10px">'
           +'<input type="checkbox" value="'+k+'" style="accent-color:var(--club-c2,#3B4D88)"> '
           +'<span style="color:'+col+';font-weight:600">'+name+'</span>'
@@ -7253,6 +7253,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
           <option value="lesion">🚑 Lesión</option>
           <option value="reserva">🔵 Reserva</option>
           <option value="primera">🟡 Primera</option>
+          <option value="nodisp">⛔ No disponible</option>
         </select>
       </label>
     </div>
@@ -7699,13 +7700,15 @@ function renderProfilesTable(){
         var lesion=p.estado==='lesion';
         var reserva=p.estado==='reserva';
         var primera=p.estado==='primera';
-        var rowBg=lesion?'#fff8f8':reserva?'#f0f4ff':primera?'#fffdf0':'#fff';
-        var borderCol=lesion?'#E24B4A55':reserva?'#3B4D8855':primera?'#EF9F2755':'#e0e0e0';
-        var nameColor=lesion?'#E24B4A':reserva?'#3B4D88':primera?'#EF9F27':'#1a1a1a';
+        var nodisp=p.estado==='nodisp';
+        var rowBg=lesion?'#fff8f8':reserva?'#f0f4ff':primera?'#fffdf0':nodisp?'#f5f5f5':'#fff';
+        var borderCol=lesion?'#E24B4A55':reserva?'#3B4D8855':primera?'#EF9F2755':nodisp?'#6B728055':'#e0e0e0';
+        var nameColor=lesion?'#E24B4A':reserva?'#3B4D88':primera?'#EF9F27':nodisp?'#6B7280':'#1a1a1a';
         var estadoInfo=(function(){
           if(lesion)   return{label:'🚑 Lesión',    bg:'#fff0f0',color:'#E24B4A',border:'#E24B4A55'};
           if(reserva)  return{label:'🔵 Reserva',   bg:'#eef4ff',color:'#3B4D88',border:'#3B4D8855'};
           if(primera)  return{label:'🟡 Primera',   bg:'#fffbee',color:'#EF9F27',border:'#EF9F2755'};
+          if(nodisp)   return{label:'⛔ No disponible',bg:'#f0f0f0',color:'#6B7280',border:'#6B728055'};
           return                {label:'✅ Disponible',bg:'#f0fff4',color:'#1D9E75',border:'#1D9E7555'};
         })();
 
@@ -7759,12 +7762,14 @@ function renderProfilesTable(){
       var lesion=p.estado==='lesion';
       var reserva=p.estado==='reserva';
       var primera=p.estado==='primera';
-      var rowBg=lesion?'#fff8f8':reserva?'#f0f4ff':primera?'#fffdf0':'#fff';
-      var nameColor=lesion?'#E24B4A':reserva?'#3B4D88':primera?'#EF9F27':'#1a1a1a';
+      var nodisp=p.estado==='nodisp';
+      var rowBg=lesion?'#fff8f8':reserva?'#f0f4ff':primera?'#fffdf0':nodisp?'#f5f5f5':'#fff';
+      var nameColor=lesion?'#E24B4A':reserva?'#3B4D88':primera?'#EF9F27':nodisp?'#6B7280':'#1a1a1a';
       var estadoInfo=(function(){
         if(lesion)   return{label:'🚑 Lesión',    bg:'#fff0f0',color:'#E24B4A',border:'#E24B4A55'};
         if(reserva)  return{label:'🔵 Reserva',   bg:'#eef4ff',color:'#3B4D88',border:'#3B4D8855'};
         if(primera)  return{label:'🟡 Primera',   bg:'#fffbee',color:'#EF9F27',border:'#EF9F2755'};
+        if(nodisp)   return{label:'⛔ No disponible',bg:'#f0f0f0',color:'#6B7280',border:'#6B728055'};
         return                {label:'✅ Disponible',bg:'#f0fff4',color:'#1D9E75',border:'#1D9E7555'};
       })();
       return'<tr style="background:'+rowBg+'">'+
@@ -7793,7 +7798,7 @@ window.renderProfilesTable=renderProfilesTable;
 
 function toggleProfileEstado(key){
   var p=PLAYER_PROFILES[key]; if(!p)return;
-  var cycle={disponible:'lesion', lesion:'reserva', reserva:'primera', primera:'disponible'};
+  var cycle={disponible:'lesion', lesion:'reserva', reserva:'primera', primera:'nodisp', nodisp:'disponible'};
   p.estado=cycle[p.estado||'disponible']||'disponible';
   saveData();
   renderProfilesTable();
@@ -14469,7 +14474,7 @@ function planEditItem(di,bi,ei){
       var p=PLAYER_PROFILES[k];
       var name=p.name||k;
       var estado=p.estado||'disponible';
-      var noDisponible=estado==='lesion'||estado==='reserva'||estado==='primera';
+      var noDisponible=estado==='lesion'||estado==='reserva'||estado==='primera'||estado==='nodisp';
       var nd=savedNoDisp!==null ? savedNoDisp.indexOf(k)>-1 : noDisponible;
       var estadoLabel=estado==='lesion'
         ? '<span style="font-size:9px;color:#E24B4A;margin-left:auto;font-weight:700">🚑 Lesión</span>'
@@ -14477,7 +14482,9 @@ function planEditItem(di,bi,ei){
           ? '<span style="font-size:9px;color:var(--club-c2,#3B4D88);margin-left:auto;font-weight:700">🔵 Reserva</span>'
           : estado==='primera'
             ? '<span style="font-size:9px;color:#EF9F27;margin-left:auto;font-weight:700">🟡 Primera</span>'
-            : (nd?'<span style="font-size:9px;color:#E24B4A;margin-left:auto">No disp.</span>':'');
+            : estado==='nodisp'
+              ? '<span style="font-size:9px;color:#6B7280;margin-left:auto;font-weight:700">⛔ No disponible</span>'
+              : (nd?'<span style="font-size:9px;color:#E24B4A;margin-left:auto">No disp.</span>':'');
       return '<label style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:4px;cursor:pointer;background:'+(nd?'#fff3f3':'#f9f9f9')+';border:1px solid '+(nd?'#E24B4A33':'#eee')+';margin-bottom:3px">'+
         '<input type="checkbox" value="'+k+'" '+(nd?'':'checked')+' onchange="peiPlayerToggle(this)" style="accent-color:#1D9E75;cursor:pointer">'+
         '<span style="font-size:11px;color:'+(nd?'#E24B4A':'#333')+';'+(nd?'text-decoration:line-through;':'')+'">'+name+'</span>'+
@@ -14548,14 +14555,16 @@ function pmxRenderPlayers(){
     var p=PLAYER_PROFILES[k];
     var name=p.name||k;
     var estado=p.estado||'disponible';
-    var noDisp=estado==='lesion'||estado==='reserva'||estado==='primera';
+    var noDisp=estado==='lesion'||estado==='reserva'||estado==='primera'||estado==='nodisp';
     var estadoLabel=estado==='lesion'
       ? '<span style="font-size:9px;color:#E24B4A;margin-left:auto;font-weight:700">🚑 Lesión</span>'
       : estado==='reserva'
         ? '<span style="font-size:9px;color:var(--club-c2,#3B4D88);margin-left:auto;font-weight:700">🔵 Reserva</span>'
         : estado==='primera'
           ? '<span style="font-size:9px;color:#EF9F27;margin-left:auto;font-weight:700">🟡 Primera</span>'
-          : '';
+          : estado==='nodisp'
+            ? '<span style="font-size:9px;color:#6B7280;margin-left:auto;font-weight:700">⛔ No disponible</span>'
+            : '';
     return '<label style="display:flex;align-items:center;gap:5px;padding:3px 6px;border-radius:4px;cursor:pointer;background:'+(noDisp?'#fff3f3':'#f9f9f9')+';border:1px solid '+(noDisp?'#E24B4A33':'#eee')+';margin-bottom:3px">'+
       '<input type="checkbox" value="'+k+'" '+(noDisp?'':'checked')+' onchange="pmxPlayerToggle(this)" style="accent-color:#1D9E75;cursor:pointer">'+
       '<span style="font-size:11px;color:'+(noDisp?'#E24B4A':'#333')+';'+(noDisp?'text-decoration:line-through':'')+'">'+name+'</span>'+
@@ -15650,6 +15659,7 @@ document.addEventListener('DOMContentLoaded',function(){
 #view-hoy .hoy-pl.r{background:#fdeeee;border-color:#D9534F66}
 #view-hoy .hoy-pl.o{background:#f0f2f7;border-color:#c7cede;opacity:0.75}
 #view-hoy .hoy-pl.o-les{background:#faf0f0;border-color:#dcb9b9}
+#view-hoy .hoy-pl.o-nod{background:#f2f2f2;border-color:#c9c9c9}
 #view-hoy .hoy-alert{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px dashed #e8e8e8;font-size:12px;color:#444;line-height:1.4}
 #view-hoy .hoy-alert:first-of-type{border-top:none;padding-top:2px}
 #view-hoy .hoy-alert .ic{flex-shrink:0;width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px}
@@ -16870,7 +16880,7 @@ function gymOpenLoadSheet(sessionId){
       var pName=p?(p.name||pk):pk;
       var evals=GYM_EVALS[pk]||[];
       var estado=p?(p.estado||'disponible'):'disponible';
-      var statusDot = estado==='lesion'?'🚑':estado==='reserva'?'🔵':estado==='primera'?'🟡':'';
+      var statusDot = estado==='lesion'?'🚑':estado==='reserva'?'🔵':estado==='primera'?'🟡':estado==='nodisp'?'⛔':'';
       var rowBg = ri%2===0?'#fff':'#f9f9f9';
 
       html += '<tr style="background:'+rowBg+';border-bottom:1px solid #eee">';
@@ -16933,7 +16943,7 @@ function gymOpenLoadSheet(sessionId){
       var pName = p?(p.name||pk):pk;
       var evals = GYM_EVALS[pk]||[];
       var estado = p?(p.estado||'disponible'):'disponible';
-      var statusDot = estado==='lesion'?'🚑':estado==='reserva'?'🔵':estado==='primera'?'🟡':'';
+      var statusDot = estado==='lesion'?'🚑':estado==='reserva'?'🔵':estado==='primera'?'🟡':estado==='nodisp'?'⛔':'';
       var rowBg = ri%2===0?'#fff':'#f9f9f9';
 
       html += '<tr style="background:'+rowBg+';border-bottom:1px solid #eee">';
@@ -17004,7 +17014,7 @@ function gymOpenLoadSheet(sessionId){
       var pName = p ? (p.name||pk) : pk;
       var evals = GYM_EVALS[pk]||[];
       var estado = p ? (p.estado||'disponible') : 'disponible';
-      var statusDot = estado==='lesion'?'🚑':estado==='reserva'?'🔵':estado==='primera'?'🟡':'';
+      var statusDot = estado==='lesion'?'🚑':estado==='reserva'?'🔵':estado==='primera'?'🟡':estado==='nodisp'?'⛔':'';
       var rowBg = ri%2===0?'#fff':'#f9f9f9';
 
       html += '<tr style="background:'+rowBg+';border-bottom:1px solid #eee">';
@@ -34878,7 +34888,7 @@ function hoyProfileByNorm(){
   });
   return map;
 }
-var HOY_ESTADOS={lesion:{lbl:'🚑 Lesión',cls:'o-les'}, reserva:{lbl:'🔵 Reserva',cls:'o-res'}, primera:{lbl:'🟡 Primera',cls:'o-pri'}, ausente:{lbl:'⬜ Ausente',cls:''}};
+var HOY_ESTADOS={lesion:{lbl:'🚑 Lesión',cls:'o-les'}, reserva:{lbl:'🔵 Reserva',cls:'o-res'}, primera:{lbl:'🟡 Primera',cls:'o-pri'}, nodisp:{lbl:'⛔ No disponible',cls:'o-nod'}, ausente:{lbl:'⬜ Ausente',cls:''}};
 
 // Fecha local (no UTC): a la noche en ART toISOString ya marca mañana.
 function hoyLocalISO(d){
@@ -35185,7 +35195,7 @@ function hoyRender(){
     return (order[a.level]-order[b.level]) || a.name.localeCompare(b.name,'es');
   }).map(function(s,i){
     var cls=s.level==='red'?'r':(s.level==='amber'?'y':(s.level==='green'?'g':(s.level==='out'?('o '+(HOY_ESTADOS[s.out]?HOY_ESTADOS[s.out].cls:'')):'')));
-    var dot=s.level==='red'?'🔴':(s.level==='amber'?'🟡':(s.level==='green'?'🟢':(s.level==='out'?(s.out==='lesion'?'🚑':(s.out==='primera'?'🟡':'🔵')):'⚪')));
+    var dot=s.level==='red'?'🔴':(s.level==='amber'?'🟡':(s.level==='green'?'🟢':(s.level==='out'?(s.out==='lesion'?'🚑':(s.out==='primera'?'🟡':(s.out==='nodisp'?'⛔':'🔵'))):'⚪')));
     if(s.level==='out')dot='';
     var sub=s.level==='none'?'sin check-in':(s.level==='out'?(HOY_ESTADOS[s.out]?HOY_ESTADOS[s.out].lbl:s.out):(s.reasons.length?(s.reasons[0].txt):'OK'));
     return '<div class="hoy-pl '+cls+'" onclick="hoyOpenPlayer('+i+')" data-hoy-idx="'+i+'" title="'+s.name.replace(/"/g,'&quot;')+'">'+
