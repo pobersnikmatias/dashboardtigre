@@ -12902,7 +12902,7 @@ function planRenderDays(){
           return '<option value="'+g.name+'"'+(g.name===itemGroup?' selected':'')+'>'+g.name+'</option>';
         }).join('');
         var groupPill = '<select onchange="planSetExGroup('+di+','+bi+','+ei+',this.value)" '
-          +'style="font-size:9px;border:1.5px solid '+groupColor2+';border-radius:10px;padding:1px 6px;background:'+groupColor2+'22;color:'+groupColor2+';font-weight:700;cursor:pointer;outline:none" '
+          +'style="font-size:9px;border:1.5px solid '+groupColor2+';border-radius:10px;padding:1px 6px;background:'+groupColor2+'22;color:'+groupColor2+';font-weight:700;cursor:pointer;outline:none;max-width:100%;min-width:0;flex-shrink:1;text-overflow:ellipsis" '
           +'title="Grupo de jugadores">'
           +groupOpts+'</select>';
 
@@ -12934,7 +12934,7 @@ function planRenderDays(){
                 '<span style="font-size:10px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+exName+'">'+exName+'</span>'+
                 (ex&&typeof gpsExerciseOrientation==='function'?(function(){var o=gpsExerciseOrientation(ex);return o?'<span style="font-size:9px;font-weight:700;color:'+o.color+';background:'+o.color+'18;border-radius:3px;padding:0 4px;white-space:nowrap">▸ '+o.label+'</span>':'';}()):'')+''+
               '</div>'+
-              '<div style="display:flex;align-items:center;gap:4px;margin-top:2px;flex-wrap:wrap">'+
+              '<div style="display:flex;align-items:center;gap:4px;margin-top:2px;flex-wrap:wrap;min-width:0">'+
                 '<input type="number" min="1" max="120" value="'+item.mins+'" '+
                   'style="width:40px;padding:1px 3px;border:1px solid #ddd;border-radius:3px;font-size:10px;text-align:center" '+
                   'onchange="planSetExMins('+di+','+bi+','+ei+',this.value)"> '+
@@ -14041,9 +14041,22 @@ function planBuildPrintHTML(weekData){
           var ex=planResolveEx(item);
           if(!ex)return'';
           var c=BC[ex.cat]||'#888';
-          return '<div style="padding:3px 6px;border-bottom:0.5px solid #f0f0f0;display:flex;align-items:flex-start;gap:6px;opacity:0.5">'+
-            '<span style="width:7px;height:7px;border-radius:50%;background:'+c+';flex-shrink:0;margin-top:3px"></span>'+
-            '<div>'+
+          var dImg = ex.img || null;
+          var dIsDiag = false;
+          if(!dImg && ex.diag && typeof drwRenderTo==='function'){
+            try{
+              var _dc=document.createElement('canvas');
+              drwRenderTo(_dc, ex.diag);
+              dImg=_dc.toDataURL('image/png');
+              dIsDiag=true;
+            }catch(e){ dImg=null; }
+          }
+          var dThumb = dImg
+            ? '<img src="'+dImg+'" style="width:54px;height:40px;'+(dIsDiag?'object-fit:contain;background:#fff':'object-fit:cover')+';border-radius:4px;border:1px solid #e0e0e0;flex-shrink:0">'
+            : '<span style="width:7px;height:7px;border-radius:50%;background:'+c+';flex-shrink:0;margin-top:3px"></span>';
+          return '<div style="padding:3px 6px;border-bottom:0.5px solid #f0f0f0;display:flex;align-items:flex-start;gap:6px;opacity:0.5;page-break-inside:avoid">'+
+            dThumb+
+            '<div style="min-width:0">'+
               '<div style="font-size:9px;color:#999;font-style:italic">'+ex.n+'</div>'+
               '<div style="font-size:8px;color:#bbb">'+item.mins+"' (sin sumar)</div>"+
             '</div>'+
@@ -14057,9 +14070,23 @@ function planBuildPrintHTML(weekData){
         var seriesStr=item.numSeries&&item.serieTime
           ? ' · '+item.numSeries+'×'+fmt(item.serieTime)+(item.pauseTime?' / '+fmt(item.pauseTime)+' pausa':'')
           : '';
-        return '<div style="padding:4px 6px;border-bottom:0.5px solid #f0f0f0;display:flex;align-items:flex-start;gap:6px">'+
-          '<span style="width:7px;height:7px;border-radius:50%;background:'+c+';flex-shrink:0;margin-top:3px"></span>'+
-          '<div>'+
+        // Miniatura: foto del ejercicio o, si no hay, el diagrama renderizado a PNG
+        var exImg = ex.img || null;
+        var isDiag = false;
+        if(!exImg && ex.diag && typeof drwRenderTo==='function'){
+          try{
+            var _c=document.createElement('canvas');
+            drwRenderTo(_c, ex.diag);
+            exImg=_c.toDataURL('image/png');
+            isDiag=true;
+          }catch(e){ exImg=null; }
+        }
+        var thumb = exImg
+          ? '<img src="'+exImg+'" style="width:54px;height:40px;'+(isDiag?'object-fit:contain;background:#fff':'object-fit:cover')+';border-radius:4px;border:1px solid #e0e0e0;flex-shrink:0">'
+          : '<span style="width:7px;height:7px;border-radius:50%;background:'+c+';flex-shrink:0;margin-top:3px"></span>';
+        return '<div style="padding:4px 6px;border-bottom:0.5px solid #f0f0f0;display:flex;align-items:flex-start;gap:6px;page-break-inside:avoid">'+
+          thumb+
+          '<div style="min-width:0">'+
             '<div style="font-size:10px;font-weight:600">'+ex.n+'</div>'+
             '<div style="font-size:9px;color:#888">'+item.mins+"' · "+Math.round(v.mts)+'m · '+v.mts_min.toFixed(1)+' m/min'+seriesStr+'</div>'+
           '</div>'+
@@ -14090,7 +14117,8 @@ function planBuildPrintHTML(weekData){
 
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Planificación — '+weekData.name+'</title>'+
     '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;color:#1a1a1a;padding:18px;background:#fff}'+
-    '@media print{@page{margin:10mm;size:A4}body{padding:0}}</style></head><body>'+
+    'img{-webkit-print-color-adjust:exact;print-color-adjust:exact}'+
+    '@media print{@page{margin:10mm;size:A4}body{padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>'+
     '<div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0D1B2A;padding-bottom:8px;margin-bottom:14px">'+
       '<div><div style="font-size:18px;font-weight:800;color:#0D1B2A">'+weekData.name+'</div>'+
       '<div style="font-size:10px;color:#aaa">Planificación semanal · '+dateStr+' · Dashboard GPS</div></div>'+
@@ -14131,9 +14159,33 @@ function planExportWeekPDF(i){
   if(!win){alert('Permitir ventanas emergentes.');return;}
   win.document.write(planBuildPrintHTML(w));
   win.document.close();
-  win.onload=function(){win.focus();win.print();};
+  win.onload=function(){ win.focus(); _planWaitImagesThenPrint(win); };
 }
 window.planExportWeekPDF=planExportWeekPDF;
+
+// Espera a que todas las imágenes (fotos y diagramas base64) estén cargadas
+// antes de disparar print(). Sin esto, Chrome/Safari pueden imprimir el PDF
+// con los recuadros de imagen vacíos.
+function _planWaitImagesThenPrint(win){
+  try{
+    var imgs = win.document.images ? Array.prototype.slice.call(win.document.images) : [];
+    var pending = imgs.filter(function(im){ return !im.complete; });
+    if(!pending.length){ setTimeout(function(){ win.print(); }, 120); return; }
+    var left = pending.length, done = false;
+    function fire(){
+      if(done) return;
+      done = true;
+      setTimeout(function(){ win.print(); }, 120);
+    }
+    pending.forEach(function(im){
+      var tick = function(){ if(--left <= 0) fire(); };
+      im.addEventListener('load', tick);
+      im.addEventListener('error', tick);
+    });
+    // Fallback: no esperar más de 3s
+    setTimeout(fire, 3000);
+  }catch(e){ try{ win.print(); }catch(_){} }
+}
 
 function planExportPDF(){
   if(_planEditData){
@@ -14144,7 +14196,7 @@ function planExportPDF(){
     if(!win){alert('Permitir ventanas emergentes.');return;}
     win.document.write(planBuildPrintHTML(w));
     win.document.close();
-    win.onload=function(){win.focus();win.print();};
+    win.onload=function(){ win.focus(); _planWaitImagesThenPrint(win); };
   } else if(PLAN_WEEKS.length){
     planExportWeekPDF(PLAN_WEEKS.length-1);
   } else {
