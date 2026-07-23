@@ -7167,7 +7167,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       </label>
       <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px">
         <span style="font-size:10px">Pausa</span>
-        <input id="plan-modal-pausetime" type="text" placeholder="90s" style="width:52px;padding:4px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center" oninput="planModalTimeSync('series')" title="En segundos (ej: 90) o minutos con s (ej: 2m o 90s)">
+        <input id="plan-modal-pausetime" type="text" placeholder="1:30" style="width:52px;padding:4px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center" oninput="planModalTimeSync('series')" title="Formato minutos:segundos (ej: 1:30 = 90 segundos). También podés escribir 90s o 2m.">
       </label>
       <span id="plan-modal-nettime" style="font-size:10px;color:#7F77DD;font-weight:600"></span>
       <label style="font-size:11px;font-weight:600;color:#333;display:flex;align-items:center;gap:5px">
@@ -13913,9 +13913,62 @@ window.planModalFilter=planModalFilter;
 
 function planModalSelect(id){
   _planModalSelected=D.find(function(r){return r.id===id;})||null;
+  planModalPrefillFromEx(_planModalSelected);
   planModalFilter(); // re-render to show checkmark
 }
 window.planModalSelect=planModalSelect;
+
+// Al elegir un ejercicio de la biblioteca, precargar los tiempos tal como se
+// guardó el ejercicio:
+//  · Si fue cargado en modo BLOQUES (tiene blocks/work/pause), completar
+//    series = blocks, tiempo de serie = work y pausa = pause. Los minutos se
+//    recalculan solos (tiempo efectivo de trabajo).
+//  · Si fue cargado en MINUTOS DIRECTOS, poner el total en minutos y limpiar
+//    los campos de series.
+function planModalPrefillFromEx(ex){
+  var mnEl = document.getElementById('plan-modal-mins');
+  var nsEl = document.getElementById('plan-modal-nseries');
+  var stEl = document.getElementById('plan-modal-serietime');
+  var ptEl = document.getElementById('plan-modal-pausetime');
+  if(!mnEl) return;
+  if(!ex){
+    if(nsEl) nsEl.value='';
+    if(stEl) stEl.value='';
+    if(ptEl) ptEl.value='';
+    return;
+  }
+  var blocks = Number(ex.blocks)||0;
+  var work   = Number(ex.work)||0;   // minutos de trabajo por bloque
+  var pause  = Number(ex.pause)||0;  // minutos de pausa entre bloques
+  if(blocks>0 && work>0){
+    // Modo bloques: reproducir la estructura guardada
+    if(nsEl) nsEl.value = blocks;
+    if(stEl) stEl.value = _planFmtMinSec(work*60);
+    if(ptEl) ptEl.value = pause>0 ? _planFmtMinSec(pause*60) : '';
+    // Recalcular minutos/leyenda a partir de las series
+    if(typeof planModalTimeSync==='function') planModalTimeSync('series');
+  } else {
+    // Modo minutos directos: usar el total guardado del ejercicio
+    var mins = Number(ex.min)||0;
+    if(mins>0) mnEl.value = Math.max(1, Math.round(mins));
+    if(nsEl) nsEl.value='';
+    if(stEl) stEl.value='';
+    if(ptEl) ptEl.value='';
+    delete mnEl.dataset.totalSec;
+    var ntEl = document.getElementById('plan-modal-nettime');
+    if(ntEl) ntEl.textContent='';
+  }
+}
+window.planModalPrefillFromEx=planModalPrefillFromEx;
+
+// Formatea segundos como m:ss (90 → "1:30", 120 → "2:00", 45 → "0:45").
+// Se usa para mostrar tiempos de serie y pausa siempre en minutos:segundos.
+function _planFmtMinSec(sec){
+  sec = Math.max(0, Math.round(Number(sec)||0));
+  var m = Math.floor(sec/60), s = sec%60;
+  return m + ':' + (s<10?'0':'') + s;
+}
+window._planFmtMinSec=_planFmtMinSec;
 
 // Parse duration string → seconds
 // Accepts: "30" → 30s, "2:30" → 150s, "2m" → 120s, "90s" → 90s, "1:30" → 90s
@@ -13950,9 +14003,10 @@ function planModalTimeSync(source){
   var stRaw = parseDurSec(stEl?stEl.value:'');
   var stSec = stRaw!==null ? (stEl.value.match(/[:\mMs]/i) ? stRaw : stRaw*60) : 0;
 
-  // Parse pause — plain number = seconds
+  // Parse pause — mismo criterio que la duración de serie: mm:ss ("1:30" = 90s),
+  // "90s" = 90 segundos, "2m" = 2 minutos, y un número plano = MINUTOS.
   var ptRaw = parseDurSec(ptEl?ptEl.value:'');
-  var ptSec = ptRaw!==null ? ((ptEl.value||'').match(/[m]/i) ? ptRaw : ptRaw) : 0;
+  var ptSec = ptRaw!==null ? ((ptEl.value||'').match(/[:\msMS]/) ? ptRaw : ptRaw*60) : 0;
 
   if(source==='series' && ns && stSec){
     var trabajoSec = ns * stSec;                          // tiempo efectivo de trabajo
@@ -13993,7 +14047,8 @@ function planModalConfirm(){
   var stRaw = parseDurSec(stVal);
   var stSec = stRaw!==null ? (stVal.match(/[:\mMs]/i) ? stRaw : stRaw*60) : null;
   var ptRaw = parseDurSec(ptVal);
-  var ptSec = ptRaw!==null ? (ptVal.match(/[m]/i) ? ptRaw : ptRaw) : null;
+  // Pausa: mm:ss / 90s / 2m explícitos; número plano = MINUTOS
+  var ptSec = ptRaw!==null ? (ptVal.match(/[:\msMS]/) ? ptRaw : ptRaw*60) : null;
   var block=_planEditData.days[_planModalDayIdx].blocks[_planModalBlockIdx];
   var isParallel=block&&block.parallel;
   var countVol=isParallel?(block.exercises.length===0):true;
@@ -14473,7 +14528,8 @@ window.planModalConfirm=function(){
   var stRaw2 = parseDurSec(stVal2);
   var stSec2 = stRaw2!==null ? (stVal2.match(/[:\mMs]/i) ? stRaw2 : stRaw2*60) : null;
   var ptRaw2 = parseDurSec(ptVal2);
-  var ptSec2 = ptRaw2!==null ? (ptVal2.match(/[m]/i) ? ptRaw2 : ptRaw2) : null;
+  // Pausa: mm:ss / 90s / 2m explícitos; número plano = MINUTOS
+  var ptSec2 = ptRaw2!==null ? (ptVal2.match(/[:\msMS]/) ? ptRaw2 : ptRaw2*60) : null;
   var mnEl3 = document.getElementById('plan-modal-mins');
   var totalSecStored2 = mnEl3 && mnEl3.dataset.totalSec ? parseFloat(mnEl3.dataset.totalSec) : null;
   if(totalSecStored2) item.minsTotal = Math.round(totalSecStored2 / 60 * 10) / 10;
