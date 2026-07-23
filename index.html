@@ -487,8 +487,8 @@ body.sb-show{visibility:visible}
     flex:0 0 calc(50% - 5px)!important;
   }
   /* Botones del diagrama más grandes */
-  #f-diag-draw-panel button,
-  #f-diag-mode-draw, #f-diag-mode-img{
+  #f-xd2-preview button,
+  #f-diag-img-preview button{
     padding:7px 12px!important;
     font-size:11px!important;
   }
@@ -497,7 +497,7 @@ body.sb-show{visibility:visible}
     width:100%!important;
     height:auto!important;
   }
-  #f-diag-draw-panel > div[style*="display:inline-block"]{
+  #f-xd2-preview > div[style*="display:inline-block"]{
     display:block!important;
     width:100%;
   }
@@ -919,50 +919,46 @@ document.addEventListener('click',function(e){
 <div style="margin-top:10px;border-top:1px solid #eee;padding-top:10px">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
     <span style="font-size:11px;font-weight:700;color:#333">Diagrama del ejercicio</span>
-    <span style="font-size:10px;color:#999">(opcional)</span>
-  </div>
-  <!-- Toggle: Dibujar | Subir imagen -->
-  <div style="display:flex;gap:6px;margin-bottom:10px">
-    <button id="f-diag-mode-draw" onclick="fDiagSetMode('draw')" class="btn bb" style="padding:6px 14px;font-size:11px">✏️ Dibujar</button>
-    <button id="f-diag-mode-img" onclick="fDiagSetMode('img')" class="btn bc" style="padding:6px 14px;font-size:11px">🖼️ Subir imagen</button>
+    <span style="font-size:10px;color:#999">(opcional — creá un diagrama o subí una imagen)</span>
   </div>
 
-  <!-- MODO SUBIR IMAGEN -->
-  <div id="f-diag-img-panel" style="display:none">
-    <input type="file" id="f-diag-img-input" accept="image/*" onchange="fDiagImgUpload(event)" style="display:none">
-    <div id="f-diag-img-empty" style="border:2px dashed #ccc;border-radius:8px;padding:24px;text-align:center;cursor:pointer;background:#fafafa" onclick="document.getElementById('f-diag-img-input').click()">
-      <div style="font-size:32px;margin-bottom:6px">📷</div>
-      <div style="font-size:12px;color:#666;font-weight:600">Tocá para subir una imagen</div>
-      <div style="font-size:10px;color:#aaa;margin-top:3px">o sacá una foto del pizarrón / cuaderno</div>
-    </div>
-    <div id="f-diag-img-preview" style="display:none;position:relative">
-      <img id="f-diag-img-el" style="width:100%;max-height:340px;object-fit:contain;border:1px solid #ddd;border-radius:8px;background:#f7f7f7">
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="btn bc" onclick="document.getElementById('f-diag-img-input').click()" style="padding:5px 12px;font-size:11px">🔄 Cambiar</button>
-        <button class="btn bc" onclick="fDiagImgClear()" style="padding:5px 12px;font-size:11px;color:#E24B4A;border-color:#E24B4A55">🗑 Quitar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODO DIBUJAR → Diseñador v2 (XD2). El editor inline viejo fue reemplazado. -->
-  <div id="f-diag-draw-panel">
-    <div id="f-xd2-empty" style="border:2px dashed #ccc;border-radius:8px;padding:24px;text-align:center;cursor:pointer;background:#fafafa" onclick="fXd2Open()">
+  <!-- Estado VACÍO: las dos opciones lado a lado -->
+  <div id="f-diag-choice" style="display:flex;gap:8px;flex-wrap:wrap">
+    <div style="flex:1;min-width:190px;border:2px dashed #ccc;border-radius:8px;padding:20px 14px;text-align:center;cursor:pointer;background:#fafafa" onclick="fXd2Open()">
       <div style="font-size:26px;margin-bottom:6px">🎨</div>
       <div style="font-size:12px;font-weight:700;color:var(--club-c2,#3B4D88)">Crear diagrama</div>
-      <div style="font-size:10px;color:#999;margin-top:3px">Abre el diseñador a pantalla completa: jugadores numerados, conos, flechas de pase/conducción/remate, zonas con medidas.</div>
+      <div style="font-size:10px;color:#999;margin-top:3px">Diseñador a pantalla completa: jugadores, conos, flechas, zonas con medidas.</div>
     </div>
-    <div id="f-xd2-preview" style="display:none">
-      <div style="border:1px solid #ddd;border-radius:8px;overflow:hidden;display:inline-block;max-width:100%">
-        <canvas id="f-xd2-canvas" style="display:block;width:320px;max-width:100%;height:auto;cursor:pointer" onclick="fXd2Open()" title="Tocar para editar"></canvas>
-      </div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button type="button" class="btn bb" onclick="fXd2Open()" style="padding:5px 12px;font-size:11px">✏️ Editar</button>
-        <button type="button" class="btn bc" onclick="xd2BoardFromForm()" style="padding:5px 12px;font-size:11px">⛶ Pizarra</button>
-        <button type="button" class="btn bc" onclick="fXd2Clear()" style="padding:5px 12px;font-size:11px;color:#E24B4A;border-color:#E24B4A55">🗑 Quitar</button>
-      </div>
+    <div style="flex:1;min-width:190px;border:2px dashed #ccc;border-radius:8px;padding:20px 14px;text-align:center;cursor:pointer;background:#fafafa" onclick="document.getElementById('f-diag-img-input').click()">
+      <div style="font-size:26px;margin-bottom:6px">📷</div>
+      <div style="font-size:12px;font-weight:700;color:var(--club-c2,#3B4D88)">Subir imagen</div>
+      <div style="font-size:10px;color:#999;margin-top:3px">O sacá una foto del pizarrón / cuaderno.</div>
     </div>
-    <div style="font-size:10px;color:#aaa;margin-top:6px">El diagrama se guarda junto al ejercicio al apretar <strong>Agregar</strong>.</div>
-  </div><!-- /f-diag-draw-panel -->
+  </div>
+  <input type="file" id="f-diag-img-input" accept="image/*" onchange="fDiagImgUpload(event)" style="display:none">
+
+  <!-- Preview: IMAGEN subida -->
+  <div id="f-diag-img-preview" style="display:none;position:relative">
+    <img id="f-diag-img-el" style="width:100%;max-height:340px;object-fit:contain;border:1px solid #ddd;border-radius:8px;background:#f7f7f7">
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <button type="button" class="btn bc" onclick="document.getElementById('f-diag-img-input').click()" style="padding:5px 12px;font-size:11px">🔄 Cambiar</button>
+      <button type="button" class="btn bc" onclick="fDiagImgClear()" style="padding:5px 12px;font-size:11px;color:#E24B4A;border-color:#E24B4A55">🗑 Quitar</button>
+    </div>
+  </div>
+
+  <!-- Preview: DIAGRAMA del diseñador -->
+  <div id="f-xd2-preview" style="display:none">
+    <div style="border:1px solid #ddd;border-radius:8px;overflow:hidden;display:inline-block;max-width:100%">
+      <canvas id="f-xd2-canvas" style="display:block;width:320px;max-width:100%;height:auto;cursor:pointer" onclick="fXd2Open()" title="Tocar para editar"></canvas>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <button type="button" class="btn bb" onclick="fXd2Open()" style="padding:5px 12px;font-size:11px">✏️ Editar</button>
+      <button type="button" class="btn bc" onclick="xd2BoardFromForm()" style="padding:5px 12px;font-size:11px">⛶ Pizarra</button>
+      <button type="button" class="btn bc" onclick="fXd2Clear()" style="padding:5px 12px;font-size:11px;color:#E24B4A;border-color:#E24B4A55">🗑 Quitar</button>
+    </div>
+  </div>
+
+  <div style="font-size:10px;color:#aaa;margin-top:6px">Se guarda junto al ejercicio al apretar <strong>Agregar</strong>.</div>
 </div>
 
 <div style="display:flex;gap:8px;align-items:center;margin-top:9px">
@@ -2498,15 +2494,15 @@ function addRow(){
   // Descripción
   var descVal=(document.getElementById('f-desc').value||'').trim();
   if(descVal)nr.desc=descVal;
-  // Diagrama: imagen subida o dibujo
-  if(_fDiagMode==='img' && _fDiagImg){
+  // Diagrama: imagen subida o diagrama del diseñador (XD2).
+  // v127: antes esto leía drwShapes/drw-canvas, que era el editor inline VIEJO
+  // ya reemplazado por el diseñador. Resultado: el diagrama nunca se guardaba
+  // al crear un ejercicio nuevo. Ahora lee _fPendingDiag, que es donde el
+  // diseñador deja el trabajo.
+  if(_fDiagImg){
     nr.img=_fDiagImg;
-  } else if(_fDiagMode==='draw' && typeof drwShapes!=='undefined' && drwShapes.length){
-    // Guardar el dibujo como imagen del canvas
-    try{
-      var cnv=document.getElementById('drw-canvas');
-      if(cnv) nr.diag=cnv.toDataURL('image/png');
-    }catch(e){}
+  } else if(window._fPendingDiag){
+    nr.diag=window._fPendingDiag;
   }
   computeRatios(nr);D.push(nr);
   if(typeof sbUpsertOneDrill==='function') sbUpsertOneDrill(nr);
@@ -2514,37 +2510,38 @@ function addRow(){
   ['f-n','f-min','f-mts','f-hsr','f-h2','f-h25','f-acc','f-dcc','f-rhie','f-vmax','f-spr','f-pl','f-jug','f-L','f-A','f-desc'].forEach(id=>{var el=document.getElementById(id);if(el)el.value='';});
   if(typeof tnReset==='function')tnReset('f-tn');
   document.getElementById('f-cat').value='';
-  // Limpiar diagrama
+  // Limpiar diagrama (imagen y diseñador)
   if(typeof drwClear==='function')drwClear();
+  window._fPendingDiag=null;
   fDiagImgClear();
+  if(typeof fXd2Preview==='function')fXd2Preview();
   fUpdateQuadPreview();
   msg.style.color='#1D9E75';msg.textContent=`"${n}" agregado.`;setTimeout(()=>msg.textContent='',3000);
   refresh();
 }
 window.addRow=addRow;
 
-// ── Diseñá ejercicios: modo diagrama (dibujar / subir imagen) ──────────────────
-var _fDiagMode='draw';   // 'draw' | 'img'
+// ── Diseñá ejercicios: diagrama unificado (crear diagrama o subir imagen) ─────
+// v127: se eliminó el toggle "Dibujar | Subir imagen". Ahora hay un solo bloque:
+// si no hay nada, se ven las dos opciones; al elegir una, se muestra su preview.
 var _fDiagImg=null;      // dataURL de la imagen subida
 
-function fDiagSetMode(mode){
-  _fDiagMode=mode;
-  var drawPanel=document.getElementById('f-diag-draw-panel');
-  var imgPanel=document.getElementById('f-diag-img-panel');
-  var btnDraw=document.getElementById('f-diag-mode-draw');
-  var btnImg=document.getElementById('f-diag-mode-img');
-  if(mode==='draw'){
-    if(drawPanel)drawPanel.style.display='';
-    if(imgPanel)imgPanel.style.display='none';
-    if(btnDraw)btnDraw.className='btn bb';
-    if(btnImg)btnImg.className='btn bc';
-  } else {
-    if(drawPanel)drawPanel.style.display='none';
-    if(imgPanel)imgPanel.style.display='';
-    if(btnDraw)btnDraw.className='btn bc';
-    if(btnImg)btnImg.className='btn bb';
-  }
+// Muestra la vista correcta según lo que haya cargado.
+function fDiagRefreshView(){
+  var choice=document.getElementById('f-diag-choice');
+  var imgPrev=document.getElementById('f-diag-img-preview');
+  var xd2Prev=document.getElementById('f-xd2-preview');
+  var hasImg=!!_fDiagImg;
+  var hasDiag=!!window._fPendingDiag;
+  if(choice) choice.style.display=(hasImg||hasDiag)?'none':'flex';
+  if(imgPrev) imgPrev.style.display=hasImg?'':'none';
+  if(xd2Prev) xd2Prev.style.display=hasDiag?'':'none';
 }
+window.fDiagRefreshView=fDiagRefreshView;
+
+// Compatibilidad: código viejo puede seguir llamando fDiagSetMode. Ya no hay
+// modos, así que solo refresca la vista.
+function fDiagSetMode(){ fDiagRefreshView(); }
 window.fDiagSetMode=fDiagSetMode;
 
 function fDiagImgUpload(ev){
@@ -2563,10 +2560,11 @@ function fDiagImgUpload(ev){
       canvas.width=w;canvas.height=h;
       canvas.getContext('2d').drawImage(img,0,0,w,h);
       _fDiagImg=canvas.toDataURL('image/jpeg',0.78);
-      // Mostrar preview
-      document.getElementById('f-diag-img-el').src=_fDiagImg;
-      document.getElementById('f-diag-img-empty').style.display='none';
-      document.getElementById('f-diag-img-preview').style.display='block';
+      // Al subir una imagen se descarta el diagrama (son excluyentes)
+      if(window._fPendingDiag) window._fPendingDiag=null;
+      var el=document.getElementById('f-diag-img-el');
+      if(el) el.src=_fDiagImg;
+      fDiagRefreshView();
     };
     img.src=e.target.result;
   };
@@ -2577,8 +2575,7 @@ window.fDiagImgUpload=fDiagImgUpload;
 function fDiagImgClear(){
   _fDiagImg=null;
   var inp=document.getElementById('f-diag-img-input');if(inp)inp.value='';
-  var empty=document.getElementById('f-diag-img-empty');if(empty)empty.style.display='';
-  var prev=document.getElementById('f-diag-img-preview');if(prev)prev.style.display='none';
+  fDiagRefreshView();
 }
 window.fDiagImgClear=fDiagImgClear;
 
@@ -35020,21 +35017,20 @@ if(typeof window.exiToggleDiag==='function'){
 //    Estado pendiente _fPendingDiag hasta que se aprieta "Agregar".
 window._fPendingDiag=null;
 window.fXd2Preview=function(){
-  var empty=document.getElementById('f-xd2-empty');
-  var prev=document.getElementById('f-xd2-preview');
   var cv=document.getElementById('f-xd2-canvas');
-  if(!empty||!prev)return;
-  if(window._fPendingDiag){
-    empty.style.display='none'; prev.style.display='';
-    if(cv&&typeof drwRenderTo==='function')drwRenderTo(cv,window._fPendingDiag);
-  } else {
-    empty.style.display=''; prev.style.display='none';
+  if(window._fPendingDiag && cv && typeof drwRenderTo==='function'){
+    drwRenderTo(cv,window._fPendingDiag);
   }
+  if(typeof fDiagRefreshView==='function') fDiagRefreshView();
 };
 window.fXd2Open=function(){
   var nameEl=document.getElementById('f-n');
   xd2Open(window._fPendingDiag,function(json){
     window._fPendingDiag=json;
+    // Diagrama e imagen son excluyentes: al crear un diagrama se quita la imagen
+    if(json && typeof _fDiagImg!=='undefined' && _fDiagImg && typeof fDiagImgClear==='function'){
+      fDiagImgClear();
+    }
     fXd2Preview();
   },{title:(nameEl&&nameEl.value.trim())||'Nuevo ejercicio'});
 };
