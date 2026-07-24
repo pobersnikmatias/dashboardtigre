@@ -23764,88 +23764,333 @@ function cargaRenderWellPse(){
     return;
   }
 
-  // ─── A PARTIR DE ACÁ: vista de equipo (la original, sin cambios) ───
-
-  // Helper: ejecutar una función render que escribe en out.innerHTML, y capturar lo que escribió.
-  // Usamos un div fantasma temporal con el mismo id ('carga-main-content') que el original
-  // para que las funciones que hacen getElementById('carga-main-content') escriban acá.
-  // Después restauramos el id en el original y devolvemos el HTML capturado.
-  function capture(fn){
-    var ghostDiv = document.createElement('div');
-    ghostDiv.style.display = 'none';
-    // Renombramos el out original temporalmente para que getElementById vea el ghost
-    out.id = 'carga-main-content-orig';
-    ghostDiv.id = 'carga-main-content';
-    document.body.appendChild(ghostDiv);
-    var captured = '';
-    try{ fn(); captured = ghostDiv.innerHTML; }
-    catch(e){ console.warn('Render error:', e); }
-    finally{
-      ghostDiv.remove();
-      out.id = 'carga-main-content';
-    }
-    return captured;
-  }
-
-  var pseHtml      = nPse  ? capture(cargaRenderPSE)           : '';
-  var doloresHtml  = nWell ? capture(cargaRenderDolores)       : '';
-  // Evolución del grupo — solo si hay wellness
-  var evoHtml = '';
-  if(nWell){
-    try{
-      var wlayout = (typeof WELLNESS_LAYOUT !== 'undefined' && WELLNESS_LAYOUT) || cargaDefaultWellnessLayout();
-      evoHtml = cargaRenderEvolucion(wlayout) || '';
-    }catch(e){ console.warn('Evolución error:', e); }
-  }
-
-  // ── Construir layout ──
-  var html = '';
-
-  // Sección 1: Wellness + PSE lado a lado. Si solo hay uno, ocupa todo el ancho.
-  // (No mostramos un aviso "Sin datos de PSE" porque visualmente queda raro al ocupar
-  // media columna casi vacía. El usuario ya tiene el botón de Subir PSE arriba.)
-  var bothPresent = nWell && nPse;
-  html += '<div style="display:grid;grid-template-columns:'+(bothPresent?'repeat(auto-fit,minmax(380px,1fr))':'1fr')+';gap:12px;margin-bottom:14px">';
-
-  // Cuadro Wellness: header + Evolución arriba + Dolores reportados abajo
-  if(nWell){
-    html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">';
-    html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:10px;display:flex;align-items:center;gap:6px">'+
-      '<span>🧘 Wellness</span>'+
-      '<span style="font-size:10px;color:#888;font-weight:400">— '+nWell+' registros</span>'+
-      '</div>';
-    // Evolución del grupo
-    if(evoHtml){
-      html += evoHtml;
-    }
-    // Dolores reportados (debajo de la evolución, dentro del mismo cuadro)
-    if(doloresHtml){
-      html += '<div style="border-top:1px dashed #e0e0e0;margin-top:14px;padding-top:12px">'+
-        '<div style="font-size:11px;font-weight:800;color:#0D1B2A;margin-bottom:8px;display:flex;align-items:center;gap:6px">'+
-          '<span>🩹 Dolores reportados</span>'+
-        '</div>'+
-        doloresHtml+
-      '</div>';
-    }
-    html += '</div>';
-  }
-
-  // Cuadro PSE
-  if(nPse){
-    html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:12px 14px">';
-    html += '<div style="font-size:12px;font-weight:800;color:#0D1B2A;margin-bottom:10px;display:flex;align-items:center;gap:6px">'+
-      '<span>🏃 PSE individual</span>'+
-      '<span style="font-size:10px;color:#888;font-weight:400">— '+nPse+' registros</span>'+
-      '</div>';
-    html += pseHtml;
-    html += '</div>';
-  }
-
-  html += '</div>';
-
-  out.innerHTML = switchHtml + html;
+  // ─── VISTA DE EQUIPO (v128): tablero semanal del plantel ───
+  // Rediseño estilo monitoreo diario de élite: avisos primero (dolores y
+  // desvíos), matriz jugadores × días con semáforo, y tendencia compacta.
+  out.innerHTML = switchHtml + cargaRenderEquipoBoard();
 }
 window.cargaRenderWellPse = cargaRenderWellPse;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TABLERO SEMANAL DEL PLANTEL (v128) — Carga interna, vista de equipo
+// Estilo monitoreo diario de élite, misma estética que "Wellness y PSE del día":
+//  1. Avisos: dolores y desvíos de la norma, primero y sin gráficos.
+//  2. Matriz jugadores × días del microciclo con semáforo (Wellness o UA).
+//  3. Tendencia compacta de las últimas semanas.
+// Pensado para leerse en 10 segundos, tanto por el PF como por el CT.
+// ═══════════════════════════════════════════════════════════════════════════
+var _cargaEqWeek = null;      // semana (período) seleccionada
+var _cargaEqMetric = 'well';  // 'well' | 'ua'
+
+function cargaEqSetWeek(w){ _cargaEqWeek = w; cargaRender(); }
+window.cargaEqSetWeek = cargaEqSetWeek;
+function cargaEqSetMetric(m){ _cargaEqMetric = m; cargaRender(); }
+window.cargaEqSetMetric = cargaEqSetMetric;
+window.cargaEqOpenPlayer = function(n){
+  _cargaWPMode='individual';
+  if(typeof cargaWPSetPlayer==='function') cargaWPSetPlayer(n); else cargaRender();
+};
+
+// Arma la lista de períodos con datos: semanas del microciclo que contengan
+// registros de wellness/PSE. Las fechas huérfanas caen en semanas calendario.
+function _cargaEqPeriods(){
+  var dataDates={};
+  var addD=function(r){ var iso=(typeof cargaParseDate==='function'&&cargaParseDate(r.date))||r.date; if(iso)dataDates[iso]=true; };
+  (WELLNESS_DATA||[]).forEach(addD);
+  (PSE_DATA||[]).forEach(addD);
+  var isoList=Object.keys(dataDates).sort();
+  if(!isoList.length) return [];
+  var wks=cargaMicroWeeksByDate();
+  var periods=[];
+  if(wks.length){
+    wks.forEach(function(w){
+      var ds=isoList.filter(function(d){ return d>=w.start && d<=w.end; });
+      if(ds.length) periods.push({week:w.week, dates:ds, dateToDay:w.dateToDay||{}});
+    });
+  }
+  var covered={};
+  periods.forEach(function(p){ p.dates.forEach(function(d){ covered[d]=true; }); });
+  var orphan=isoList.filter(function(d){ return !covered[d]; });
+  if(orphan.length){
+    var byMon={};
+    orphan.forEach(function(d){
+      var dt=new Date(d+'T12:00:00');
+      var dow=(dt.getDay()+6)%7; // 0=lunes
+      dt.setDate(dt.getDate()-dow);
+      var mon=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+      if(!byMon[mon])byMon[mon]=[];
+      byMon[mon].push(d);
+    });
+    Object.keys(byMon).sort().forEach(function(mon){
+      var p=mon.split('-');
+      periods.push({week:'Sem '+p[2]+'/'+p[1], dates:byMon[mon].sort(), dateToDay:{}});
+    });
+    periods.sort(function(a,b){ return a.dates[0]<b.dates[0]?-1:1; });
+  }
+  return periods;
+}
+
+// Índices por jugador+fecha de un período: {well:{name:{iso:rec}}, pse:{...}, names:[...]}
+function _cargaEqIndex(per){
+  var well={}, pse={}, namesSet={};
+  (WELLNESS_DATA||[]).forEach(function(r){
+    var iso=(typeof cargaParseDate==='function'&&cargaParseDate(r.date))||r.date;
+    if(!iso||per.dates.indexOf(iso)<0)return;
+    if(!well[r.name])well[r.name]={};
+    well[r.name][iso]=r; namesSet[r.name]=true;
+  });
+  (PSE_DATA||[]).forEach(function(r){
+    var iso=(typeof cargaParseDate==='function'&&cargaParseDate(r.date))||r.date;
+    if(!iso||per.dates.indexOf(iso)<0)return;
+    if(!pse[r.name])pse[r.name]={};
+    pse[r.name][iso]=r; namesSet[r.name]=true;
+  });
+  return {well:well,pse:pse,names:Object.keys(namesSet).sort(function(a,b){return a.localeCompare(b,'es');})};
+}
+
+function _cargaEqUa(pr){ return (pr&&pr.pse!=null&&pr.min>0)?pr.pse*pr.min:null; }
+
+// Resumen del grupo en un período: {wAvg, uaAvg} (promedios por jugador)
+function _cargaEqGroupStats(per){
+  var idx=_cargaEqIndex(per);
+  var wv=[], uv=[];
+  idx.names.forEach(function(n){
+    var w=per.dates.map(function(d){var r=idx.well[n]&&idx.well[n][d];return r?(r.readiness||0):null;}).filter(function(v){return v!=null&&v>0;});
+    if(w.length)wv.push(w.reduce(function(a,b){return a+b;},0)/w.length);
+    var us=per.dates.map(function(d){return _cargaEqUa(idx.pse[n]&&idx.pse[n][d]);}).filter(function(v){return v!=null;});
+    if(us.length)uv.push(us.reduce(function(a,b){return a+b;},0));
+  });
+  return {
+    wAvg: wv.length?wv.reduce(function(a,b){return a+b;},0)/wv.length:null,
+    uaAvg: uv.length?uv.reduce(function(a,b){return a+b;},0)/uv.length:null
+  };
+}
+
+function cargaRenderEquipoBoard(){
+  var layout=WELLNESS_LAYOUT||cargaDefaultWellnessLayout();
+  var maxTotal=layout.fields.reduce(function(a,f){return a+(f.max||5);},0);
+  var periods=_cargaEqPeriods();
+  if(!periods.length) return '';
+  if(!_cargaEqWeek || !periods.some(function(p){return p.week===_cargaEqWeek;})){
+    _cargaEqWeek=periods[periods.length-1].week; // la más reciente
+  }
+  var pi=periods.findIndex(function(p){return p.week===_cargaEqWeek;});
+  var per=periods[pi];
+  var esc=function(s){ return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;'); };
+
+  var idx=_cargaEqIndex(per);
+  var names=idx.names;
+
+  // ── Métricas por jugador en el período ──
+  var perStats={};
+  names.forEach(function(n){
+    var wvals=per.dates.map(function(d){var r=idx.well[n]&&idx.well[n][d];return r?(r.readiness||0):null;}).filter(function(v){return v!=null&&v>0;});
+    var uas=per.dates.map(function(d){return _cargaEqUa(idx.pse[n]&&idx.pse[n][d]);}).filter(function(v){return v!=null;});
+    var dol=per.dates.map(function(d){var r=idx.well[n]&&idx.well[n][d];return (r&&r.dolor==='Si')?r:null;}).filter(Boolean);
+    perStats[n]={
+      wAvg: wvals.length?wvals.reduce(function(a,b){return a+b;},0)/wvals.length:null,
+      uaTot: uas.length?uas.reduce(function(a,b){return a+b;},0):null,
+      dolores: dol
+    };
+  });
+
+  // ── Baselines individuales (hasta 4 semanas previas) para detectar desvíos ──
+  var prevPeriods=periods.slice(Math.max(0,pi-4),pi);
+  var prevIdx=prevPeriods.map(function(p){ return {per:p, idx:_cargaEqIndex(p)}; });
+  var baseline={};
+  names.forEach(function(n){
+    var wAvgs=[], uaTots=[];
+    prevIdx.forEach(function(pp){
+      var w=pp.per.dates.map(function(d){var r=pp.idx.well[n]&&pp.idx.well[n][d];return r?(r.readiness||0):null;}).filter(function(v){return v!=null&&v>0;});
+      if(w.length)wAvgs.push(w.reduce(function(a,b){return a+b;},0)/w.length);
+      var us=pp.per.dates.map(function(d){return _cargaEqUa(pp.idx.pse[n]&&pp.idx.pse[n][d]);}).filter(function(v){return v!=null;});
+      if(us.length)uaTots.push(us.reduce(function(a,b){return a+b;},0));
+    });
+    baseline[n]={
+      wAvg: wAvgs.length?wAvgs.reduce(function(a,b){return a+b;},0)/wAvgs.length:null, wN:wAvgs.length,
+      uaTot: uaTots.length?uaTots.reduce(function(a,b){return a+b;},0)/uaTots.length:null, uaN:uaTots.length
+    };
+  });
+
+  // ── AVISOS: lo fuera de la norma, sin gráficos ──
+  var avisos=[];
+  names.forEach(function(n){
+    var s=perStats[n], b=baseline[n];
+    if(s.dolores.length){
+      var last=s.dolores[s.dolores.length-1];
+      var zona=last.dolorZona||'sin zona';
+      var tiempo=last.dolorTiempo||(last.fields&&last.fields._dolorTiempo)||'';
+      avisos.push({type:'dolor', sev:2, name:n,
+        txt:'🩹 <strong>'+n+'</strong> — dolor en <strong>'+zona+'</strong>'+(tiempo?' ('+tiempo+')':'')+(s.dolores.length>1?' · '+s.dolores.length+' días':'')});
+    }
+    if(s.wAvg!=null && b.wAvg!=null && b.wN>=1){
+      var drop=(b.wAvg-s.wAvg)/b.wAvg;
+      if(drop>=0.15) avisos.push({type:'well', sev:drop>=0.25?2:1, name:n,
+        txt:'📉 <strong>'+n+'</strong> — wellness '+Math.round(drop*100)+'% por debajo de su promedio ('+s.wAvg.toFixed(0)+' vs '+b.wAvg.toFixed(0)+')'});
+    }
+    if(s.uaTot!=null && b.uaTot!=null && b.uaN>=1 && b.uaTot>0){
+      var ratio=s.uaTot/b.uaTot;
+      if(ratio>=1.5) avisos.push({type:'ua', sev:ratio>=1.8?2:1, name:n,
+        txt:'⚡ <strong>'+n+'</strong> — carga interna '+ratio.toFixed(1)+'× su promedio semanal ('+Math.round(s.uaTot)+' vs '+Math.round(b.uaTot)+' UA)'});
+    }
+  });
+  avisos.sort(function(a,b){ return b.sev-a.sev || a.name.localeCompare(b.name,'es'); });
+
+  // ── KPIs del período ──
+  var wAll=names.map(function(n){return perStats[n].wAvg;}).filter(function(v){return v!=null;});
+  var wAvgGrp=wAll.length?wAll.reduce(function(a,b){return a+b;},0)/wAll.length:null;
+  var uaAll=names.map(function(n){return perStats[n].uaTot;}).filter(function(v){return v!=null;});
+  var uaAvgGrp=uaAll.length?uaAll.reduce(function(a,b){return a+b;},0)/uaAll.length:null;
+  var prevStats=pi>0?_cargaEqGroupStats(periods[pi-1]):{wAvg:null,uaAvg:null};
+  var deltaChip=function(cur,prev,invert){
+    if(cur==null||prev==null||prev===0)return '';
+    var d=(cur-prev)/prev*100;
+    if(Math.abs(d)<3)return '<span style="font-size:9px;color:#aaa;font-weight:600"> ≈</span>';
+    var up=d>0;
+    var good=invert?!up:up;
+    return '<span style="font-size:9px;color:'+(good?'#1D9E75':'#E24B4A')+';font-weight:800"> '+(up?'▲':'▼')+Math.abs(Math.round(d))+'%</span>';
+  };
+  var nDolor=names.filter(function(n){return perStats[n].dolores.length;}).length;
+
+  var colTotal=function(v){var p=maxTotal>0?v/maxTotal:0;return p>=0.8?'#1D9E75':p>=0.6?'#EF9F27':'#E24B4A';};
+
+  // ── HEADER (navy, como "del día") ──
+  var html='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">';
+  html+='<div style="background:#0D1B2A;padding:12px 16px">';
+  html+='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">';
+  html+='<div style="color:#fff;font-size:14px;font-weight:800">🫀 Estado del plantel <span style="font-size:11px;font-weight:500;color:#9fb3c8">— '+per.week+'</span></div>';
+  html+='<div style="display:flex;border:1px solid #ffffff33;border-radius:6px;overflow:hidden">'+
+    '<button onclick="cargaEqSetMetric(\'well\')" style="padding:5px 13px;border:none;background:'+(_cargaEqMetric==='well'?'#1D9E75':'none')+';color:'+(_cargaEqMetric==='well'?'#fff':'#9fb3c8')+';font-size:11px;font-weight:700;cursor:pointer">🧘 Wellness</button>'+
+    '<button onclick="cargaEqSetMetric(\'ua\')" style="padding:5px 13px;border:none;background:'+(_cargaEqMetric==='ua'?'#9C59D1':'none')+';color:'+(_cargaEqMetric==='ua'?'#fff':'#9fb3c8')+';font-size:11px;font-weight:700;cursor:pointer">⚡ Carga (UA)</button>'+
+  '</div>';
+  html+='</div>';
+  html+='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">';
+  periods.slice(-8).forEach(function(p){
+    var sel=p.week===_cargaEqWeek;
+    html+='<button onclick="cargaEqSetWeek(\''+esc(p.week)+'\')" style="padding:5px 11px;border:1px solid '+(sel?'#1D9E75':'#ffffff33')+';background:'+(sel?'#1D9E75':'none')+';color:'+(sel?'#fff':'#9fb3c8')+';border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">'+p.week+'</button>';
+  });
+  html+='</div></div>';
+
+  // ── KPIs ──
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;background:#f8faff;border-bottom:1px solid #eef2f8">';
+  var kpi=function(lbl,val,col,extra){
+    return '<div style="flex:1;min-width:105px;background:#fff;border:1px solid #e8e8e8;border-radius:8px;padding:8px 10px;text-align:center">'+
+      '<div style="font-size:9px;color:#aaa;font-weight:700;text-transform:uppercase;margin-bottom:2px">'+lbl+'</div>'+
+      '<div style="font-size:17px;font-weight:800;color:'+col+'">'+val+(extra||'')+'</div></div>';
+  };
+  html+=kpi('Wellness grupo', wAvgGrp!=null?Math.round(wAvgGrp)+'<span style="font-size:10px;color:#aaa">/'+maxTotal+'</span>':'–', wAvgGrp!=null?colTotal(wAvgGrp):'#bbb', deltaChip(wAvgGrp,prevStats.wAvg,false));
+  html+=kpi('UA prom / jugador', uaAvgGrp!=null?Math.round(uaAvgGrp).toLocaleString('es-AR'):'–', '#9C59D1', deltaChip(uaAvgGrp,prevStats.uaAvg,false));
+  html+=kpi('Reportaron', names.length, '#3B4D88');
+  html+=kpi('Con dolor', nDolor, nDolor>0?'#E24B4A':'#1D9E75');
+  html+=kpi('Avisos', avisos.length, avisos.length?'#EF9F27':'#1D9E75');
+  html+='</div>';
+
+  // ── AVISOS ──
+  if(avisos.length){
+    html+='<div style="padding:10px 16px;background:#fffaf3;border-bottom:1px solid #f5e6cc">';
+    html+='<div style="font-size:10px;font-weight:800;color:#B26A00;text-transform:uppercase;margin-bottom:6px">⚠️ Avisos — fuera de la norma</div>';
+    avisos.forEach(function(a){
+      var bc=a.sev===2?'#E24B4A':'#EF9F27';
+      html+='<div onclick="cargaEqOpenPlayer(\''+esc(a.name)+'\')" style="display:flex;align-items:center;gap:7px;font-size:11px;color:#333;padding:4px 0;cursor:pointer" title="Ver ficha individual">'+
+        '<span style="width:7px;height:7px;border-radius:50%;background:'+bc+';flex-shrink:0"></span>'+
+        '<span>'+a.txt+'</span></div>';
+    });
+    html+='</div>';
+  } else {
+    html+='<div style="padding:9px 16px;background:#f2fbf6;border-bottom:1px solid #d9f0e3;font-size:11px;color:#1D9E75;font-weight:700">✓ Sin avisos — el grupo está dentro de sus parámetros normales.</div>';
+  }
+
+  // ── MATRIZ jugadores × días ──
+  var fmtDay=function(iso){
+    var dt=new Date(iso+'T12:00:00');
+    var dows=['Lu','Ma','Mi','Ju','Vi','Sá','Do'];
+    return dows[(dt.getDay()+6)%7]+' '+iso.slice(8,10)+'/'+iso.slice(5,7);
+  };
+  var uaMax=0;
+  names.forEach(function(n){ per.dates.forEach(function(d){ var u=_cargaEqUa(idx.pse[n]&&idx.pse[n][d]); if(u!=null&&u>uaMax)uaMax=u; }); });
+
+  html+='<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:11px;min-width:520px">';
+  html+='<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">';
+  html+='<th style="padding:8px 12px;text-align:left;font-weight:700;color:#555;white-space:nowrap;position:sticky;left:0;background:#f5f7fa;z-index:1">Jugador</th>';
+  per.dates.forEach(function(d){
+    var md=per.dateToDay[d]||'';
+    html+='<th style="padding:6px 6px;text-align:center;font-weight:700;color:#555;white-space:nowrap"><div>'+fmtDay(d)+'</div>'+(md?'<div style="font-size:9px;color:#3B4D88;font-weight:800">'+md+'</div>':'')+'</th>';
+  });
+  html+='<th style="padding:8px 10px;text-align:center;font-weight:800;color:#0D1B2A;white-space:nowrap;border-left:2px solid #e0e0e0">'+(_cargaEqMetric==='well'?'Prom':'Total UA')+'</th>';
+  html+='</tr></thead><tbody>';
+
+  // Ordenar: con avisos primero (rojo → amarillo), después alfabético
+  var sevOf={}; avisos.forEach(function(a){ sevOf[a.name]=Math.max(sevOf[a.name]||0,a.sev); });
+  var namesSorted=names.slice().sort(function(a,b){ return (sevOf[b]||0)-(sevOf[a]||0) || a.localeCompare(b,'es'); });
+
+  namesSorted.forEach(function(n){
+    var s=perStats[n];
+    var rowMark=sevOf[n]===2?'#E24B4A':sevOf[n]===1?'#EF9F27':'transparent';
+    html+='<tr style="border-bottom:0.5px solid #eee">';
+    html+='<td onclick="cargaEqOpenPlayer(\''+esc(n)+'\')" style="padding:7px 12px 7px 9px;font-weight:600;color:#0D1B2A;white-space:nowrap;position:sticky;left:0;background:#fff;cursor:pointer;border-left:3px solid '+rowMark+'" title="Ver ficha individual">'+n+'</td>';
+    per.dates.forEach(function(d){
+      var wr=idx.well[n]&&idx.well[n][d];
+      var pr=idx.pse[n]&&idx.pse[n][d];
+      if(_cargaEqMetric==='well'){
+        var v=wr?(wr.readiness||0):0;
+        if(!v){ html+='<td style="padding:6px;text-align:center;color:#ddd">–</td>'; return; }
+        var p=maxTotal>0?v/maxTotal:0;
+        var bg=p>=0.8?'#e8f8f0':p>=0.6?'#f1f8e9':p>=0.4?'#fff8e1':'#fdeaea';
+        var fg=p>=0.8?'#1D9E75':p>=0.6?'#8BC34A':p>=0.4?'#EF9F27':'#E24B4A';
+        var dolorDot=(wr.dolor==='Si')?'<span title="'+(wr.dolorZona||'dolor')+'" style="position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#E24B4A;border:1.5px solid #fff"></span>':'';
+        html+='<td style="padding:6px;text-align:center"><span style="position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:24px;border-radius:6px;background:'+bg+';color:'+fg+';font-weight:800;padding:0 4px">'+Math.round(v)+dolorDot+'</span></td>';
+      } else {
+        var u=_cargaEqUa(pr);
+        if(u==null){
+          if(pr&&pr.pse!=null){ html+='<td style="padding:6px;text-align:center;color:#b58ad6;font-size:10px" title="PSE sin minutos — cargá el tiempo para calcular UA">('+pr.pse+')</td>'; }
+          else html+='<td style="padding:6px;text-align:center;color:#ddd">–</td>';
+          return;
+        }
+        var alpha=uaMax>0?Math.max(0.12,u/uaMax):0.12;
+        html+='<td style="padding:6px;text-align:center"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:24px;border-radius:6px;background:rgba(156,89,209,'+alpha.toFixed(2)+');color:'+(alpha>0.55?'#fff':'#6B3FA0')+';font-weight:800;padding:0 4px">'+Math.round(u)+'</span></td>';
+      }
+    });
+    if(_cargaEqMetric==='well'){
+      html+='<td style="padding:6px 10px;text-align:center;font-weight:800;border-left:2px solid #e0e0e0;color:'+(s.wAvg!=null?colTotal(s.wAvg):'#ddd')+'">'+(s.wAvg!=null?Math.round(s.wAvg):'–')+'</td>';
+    } else {
+      html+='<td style="padding:6px 10px;text-align:center;font-weight:800;border-left:2px solid #e0e0e0;color:#9C59D1">'+(s.uaTot!=null?Math.round(s.uaTot).toLocaleString('es-AR'):'–')+'</td>';
+    }
+    html+='</tr>';
+  });
+  html+='</tbody></table></div>';
+
+  // ── TENDENCIA compacta (últimos 6 períodos) ──
+  var trendP=periods.slice(-6);
+  if(trendP.length>1){
+    var tr=trendP.map(function(p){
+      var g=_cargaEqGroupStats(p);
+      return {week:p.week, w:g.wAvg, ua:g.uaAvg};
+    });
+    var uaMaxT=Math.max.apply(null,tr.map(function(t){return t.ua||0;}).concat([1]));
+    html+='<div style="padding:12px 16px;border-top:1px solid #eef2f8;background:#fbfcff">';
+    html+='<div style="font-size:10px;font-weight:800;color:#aaa;text-transform:uppercase;margin-bottom:8px">📈 Últimas semanas — wellness del grupo y carga promedio por jugador</div>';
+    html+='<div style="display:flex;align-items:flex-end;gap:10px;height:86px">';
+    tr.forEach(function(t){
+      var sel=t.week===_cargaEqWeek;
+      var wh=t.w!=null?Math.max(5,Math.round(t.w/maxTotal*62)):0;
+      var uh=t.ua!=null?Math.max(5,Math.round(t.ua/uaMaxT*62)):0;
+      html+='<div onclick="cargaEqSetWeek(\''+esc(t.week)+'\')" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;'+(sel?'':'opacity:0.6')+'" title="'+t.week+'">';
+      html+='<div style="display:flex;align-items:flex-end;gap:3px;height:64px">';
+      html+=t.w!=null?'<div style="width:16px;height:'+wh+'px;background:'+colTotal(t.w)+';border-radius:3px 3px 0 0" title="Wellness '+Math.round(t.w)+'"></div>':'';
+      html+=t.ua!=null?'<div style="width:16px;height:'+uh+'px;background:#9C59D1;border-radius:3px 3px 0 0" title="'+Math.round(t.ua)+' UA"></div>':'';
+      html+='</div>';
+      html+='<span style="font-size:8.5px;color:'+(sel?'#0D1B2A':'#aaa')+';font-weight:'+(sel?'800':'600')+';white-space:nowrap;max-width:76px;overflow:hidden;text-overflow:ellipsis">'+t.week+'</span>';
+      html+='</div>';
+    });
+    html+='</div>';
+    html+='<div style="display:flex;gap:14px;margin-top:6px;font-size:9px;color:#888"><span><span style="display:inline-block;width:9px;height:9px;background:#1D9E75;border-radius:2px;margin-right:3px"></span>Wellness (color según nivel)</span><span><span style="display:inline-block;width:9px;height:9px;background:#9C59D1;border-radius:2px;margin-right:3px"></span>UA promedio por jugador</span></div>';
+    html+='</div>';
+  }
+
+  html+='</div>';
+  return html;
+}
+window.cargaRenderEquipoBoard=cargaRenderEquipoBoard;
 
 // ═══════════════════════════════════════════════════════════════
 // VISTA INDIVIDUAL: Wellness y PSE/UA de un jugador específico
