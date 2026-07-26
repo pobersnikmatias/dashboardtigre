@@ -35516,8 +35516,26 @@ function xdBuildModal(){
   '#xd2-modal .xd2-top{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#0D1B2A;flex-shrink:0}'+
   '#xd2-modal .xd2-top b{color:#fff;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'+
   '#xd2-modal .xd2-hbtn{border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:800;cursor:pointer}'+
-  '#xd2-modal .xd2-bar{display:flex;gap:6px;align-items:center;padding:7px 10px;background:#16233A;overflow-x:auto;flex-shrink:0;-webkit-overflow-scrolling:touch}'+
-  '#xd2-modal .xd2-bar::-webkit-scrollbar{height:0}'+
+  '#xd2-modal .xd2-barwrap{position:relative;flex-shrink:0;background:#16233A}'+
+  '#xd2-modal .xd2-bar{display:flex;gap:6px;align-items:center;padding:7px 10px;background:#16233A;overflow-x:auto;overflow-y:hidden;flex-shrink:0;-webkit-overflow-scrolling:touch;scroll-behavior:smooth;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.30) rgba(255,255,255,0.06)}'+
+  // v131: el scrollbar estaba oculto (height:0). En PC eso dejaba la barra sin
+  // forma visible de desplazarse. Ahora es una barra fina y visible.
+  '#xd2-modal .xd2-bar::-webkit-scrollbar{height:9px}'+
+  '#xd2-modal .xd2-bar::-webkit-scrollbar-track{background:rgba(255,255,255,0.06);border-radius:6px;margin:0 4px}'+
+  '#xd2-modal .xd2-bar::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.30);border-radius:6px}'+
+  '#xd2-modal .xd2-bar::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.55)}'+
+  // Flechas laterales: solo en dispositivos con mouse (en touch se desliza con el dedo)
+  '#xd2-modal .xd2-nav{position:absolute;top:0;height:calc(100% - 9px);width:36px;border:none;color:#fff;font-size:24px;font-weight:700;cursor:pointer;z-index:4;display:none;align-items:center;justify-content:center;padding:0;line-height:1}'+
+  '#xd2-modal .xd2-nav-l{left:0;background:linear-gradient(90deg,#16233A 55%,rgba(22,35,58,0))}'+
+  '#xd2-modal .xd2-nav-r{right:0;background:linear-gradient(270deg,#16233A 55%,rgba(22,35,58,0))}'+
+  '#xd2-modal .xd2-nav:hover{color:#FFE45C}'+
+  '@media (hover:hover) and (pointer:fine){'+
+    '#xd2-modal .xd2-nav.show{display:flex}'+
+    '#xd2-modal .xd2-bar{padding-left:34px;padding-right:34px}'+
+  '}'+
+  '#xd2-modal .xd2-seqbar::-webkit-scrollbar{height:9px}'+
+  '#xd2-modal .xd2-seqbar::-webkit-scrollbar-track{background:rgba(255,255,255,0.06);border-radius:6px}'+
+  '#xd2-modal .xd2-seqbar::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.30);border-radius:6px}'+
   '#xd2-modal .xd2-grp{display:flex;gap:4px;align-items:center;padding-right:8px;margin-right:2px;border-right:1px solid rgba(255,255,255,0.12);flex-shrink:0}'+
   '#xd2-modal .xd2-grp:last-child{border-right:none}'+
   '#xd2-modal .xd2-tbtn{min-width:46px;height:44px;border:1px solid rgba(255,255,255,0.16);border-radius:9px;background:#1D2C47;color:#C9D4E8;font-size:15px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;flex-shrink:0;padding:2px 6px}'+
@@ -35543,7 +35561,9 @@ function xdBuildModal(){
     '<button class="xd2-hbtn" style="background:#1D9E75;color:#fff" onclick="xd2Save()">✓ Guardar</button>'+
     '<button class="xd2-hbtn" style="background:#2A3A58;color:#fff" onclick="xd2Close()">✕</button>'+
   '</div>'+
-  '<div class="xd2-bar">'+
+  '<div class="xd2-barwrap">'+
+  '<button class="xd2-nav xd2-nav-l" id="xd2-nav-l" onclick="xd2BarScroll(-1)" title="Desplazar herramientas a la izquierda">\u2039</button>'+
+  '<div class="xd2-bar" id="xd2-bar">'+
     '<div class="xd2-grp">'+
       '<button class="xd2-tbtn" data-t="select" onclick="xd2SetTool(\'select\')">↖<small>MOVER</small></button>'+
       '<button class="xd2-tbtn" data-t="erase" onclick="xd2SetTool(\'erase\')">🧽<small>BORRAR</small></button>'+
@@ -35599,6 +35619,8 @@ function xdBuildModal(){
       '<button class="xd2-tbtn" onclick="xd2Clear()">🗑<small>LIMPIAR</small></button>'+
     '</div>'+
   '</div>'+
+  '<button class="xd2-nav xd2-nav-r" id="xd2-nav-r" onclick="xd2BarScroll(1)" title="Desplazar herramientas a la derecha">\u203a</button>'+
+  '</div>'+
   '<div class="xd2-seqbar" id="xd2-seq"></div>'+
   '<div class="xd2-stage">'+
     '<svg id="xd2-svg" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" style="display:block"></svg>'+
@@ -35611,7 +35633,63 @@ function xdBuildModal(){
   svg.addEventListener('pointermove',xdMove);
   svg.addEventListener('pointerup',xdUp);
   svg.addEventListener('pointercancel',xdUp);
+  xd2BarNavInit();
   setTimeout(xdFitAll,0); setTimeout(xdFitAll,180);
+}
+
+// ── v131: navegación lateral de la barra de herramientas ───────────────────
+// En PC la barra tenía overflow-x:auto pero con el scrollbar oculto, así que
+// no había manera evidente de llegar a las herramientas de la derecha. Ahora:
+//  · scrollbar fina y visible,
+//  · flechas ‹ › en los bordes (solo con mouse), que se ocultan al llegar al final,
+//  · la rueda del mouse sobre la barra la desplaza en horizontal,
+//  · se puede arrastrar la barra con el mouse (click sostenido).
+function xd2BarScroll(dir){
+  var bar=document.getElementById('xd2-bar'); if(!bar)return;
+  bar.scrollBy({left:dir*Math.max(160,bar.clientWidth*0.7), behavior:'smooth'});
+}
+window.xd2BarScroll=xd2BarScroll;
+
+function xd2BarNavSync(){
+  var bar=document.getElementById('xd2-bar'); if(!bar)return;
+  var l=document.getElementById('xd2-nav-l'), r=document.getElementById('xd2-nav-r');
+  var max=bar.scrollWidth-bar.clientWidth;
+  var canScroll=max>4;
+  if(l)l.classList.toggle('show', canScroll && bar.scrollLeft>2);
+  if(r)r.classList.toggle('show', canScroll && bar.scrollLeft<max-2);
+}
+window.xd2BarNavSync=xd2BarNavSync;
+
+function xd2BarNavInit(){
+  var bar=document.getElementById('xd2-bar'); if(!bar)return;
+  bar.addEventListener('scroll',xd2BarNavSync,{passive:true});
+  window.addEventListener('resize',xd2BarNavSync);
+  // Rueda del mouse → desplazamiento horizontal
+  bar.addEventListener('wheel',function(e){
+    if(Math.abs(e.deltaY)<=Math.abs(e.deltaX))return; // ya es horizontal
+    var max=bar.scrollWidth-bar.clientWidth;
+    if(max<=4)return;
+    e.preventDefault();
+    bar.scrollLeft+=e.deltaY;
+  },{passive:false});
+  // Arrastrar con el mouse (no interferir con los botones ni con touch)
+  var down=false,x0=0,s0=0,moved=false;
+  bar.addEventListener('pointerdown',function(e){
+    if(e.pointerType!=='mouse')return;
+    if(e.target.closest('button'))return;
+    down=true;moved=false;x0=e.clientX;s0=bar.scrollLeft;
+  });
+  bar.addEventListener('pointermove',function(e){
+    if(!down)return;
+    var dx=e.clientX-x0;
+    if(Math.abs(dx)>3)moved=true;
+    bar.scrollLeft=s0-dx;
+  });
+  var end=function(){ down=false; if(moved)setTimeout(function(){moved=false;},0); };
+  bar.addEventListener('pointerup',end);
+  bar.addEventListener('pointerleave',end);
+  setTimeout(xd2BarNavSync,0);
+  setTimeout(xd2BarNavSync,250);
 }
 
 // Ajuste de tamaño del SVG por JS (a prueba de Safari/iPad: sin dvh ni aspect-ratio)
