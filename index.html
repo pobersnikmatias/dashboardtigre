@@ -6979,6 +6979,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
           <div style="font-size:12px;font-weight:700;color:#0C447C">✏️ Editor de semana</div>
           <input id="plan-week-name" type="text" placeholder="Nombre (ej: Semana 12 — vs Racing)" style="flex:1;min-width:200px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px">
           <button class="btn bg" onclick="planSaveWeek()" style="font-size:10px;padding:4px 12px">💾 Guardar semana</button>
+          <span id="plan-autosave-ind" style="font-size:10px;color:#1D9E75;font-weight:700;opacity:0;transition:opacity .35s;white-space:nowrap">✓ Guardado</span>
           <button class="btn bc" onclick="planCancelEdit()" style="font-size:10px;padding:4px 12px">✕ Cancelar</button>
         </div>
         <!-- Partido de referencia selector -->
@@ -12340,6 +12341,49 @@ function planCalcExVol(ex, mins){
   };
 }
 
+// ── BLOQUES PARALELOS (v130) ──────────────────────────────────────────────
+// Regla: en un bloque paralelo los ejercicios se hacen AL MISMO TIEMPO por
+// distintos grupos (ej: uno específico de defensores y otro de delanteros),
+// así que el bloque dura lo que dura el ejercicio MÁS LARGO y los datos
+// físicos son los de ese ejercicio. Si hay empate en el tiempo más largo,
+// se PROMEDIAN los valores físicos de los empatados (el tiempo es el mismo).
+// Reemplaza al viejo checkbox manual "vol", que obligaba a elegir a mano
+// cuál sumaba y se olvidaba fácil.
+function planParallelLeaders(exs){
+  var maxT=0;
+  (exs||[]).forEach(function(item){
+    var t=(item.minsTotal!=null?item.minsTotal:item.mins)||0;
+    if(t>maxT)maxT=t;
+  });
+  var idx=[];
+  (exs||[]).forEach(function(item,i){
+    var t=(item.minsTotal!=null?item.minsTotal:item.mins)||0;
+    if(t===maxT)idx.push(i);
+  });
+  return {maxT:maxT, idx:idx, tie:idx.length>1};
+}
+// Devuelve {mins, vol, n}: duración del bloque y métricas a imputar.
+function planParallelBlockVol(exs){
+  var L=planParallelLeaders(exs);
+  var acc={mts:0,hsr:0,h2:0,h25:0,acc:0,dcc:0,rhie:0,mts_min:0};
+  var n=0;
+  L.idx.forEach(function(i){
+    var item=exs[i];
+    var ex=planResolveEx(item);
+    if(!ex)return;
+    var v=planCalcExVol(ex,item.mins);
+    acc.mts+=v.mts; acc.hsr+=v.hsr; acc.h2+=v.h2; acc.h25+=v.h25;
+    acc.acc+=v.acc; acc.dcc+=v.dcc; acc.rhie+=v.rhie; acc.mts_min+=v.mts_min;
+    n++;
+  });
+  if(n>1){ // empate en el tiempo más largo → promedio de los físicos
+    acc.mts/=n; acc.hsr/=n; acc.h2/=n; acc.h25/=n;
+    acc.acc/=n; acc.dcc/=n; acc.rhie/=n; acc.mts_min/=n;
+  }
+  return {mins:L.maxT, vol:acc, n:n};
+}
+window.planParallelLeaders=planParallelLeaders;
+
 function planSumDay(day){
   // Accept either old format (array of exercises) or new format (day object with blocks)
   var blocks;
@@ -12359,21 +12403,13 @@ function planSumDay(day){
     if(!exs.length)return;
 
     if(block.parallel){
-      // Parallel block: only exercises with countVolume=true contribute metrics
-      // Time = max totalMins (or mins) among all exercises
-      var blockMins=0;
-      exs.forEach(function(item){
-        var itemTime = item.minsTotal!=null ? item.minsTotal : item.mins;
-        if(itemTime>blockMins) blockMins=itemTime;
-        if(!item.countVolume) return;
-        var ex=planResolveEx(item);
-        if(!ex)return;
-        var v=planCalcExVol(ex,item.mins); // always use work time for volume
-        sum.mts+=v.mts; sum.hsr+=v.hsr; sum.h2+=v.h2; sum.h25+=v.h25;
-        sum.acc+=v.acc; sum.dcc+=v.dcc; sum.rhie+=v.rhie;
-        mtsMinSum+=v.mts_min; mtsMinCount++;
-      });
-      sum.totalMins+=blockMins;
+      // v130: tiempo = el del ejercicio más largo; físicos = los de ese
+      // ejercicio (o promedio de los empatados en el tiempo más largo).
+      var pb=planParallelBlockVol(exs);
+      sum.mts+=pb.vol.mts; sum.hsr+=pb.vol.hsr; sum.h2+=pb.vol.h2; sum.h25+=pb.vol.h25;
+      sum.acc+=pb.vol.acc; sum.dcc+=pb.vol.dcc; sum.rhie+=pb.vol.rhie;
+      if(pb.n){ mtsMinSum+=pb.vol.mts_min; mtsMinCount++; }
+      sum.totalMins+=pb.mins;
     } else {
       // Sequential: all exercises contribute
       exs.forEach(function(item){
@@ -12460,14 +12496,10 @@ function planSumDayByGroup(day, weekGroups){
       Object.keys(byGroup).forEach(function(srcG){
         var bg=byGroup[srcG];
         var bucket=(srcG==='Todos')?todosSum:(specificSums[srcG]||(specificSums[srcG]=mkSum()));
-        bucket.totalMins+=bg.maxTime;
-        bg.items.forEach(function(item){
-          if(!item.countVolume) return;
-          var ex=planResolveEx(item);
-          if(!ex) return;
-          var v=planCalcExVol(ex,item.mins);
-          addVol(bucket,v,0);
-        });
+        // v130: misma regla dentro de cada grupo — el más largo manda; empate → promedio
+        var pbg=planParallelBlockVol(bg.items);
+        bucket.totalMins+=pbg.mins;
+        addVol(bucket,pbg.vol,0);
       });
     } else {
       exs.forEach(function(item){
@@ -12811,13 +12843,51 @@ window.planRemoveGroup=planRemoveGroup;
 function planSetExGroup(di,bi,ei,group){
   if(!_planEditData) return;
   _planEditData.days[di].blocks[bi].exercises[ei].group=group;
-  // Auto-save so group assignment persists
-  if(_planEditIdx!==null) PLAN_WEEKS[_planEditIdx]=JSON.parse(JSON.stringify(_planEditData));
-  planSave();
   planRenderDays();
   planRenderWeekSummary();
+  planAutoSave();
 }
 window.planSetExGroup=planSetExGroup;
+
+// ── AUTOGUARDADO (v130) ───────────────────────────────────────────────────
+// Todo cambio estructural de la semana (agregar/quitar ejercicios o bloques,
+// marcar paralelo, cambiar grupo o tiempos) persiste solo. Antes, si alguien
+// se olvidaba de apretar "Guardar semana", se perdía todo el trabajo.
+// Si la semana todavía no existe en la lista, se crea al primer cambio para
+// que el borrador quede guardado igual.
+function planAutoSave(){
+  if(!_planEditData)return;
+  try{
+    var nmEl=document.getElementById('plan-week-name');
+    var nm=nmEl&&nmEl.value?nmEl.value.trim():'';
+    if(nm)_planEditData.name=nm;
+    var rmEl=document.getElementById('plan-ref-mode');
+    if(rmEl&&rmEl.value)_planEditData.refMode=rmEl.value;
+    if(_planEditIdx===null){
+      if(!_planEditData.name)_planEditData.name='Semana '+(PLAN_WEEKS.length+1);
+      _planEditData.created=new Date().toISOString();
+      PLAN_WEEKS.push(JSON.parse(JSON.stringify(_planEditData)));
+      _planEditIdx=PLAN_WEEKS.length-1;
+      if(typeof planRenderWeeksList==='function')planRenderWeeksList();
+    } else {
+      PLAN_WEEKS[_planEditIdx]=JSON.parse(JSON.stringify(_planEditData));
+    }
+    planSave();
+    planAutoSaveFlash();
+  }catch(e){ console.warn('planAutoSave:',e); }
+}
+window.planAutoSave=planAutoSave;
+
+// Indicador discreto "Guardado ✓" al lado del botón Guardar semana.
+var _planAutoSaveTimer=null;
+function planAutoSaveFlash(){
+  var el=document.getElementById('plan-autosave-ind');
+  if(!el)return;
+  el.textContent='✓ Guardado';
+  el.style.opacity='1';
+  if(_planAutoSaveTimer)clearTimeout(_planAutoSaveTimer);
+  _planAutoSaveTimer=setTimeout(function(){ el.style.opacity='0'; },1800);
+}
 
 function planSaveWeek(){
   var name=document.getElementById('plan-week-name').value.trim();
@@ -12903,18 +12973,18 @@ function planRenderDays(){
           +'title="Grupo de jugadores">'
           +groupOpts+'</select>';
 
-        // Parallel toggle: checkbox to include volume
+        // v130: ya no hay checkbox manual. El bloque paralelo calcula solo:
+        // manda el ejercicio más largo (o el promedio si empatan).
+        var _pl=isParallel?planParallelLeaders(block.exercises||[]):null;
+        var isLeader=_pl&&_pl.idx.indexOf(ei)>=0;
         var countCheck=isParallel
-          ? '<label title="Sumar este volumen al día" style="display:flex;align-items:center;gap:2px;cursor:pointer;flex-shrink:0">'+
-              '<input type="checkbox" '+(item.countVolume?'checked':'')+' '+
-                'onchange="planToggleCount('+di+','+bi+','+ei+',this.checked)" '+
-                'style="accent-color:#1D9E75;width:12px;height:12px">'+
-              '<span style="font-size:9px;color:#1D9E75;font-weight:700">vol</span>'+
-            '</label>'
+          ? (isLeader
+              ? '<span title="'+(_pl.tie?'Empata en el tiempo más largo: se promedian los datos físicos':'Es el ejercicio más largo: sus datos físicos son los del bloque')+'" style="font-size:9px;color:#1D9E75;font-weight:700;background:#1D9E7518;border:1px solid #1D9E7544;border-radius:4px;padding:1px 5px;flex-shrink:0;white-space:nowrap">'+(_pl.tie?'≈ promedia':'★ manda')+'</span>'
+              : '<span title="Es más corto que el ejercicio principal del bloque: no suma volumen" style="font-size:9px;color:#aaa;font-weight:600;flex-shrink:0;white-space:nowrap">no suma</span>')
           : '';
 
-        // Dim the row if parallel and not counting
-        var dimmed=isParallel&&!item.countVolume;
+        // Atenuar la fila si es paralelo y no es el que manda
+        var dimmed=isParallel&&!isLeader;
         // Miniatura visual: la foto o el diagrama del ejercicio (tocable → ficha completa)
         var thumbHtml='';
         if(ex&&ex.img){
@@ -12960,19 +13030,28 @@ function planRenderDays(){
         '</div>';
       }).join('');
 
-      // Block header (only show controls if block exists)
+      // Block header. v130: el bloque 1 también muestra su etiqueta ("Bloque 1")
+      // cuando la sesión tiene más de un ejercicio, y el botón "Marcar paralelo"
+      // aparece en cualquier bloque que tenga 2+ ejercicios.
+      var _nBlocks=(day.blocks||[]).length;
+      var _nExDay=(day.blocks||[]).reduce(function(a,b){return a+((b.exercises||[]).length);},0);
+      var _showLabel=(bi>0)||(_nExDay>1)||(_nBlocks>1);
+      var _canParallel=((block.exercises||[]).length>=2);
+      var _parBtn=_canParallel
+        ? '<button onclick="planToggleBlockParallel('+di+','+bi+')" title="Los ejercicios se hacen al mismo tiempo por distintos grupos" style="border:none;background:#f0f0f0;cursor:pointer;font-size:9px;color:#555;border-radius:4px;padding:1px 7px;white-space:nowrap">⇆ Marcar paralelo</button>'
+        : '';
       var blockLabel=isParallel
-        ? '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">'+
-            '<span style="font-size:9px;font-weight:700;color:#7F77DD;background:#7F77DD18;border:1px solid #7F77DD44;border-radius:4px;padding:1px 7px;white-space:nowrap">⇆ PARALELO</span>'+
-            '<span style="font-size:9px;color:#888;flex:1">Solo se suma el vol. marcado · tiempo = bloque más largo</span>'+
+        ? '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;flex-wrap:wrap">'+
+            '<span style="font-size:9px;font-weight:700;color:#7F77DD;background:#7F77DD18;border:1px solid #7F77DD44;border-radius:4px;padding:1px 7px;white-space:nowrap">⇆ BLOQUE '+(bi+1)+' · PARALELO</span>'+
+            '<span style="font-size:9px;color:#888;flex:1;min-width:0">Duran lo del más largo · sus datos físicos mandan (empate → promedio)</span>'+
             '<button onclick="planToggleBlockParallel('+di+','+bi+')" style="border:none;background:none;cursor:pointer;font-size:10px;color:#aaa;padding:0 2px" title="Volver a secuencial">✕ Separar</button>'+
-            '<button onclick="planRemoveBlock('+di+','+bi+')" style="border:none;background:none;cursor:pointer;font-size:10px;color:#E24B4A44;padding:0 2px" title="Eliminar bloque">🗑</button>'+
+            (_nBlocks>1?'<button onclick="planRemoveBlock('+di+','+bi+')" style="border:none;background:none;cursor:pointer;font-size:10px;color:#E24B4A44;padding:0 2px" title="Eliminar bloque">🗑</button>':'')+
           '</div>'
-        : (bi>0 ?
-            '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">'+
-              '<span style="font-size:9px;color:#aaa">— bloque '+(bi+1)+' —</span>'+
-              '<button onclick="planToggleBlockParallel('+di+','+bi+')" style="border:none;background:#f0f0f0;cursor:pointer;font-size:9px;color:#555;border-radius:4px;padding:1px 7px">⇆ Marcar paralelo</button>'+
-              '<button onclick="planRemoveBlock('+di+','+bi+')" style="border:none;background:none;cursor:pointer;font-size:10px;color:#E24B4A44;padding:0 2px">🗑</button>'+
+        : (_showLabel ?
+            '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;flex-wrap:wrap">'+
+              '<span style="font-size:9px;color:#999;font-weight:700;white-space:nowrap">Bloque '+(bi+1)+'</span>'+
+              _parBtn+
+              (_nBlocks>1?'<button onclick="planRemoveBlock('+di+','+bi+')" style="border:none;background:none;cursor:pointer;font-size:10px;color:#E24B4A44;padding:0 2px" title="Eliminar bloque">🗑</button>':'')+
             '</div>'
           : '');
 
@@ -13105,6 +13184,7 @@ function planSetExMins(di, bi, ei, val){
   _planEditData.days[di].blocks[bi].exercises[ei].mins=v;
   planRenderDays();
   planRenderWeekSummary();
+  planAutoSave();
 }
 window.planSetExMins=planSetExMins;
 
@@ -13116,6 +13196,7 @@ function planRemoveEx(di, bi, ei){
   if(!block.exercises.length) _planEditData.days[di].blocks.splice(bi,1);
   planRenderDays();
   planRenderWeekSummary();
+  planAutoSave();
 }
 window.planRemoveEx=planRemoveEx;
 
@@ -13139,6 +13220,7 @@ function planToggleBlockParallel(di, bi){
   }
   planRenderDays();
   planRenderWeekSummary();
+  planAutoSave();
 }
 window.planToggleBlockParallel=planToggleBlockParallel;
 
@@ -13158,6 +13240,7 @@ function planRemoveBlock(di, bi){
   _planEditData.days[di].blocks.splice(bi,1);
   planRenderDays();
   planRenderWeekSummary();
+  planAutoSave();
 }
 window.planRemoveBlock=planRemoveBlock;
 
@@ -14061,6 +14144,7 @@ function planModalConfirm(){
   planCloseModal();
   planRenderDays();
   planRenderWeekSummary();
+  planAutoSave();
 }
 window.planModalConfirm=planModalConfirm;
 
@@ -14638,6 +14722,7 @@ function peiSave(){
   document.getElementById('pei-modal').style.display='none';
   window._peiDi=null;window._peiBi=null;window._peiEi=null;
   planRenderDays();planRenderWeekSummary();
+  planAutoSave();
 }
 window.peiSave=peiSave;
 
