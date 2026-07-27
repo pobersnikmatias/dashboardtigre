@@ -36380,19 +36380,99 @@ function hoyAsistCycle(nameL){
   hoySaveAsist(); hoyRender();
 }
 window.hoyAsistCycle=hoyAsistCycle;
+// ── v133: "Todos presentes" ahora SÍ marca a todos ────────────────────────
+// Antes usaba `if(!HOY_ASIST[today][nameL])`, así que en cuanto había alguna
+// marca previa (o el botón ya se había tocado una vez) parecía no hacer nada.
+// Ahora pone P a todos los jugadores DISPONIBLES del plantel, sin excepciones:
+// las excepciones se marcan después tocando cada uno.
 function hoyAsistAllPresent(){
   var today=hoyLocalISO();
   if(!HOY_ASIST[today])HOY_ASIST[today]={};
   var profMap=hoyProfileByNorm();
-  hoyRoster().forEach(function(n){
-    var nameL=hoyNorm(n);
+  var n=0;
+  hoyRoster().forEach(function(nm){
+    var nameL=hoyNorm(nm);
     var prof=profMap[nameL];
-    if(prof&&HOY_ESTADOS[prof.estado])return;            // Primera/Reserva/Lesión no se marcan
-    if(!HOY_ASIST[today][nameL])HOY_ASIST[today][nameL]='P'; // no pisa excepciones ya marcadas
+    var est=(prof&&prof.estado)?prof.estado:'disponible';
+    // Los que no están disponibles en el plantel (Primera/Reserva/Lesión/No disp.)
+    // no participan del entrenamiento, así que no se marcan.
+    if(HOY_ESTADOS[est])return;
+    HOY_ASIST[today][nameL]='P';
+    n++;
   });
   hoySaveAsist(); hoyRender();
 }
 window.hoyAsistAllPresent=hoyAsistAllPresent;
+
+// Limpia la asistencia del día (volver a "sin marcar")
+function hoyAsistClear(){
+  var today=hoyLocalISO();
+  if(!HOY_ASIST[today]||!Object.keys(HOY_ASIST[today]).length)return;
+  if(!confirm('¿Borrar la asistencia marcada de hoy?\n\nNo afecta la disponibilidad del plantel.'))return;
+  delete HOY_ASIST[today];
+  hoySaveAsist(); hoyRender();
+}
+window.hoyAsistClear=hoyAsistClear;
+
+// ── DISPONIBILIDAD DEL PLANTEL (v133) ─────────────────────────────────────
+// La disponibilidad es del PLANTEL, no del día: un jugador que pasa a Reserva
+// a la tarde deja de estar disponible aunque hoy haya entrenado y tenga
+// check-in. Por eso se edita acá directamente, y no depende de la asistencia.
+var HOY_DISP_ORDER=['disponible','reserva','primera','lesion','nodisp'];
+var HOY_DISP_META={
+  disponible:{lbl:'Disponible',   ico:'✅', col:'#1D9E75'},
+  reserva:   {lbl:'Reserva',      ico:'🔵', col:'#3B4D88'},
+  primera:   {lbl:'Primera',      ico:'🟡', col:'#EF9F27'},
+  lesion:    {lbl:'Lesión',       ico:'🚑', col:'#E24B4A'},
+  nodisp:    {lbl:'No disponible',ico:'⛔', col:'#6B7280'}
+};
+// Cambia el estado de un jugador desde la pestaña Hoy (escribe en Perfiles).
+function hoySetEstado(nameL, estado){
+  var profMap=hoyProfileByNorm();
+  var prof=profMap[nameL];
+  if(!prof){
+    // El jugador existe en datos pero no tiene perfil: crearlo para poder
+    // guardarle el estado.
+    var disp=hoyRoster().find(function(n){return hoyNorm(n)===nameL;})||nameL;
+    var key=(typeof profKeyOf==='function')?profKeyOf(disp):String(disp).toLowerCase();
+    PLAYER_PROFILES[key]={name:disp, estado:estado};
+  } else {
+    prof.estado=estado;
+  }
+  if(typeof saveData==='function')saveData();
+  if(typeof renderProfilesTable==='function'){ try{ renderProfilesTable(); }catch(e){} }
+  hoyRender();
+}
+window.hoySetEstado=hoySetEstado;
+
+// Menú para elegir estado de un jugador
+function hoyDispMenu(nameL, name){
+  var profMap=hoyProfileByNorm();
+  var prof=profMap[nameL];
+  var cur=(prof&&prof.estado)?prof.estado:'disponible';
+  var old=document.getElementById('hoy-disp-menu'); if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='hoy-disp-menu';
+  m.style.cssText='position:fixed;inset:0;z-index:13000;background:rgba(10,16,28,.55);display:flex;align-items:center;justify-content:center;padding:18px';
+  m.innerHTML='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:330px;width:100%;box-shadow:0 18px 60px rgba(0,0,0,.35)" onclick="event.stopPropagation()">'+
+    '<div style="font-size:14px;font-weight:800;color:#0D1B2A;margin-bottom:3px">'+String(name).replace(/</g,'&lt;')+'</div>'+
+    '<div style="font-size:11px;color:#888;margin-bottom:13px">Disponibilidad en el plantel</div>'+
+    HOY_DISP_ORDER.map(function(k){
+      var meta=HOY_DISP_META[k], on=(k===cur);
+      return '<button onclick="hoyDispPick(\''+nameL.replace(/'/g,"\\'")+'\',\''+k+'\')" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;margin-bottom:6px;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700;'+
+        (on?('background:'+meta.col+';color:#fff;border:1px solid '+meta.col):('background:#f7f8fb;color:#333;border:1px solid #e4e6ec'))+'">'+
+        '<span style="font-size:16px">'+meta.ico+'</span>'+meta.lbl+(on?'<span style="margin-left:auto;font-size:11px">✓ actual</span>':'')+'</button>';
+    }).join('')+
+    '<button onclick="hoyDispClose()" style="width:100%;margin-top:6px;padding:9px;border-radius:9px;border:1px solid #ddd;background:#fff;color:#666;font-size:12px;font-weight:700;cursor:pointer">Cancelar</button>'+
+  '</div>';
+  m.onclick=hoyDispClose;
+  document.body.appendChild(m);
+}
+window.hoyDispMenu=hoyDispMenu;
+function hoyDispClose(){ var m=document.getElementById('hoy-disp-menu'); if(m)m.remove(); }
+window.hoyDispClose=hoyDispClose;
+function hoyDispPick(nameL, estado){ hoyDispClose(); hoySetEstado(nameL, estado); }
+window.hoyDispPick=hoyDispPick;
 // % de disponibilidad de un día: P sobre el total marcado
 function hoyAsistPct(dateISO){
   var day=HOY_ASIST[dateISO]||{};
@@ -36423,6 +36503,37 @@ function hoyRender(){
   var nO=statuses.filter(function(s){return s.level==='out';}).length;
   var activos=statuses.filter(function(s){return s.level!=='out';});
   var withWellness=activos.filter(function(s){return !!s.wellness;}).length;
+
+  // ── v133: DISPONIBILIDAD DEL PLANTEL (independiente del día) ──
+  // Se calcula solo desde el estado del perfil: no mira wellness, check-in ni
+  // asistencia. Un jugador está disponible aunque hoy no haya venido.
+  var dispByState={};
+  HOY_DISP_ORDER.forEach(function(k){ dispByState[k]=[]; });
+  roster.forEach(function(nm){
+    var nameL=hoyNorm(nm);
+    var prof=profMap[nameL];
+    var est=(prof&&prof.estado)?prof.estado:'disponible';
+    if(!dispByState[est])dispByState[est]=[];
+    dispByState[est].push({name:nm, nameL:nameL});
+  });
+  var nDispOK=(dispByState['disponible']||[]).length;
+  var nDispOut=roster.length-nDispOK;
+  // Chips resumen por estado
+  var dispChips=HOY_DISP_ORDER.filter(function(k){return (dispByState[k]||[]).length;}).map(function(k){
+    var meta=HOY_DISP_META[k], n=dispByState[k].length;
+    return '<span style="font-size:10px;font-weight:700;color:'+meta.col+';background:'+meta.col+'14;border:1px solid '+meta.col+'44;border-radius:12px;padding:2px 9px;white-space:nowrap">'+meta.ico+' '+n+' '+meta.lbl+'</span>';
+  }).join('');
+  // Lista de jugadores: tocar abre el menú de disponibilidad
+  var dispHtml=HOY_DISP_ORDER.map(function(k){
+    return (dispByState[k]||[]).slice().sort(function(a,b){return a.name.localeCompare(b.name,'es');}).map(function(p){
+      var meta=HOY_DISP_META[k];
+      var isOk=(k==='disponible');
+      return '<div class="hoy-pl" style="cursor:pointer;'+(isOk?'':'background:'+meta.col+'0e;border-color:'+meta.col+'44')+'" '+
+        'onclick="hoyDispMenu(\''+p.nameL.replace(/'/g,"\\'")+'\',\''+String(p.name).replace(/'/g,"\\'")+'\')" title="Cambiar disponibilidad">'+
+        '<b>'+meta.ico+' '+hoyShortName(p.name)+'</b>'+
+        '<small style="color:'+meta.col+';font-weight:700">'+meta.lbl+'</small></div>';
+    }).join('');
+  }).join('');
 
   var plan=hoyTodaysPlan();
   var next=hoyNextMatch();
@@ -36460,26 +36571,22 @@ function hoyRender(){
   if(!alertsHtml) alertsHtml='<div style="font-size:12px;color:#1D9E75;padding:6px 0">✓ Sin alertas: plantel completo en verde.</div>';
 
   // ── Asistencia de hoy: 1 toque cicla P → D → K → A ──
+  // v133: la asistencia es SOLO del día y no cambia la disponibilidad del
+  // plantel. Los porcentajes se calculan sobre los jugadores disponibles.
   var asistDay=HOY_ASIST[today]||{};
   var asistables=statuses.filter(function(s){ return !(s.level==='out'&&s.out!=='ausente'); }); // Primera/Reserva/Lesión afuera
-  var pct=hoyAsistPct(today);
-  var pct7=(function(){
-    var acc=0,nd=0;
-    for(var i=1;i<=7;i++){
-      var d=new Date(today+'T12:00:00'); d.setDate(d.getDate()-i);
-      var r=hoyAsistPct(hoyLocalISO(d));
-      if(r){acc+=r.pct;nd++;}
-    }
-    return nd?Math.round(acc/nd):null;
-  })();
+  var nAsistables=asistables.length;
+  var nPres=asistables.filter(function(s){ return asistDay[s.nameL]==='P'; }).length;
+  var nMarcados=asistables.filter(function(s){ return !!asistDay[s.nameL]; }).length;
+  var pctPres=nAsistables?Math.round(nPres*100/nAsistables):null;
   var asistHeadHtml='<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+
-    (pct?'<span class="hoy-count '+(pct.pct>=85?'g':(pct.pct>=70?'y':'r'))+'">'+pct.pct+'% disponible ('+pct.p+'/'+pct.tot+')</span>':'')+
-    (pct7!=null?'<span class="hoy-count n">7d: '+pct7+'%</span>':'')+
+    (nMarcados?'<span class="hoy-count '+(pctPres>=85?'g':(pctPres>=70?'y':'r'))+'">'+nPres+'/'+nAsistables+' presentes</span>':
+               '<span class="hoy-count n">sin marcar</span>')+
     '</span>';
-  var marcados=Object.keys(asistDay).length;
   var asistHtml='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:9px">'+
     '<button class="hoy-btn" style="background:#1D9E75;padding:8px 14px" onclick="hoyAsistAllPresent()">✓ Todos presentes</button>'+
-    '<span style="font-size:10px;color:#999">Después tocá solo las excepciones: cada toque cambia Presente → Diferenciado → Kinesio → Ausente'+(marcados?'':' · <b>sin marcar todavía</b>')+'</span>'+
+    (nMarcados?'<button class="hoy-btn" style="background:#fff;color:#888;border:1px solid #ddd;padding:8px 12px" onclick="hoyAsistClear()">↺ Limpiar</button>':'')+
+    '<span style="font-size:10px;color:#999;flex:1;min-width:170px">Marcá las excepciones: cada toque cambia Presente → Diferenciado → Kinesio → Ausente</span>'+
   '</div>'+
   '<div class="hoy-sem">'+
     asistables.map(function(s){
@@ -36489,7 +36596,8 @@ function hoyRender(){
         '<b>'+(meta?meta.ico+' ':'')+hoyShortName(s.name)+'</b>'+
         '<small style="'+(meta?('color:'+meta.col+';font-weight:700'):'')+'">'+(meta?meta.lbl:'sin marcar')+'</small></div>';
     }).join('')+
-  '</div>';
+  '</div>'+
+  (nAsistables?'':'<div style="font-size:11px;color:#888;padding:8px 0">Ningún jugador disponible hoy. Revisá la disponibilidad del plantel.</div>');
 
   // ── Sesión de hoy ──
   function hoyVolsHtml(sum){
@@ -36623,13 +36731,21 @@ function hoyRender(){
       '<div style="display:flex;flex-direction:column;gap:14px">'+
         '<div class="hoy-card">'+
           '<h3>🚦 Disponibilidad del plantel'+
-            '<span style="margin-left:auto;display:flex;gap:5px">'+
-              '<span class="hoy-count g">'+nG+' OK</span><span class="hoy-count y">'+nY+'</span>'+
-              '<span class="hoy-count r">'+nR+'</span><span class="hoy-count n">'+nN+' s/checkin</span>'+
-              (nO?'<span class="hoy-count o">'+nO+' no disp.</span>':'')+
+            '<span style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap">'+
+              '<span class="hoy-count g">'+nDispOK+' disponibles</span>'+
+              (nDispOut?'<span class="hoy-count o">'+nDispOut+' fuera</span>':'')+
             '</span></h3>'+
-          (statuses.length?('<div class="hoy-sem">'+semHtml+'</div>'):'<div style="font-size:12px;color:#888">Sin jugadores registrados todavía. Se toman de perfiles, GPS y wellness.</div>')+
-          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Semáforo = wellness de hoy (dolor, ítems bajos)'+(HOY_CFG.useACWR?' + ACWR (sRPE 7d/28d)':'')+' + estado del CT. Primera/Reserva/Lesión salen del estado en Perfiles. Tocá un jugador para el detalle. ⚙ para configurar.</div>'+
+          '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px">'+dispChips+'</div>'+
+          (statuses.length?('<div class="hoy-sem">'+dispHtml+'</div>'):'<div style="font-size:12px;color:#888">Sin jugadores registrados todavía. Se toman de perfiles, GPS y wellness.</div>')+
+          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Tocá un jugador para cambiar su disponibilidad (queda guardada en Perfiles). Es del plantel, no del día: no depende del check-in ni de la asistencia, así podés planificar para otro día.</div>'+
+        '</div>'+
+        '<div class="hoy-card"><h3>🟢 Estado de hoy'+
+          '<span style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap">'+
+            '<span class="hoy-count g">'+nG+'</span><span class="hoy-count y">'+nY+'</span>'+
+            '<span class="hoy-count r">'+nR+'</span><span class="hoy-count n">'+nN+' s/checkin</span>'+
+          '</span></h3>'+
+          (statuses.length?('<div class="hoy-sem">'+semHtml+'</div>'):'')+
+          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Semáforo = wellness de hoy (dolor, ítems bajos)'+(HOY_CFG.useACWR?' + ACWR (sRPE 7d/28d)':'')+' + asistencia. Tocá un jugador para el detalle. ⚙ para configurar.</div>'+
         '</div>'+
         '<div class="hoy-card"><h3>📋 Asistencia de hoy'+asistHeadHtml+'</h3>'+asistHtml+'</div>'+
         '<div class="hoy-card"><h3>⚠️ Alertas de hoy</h3>'+alertsHtml+'</div>'+
