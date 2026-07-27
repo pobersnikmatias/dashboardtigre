@@ -7255,9 +7255,10 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
         </select>
       </label>
     </div>
+    <div id="prof-edit-ind" style="display:none;margin-top:9px;padding:6px 11px;background:#eef2fa;border:1px solid #3B4D8833;border-radius:6px;font-size:11px;color:#0D1B2A"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap">
       <button class="btn bg" onclick="saveProfile()">Guardar perfil</button>
-      <button class="btn bc" onclick="['prof-name','prof-vmax','prof-accmax','prof-dccmax'].forEach(id=>document.getElementById(id).value='');document.getElementById('prof-estado').value='disponible';document.getElementById('prof-pos').value='';['vmax','accmax','dccmax'].forEach(function(k){profSetLockUI(k,false);})">Limpiar</button>
+      <button class="btn bc" onclick="profNewBlank()">Limpiar</button>
       <button class="btn" onclick="profRecalcMaxOpen()" style="background:#fff5e6;color:#7a4a00;border:1px solid #EF9F27" title="Recalcular Vmax, AccMáx y DccMáx desde MATCHES y MICROCICLO. Útil si quedaron valores erróneos.">🔄 Recalcular máximos desde datos</button>
       <span id="prof-msg" style="font-size:11px;color:#1D9E75"></span>
     </div>
@@ -7447,25 +7448,116 @@ function profIsMetricLocked(playerKey, metric){
 }
 window.profIsMetricLocked = profIsMetricLocked;
 
+// ── RENOMBRAR PERFILES (v132) ─────────────────────────────────────────────
+// BUG que esto arregla: editProfile() sólo llenaba el formulario, sin recordar
+// QUÉ perfil se estaba editando, y saveProfile() derivaba la key del nombre
+// tipeado (name.toLowerCase()). Entonces al agregarle una tilde a un nombre
+// ("jeronimo moyano" → "Jerónimo Moyano") la key cambiaba y se creaba un
+// perfil NUEVO, dejando el viejo duplicado. Ahora se rastrea la key original
+// y, si cambia, se RENOMBRA el perfil existente propagando el nombre nuevo a
+// todos los datos asociados.
+var _profEditKey = null;   // key del perfil que se está editando (null = alta nueva)
+
+// Todos los lugares donde se guarda el nombre de un jugador. Renombrar tiene
+// que tocarlos todos, o los datos quedan huérfanos.
+function profRenameEverywhere(oldKey, oldName, newName){
+  var moved = {records:0, buckets:0};
+  var sameName = function(v){
+    if(!v) return false;
+    if(typeof cargaNormName==='function') return cargaNormName(v)===cargaNormName(oldName);
+    return String(v).trim().toLowerCase()===String(oldName).trim().toLowerCase();
+  };
+  // 1) Datasets con .name por registro
+  [ (typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:null),
+    (typeof PSE_DATA!=='undefined'?PSE_DATA:null),
+    (typeof TST_DATA!=='undefined'?TST_DATA:null)
+  ].forEach(function(arr){
+    if(!Array.isArray(arr))return;
+    arr.forEach(function(r){ if(r&&sameName(r.name)){ r.name=newName; moved.records++; } });
+  });
+  // 2) Tests de resistencia: players[] embebidos
+  if(typeof RESI_TESTS!=='undefined' && Array.isArray(RESI_TESTS)){
+    RESI_TESTS.forEach(function(t){
+      (t&&t.players||[]).forEach(function(p){ if(p&&sameName(p.name)){ p.name=newName; moved.records++; } });
+    });
+  }
+  // 3) Objetos indexados por key de jugador
+  var newKey = profKeyOf(newName);
+  [ (typeof NUTRITION_DATA!=='undefined'?NUTRITION_DATA:null),
+    (typeof GYM_EVALS!=='undefined'?GYM_EVALS:null)
+  ].forEach(function(obj){
+    if(!obj||typeof obj!=='object')return;
+    if(obj[oldKey]===undefined || oldKey===newKey)return;
+    if(obj[newKey]===undefined){ obj[newKey]=obj[oldKey]; }
+    else if(Array.isArray(obj[newKey])&&Array.isArray(obj[oldKey])){ obj[newKey]=obj[newKey].concat(obj[oldKey]); }
+    delete obj[oldKey];
+    moved.buckets++;
+  });
+  // 4) Alias: que futuros CSV/planillas con el nombre VIEJO caigan en el nuevo
+  if(typeof CARGA_NAME_ALIASES!=='undefined' && typeof cargaNormName==='function'){
+    CARGA_NAME_ALIASES[cargaNormName(oldName)]=newName;
+    // Y si el nombre viejo era alias de algo, reapuntarlo
+    Object.keys(CARGA_NAME_ALIASES).forEach(function(k){
+      if(sameName(CARGA_NAME_ALIASES[k])) CARGA_NAME_ALIASES[k]=newName;
+    });
+  }
+  return moved;
+}
+
+// Key canónica de un perfil. Se mantiene el criterio histórico (lowercase del
+// nombre) para no romper los datos ya guardados.
+function profKeyOf(name){ return String(name||'').trim().toLowerCase(); }
+window.profKeyOf=profKeyOf;
+
 function saveProfile(){
   var name = document.getElementById('prof-name').value.trim();
   var msg = document.getElementById('prof-msg');
   if(!name){msg.style.color='#E24B4A';msg.textContent='Nombre obligatorio.';return;}
   var estado = document.getElementById('prof-estado').value||'disponible';
   var pos = document.getElementById('prof-pos')?.value||'';
-  var key = name.trim().toLowerCase();
-  var ex = PLAYER_PROFILES[key]||{};
+  var key = profKeyOf(name);
+
+  // ── Resolución de identidad ──
+  var editKey = _profEditKey;                       // perfil que se está editando
+  var editing = editKey!=null && PLAYER_PROFILES[editKey];
+  var renaming = editing && editKey!==key;          // le cambió el nombre/key
+  var collides = renaming && PLAYER_PROFILES[key];  // ya existe otro con ese nombre
+  var oldName = editing ? (PLAYER_PROFILES[editKey].name||editKey) : null;
+
+  if(collides){
+    // El nombre nuevo ya pertenece a OTRO perfil → fusionar en vez de duplicar
+    var okMerge = confirm(
+      'Ya existe un perfil llamado "'+(PLAYER_PROFILES[key].name||key)+'".\n\n'+
+      '¿Querés FUSIONAR "'+oldName+'" dentro de él?\n\n'+
+      'Se combinan los datos de ambos (wellness, PSE, tests, nutrición, gimnasio) '+
+      'y queda un solo perfil. No se puede deshacer.');
+    if(!okMerge){
+      msg.style.color='#E24B4A';
+      msg.textContent='Cancelado. Elegí otro nombre o editá el perfil existente.';
+      return;
+    }
+  }
+
+  var ex = PLAYER_PROFILES[editing?editKey:key]||{};
   // Read lock states from UI (window._profLocks)
   var locks = Object.assign({}, ex.locks||{}, {
     vmax: profGetLock('vmax'),
     accmax: profGetLock('accmax'),
     dccmax: profGetLock('dccmax')
   });
+  // Si fusionamos, el perfil destino manda para lo que este form no controla
+  // (lesiones, etc.), pero conservamos las lesiones de ambos.
+  var base = collides ? Object.assign({}, PLAYER_PROFILES[key]) : ex;
+  if(collides){
+    var injA = (PLAYER_PROFILES[key].injuries)||[];
+    var injB = (ex.injuries)||[];
+    if(injA.length||injB.length) base.injuries = injA.concat(injB);
+  }
   // CRITICAL: spread existing profile FIRST so we preserve injuries[],
   // and any other fields added by other modules. Then override only the fields
   // this form controls. NEVER replace the whole object — that's how the
   // injuries-disappearing bug happened.
-  PLAYER_PROFILES[key] = Object.assign({}, ex, {
+  PLAYER_PROFILES[key] = Object.assign({}, base, {
     name: name.trim(),
     pos: pos,
     vmax: parseFloat(document.getElementById('prof-vmax').value)||null,
@@ -7474,16 +7566,123 @@ function saveProfile(){
     estado: estado,
     locks: locks
   });
+
+  var renameInfo=null;
+  if(renaming){
+    // Propagar el nombre nuevo a todos los datos y borrar la entrada vieja.
+    renameInfo = profRenameEverywhere(editKey, oldName, name.trim());
+    delete PLAYER_PROFILES[editKey];
+  }
+
+  _profEditKey = key;  // seguimos editando el mismo jugador, ya con su key nueva
   saveData(); renderProfilesTable();
   var lockedCount = (locks.vmax?1:0)+(locks.accmax?1:0)+(locks.dccmax?1:0);
   msg.style.color='#1D9E75';
-  msg.textContent='"'+name+'" guardado.'+(lockedCount>0?' 🔒 '+lockedCount+' valor'+(lockedCount===1?'':'es')+' bloqueado'+(lockedCount===1?'':'s')+' contra updates del GPS.':'');
-  setTimeout(()=>msg.textContent='',5000);
+  if(collides){
+    msg.textContent='Perfiles fusionados en "'+name+'".'+
+      (renameInfo&&renameInfo.records?' Se reasignaron '+renameInfo.records+' registros.':'');
+  } else if(renaming){
+    msg.textContent='"'+oldName+'" pasó a llamarse "'+name+'".'+
+      (renameInfo&&renameInfo.records?' Se actualizaron '+renameInfo.records+' registros.':'')+
+      ' No se creó un perfil nuevo.';
+  } else {
+    msg.textContent='"'+name+'" guardado.'+(lockedCount>0?' 🔒 '+lockedCount+' valor'+(lockedCount===1?'':'es')+' bloqueado'+(lockedCount===1?'':'s')+' contra updates del GPS.':'');
+  }
+  setTimeout(()=>msg.textContent='',6000);
 }
 window.saveProfile=saveProfile;
 
+// Limpiar el formulario y salir del modo edición (para dar de alta a otro).
+function profNewBlank(){
+  _profEditKey=null;
+  ['prof-name','prof-vmax','prof-accmax','prof-dccmax'].forEach(function(id){
+    var el=document.getElementById(id); if(el)el.value='';
+  });
+  var e=document.getElementById('prof-estado'); if(e)e.value='disponible';
+  var p=document.getElementById('prof-pos'); if(p)p.value='';
+  profSetLockUI('vmax',false); profSetLockUI('accmax',false); profSetLockUI('dccmax',false);
+  var ind=document.getElementById('prof-edit-ind'); if(ind)ind.style.display='none';
+  var msg=document.getElementById('prof-msg'); if(msg)msg.textContent='';
+}
+window.profNewBlank=profNewBlank;
+
+// ── DUPLICADOS EXISTENTES (v132) ──────────────────────────────────────────
+// El bug de renombrado ya pudo haber creado pares como "jeronimo moyano" +
+// "Jerónimo Moyano". Esto los detecta comparando nombres normalizados (sin
+// tildes ni mayúsculas) y permite fusionarlos con un click.
+function profFindDuplicates(){
+  var norm=function(s){
+    if(typeof cargaNormName==='function')return cargaNormName(s);
+    return String(s||'').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  };
+  var groups={};
+  Object.keys(PLAYER_PROFILES||{}).forEach(function(k){
+    var p=PLAYER_PROFILES[k]; if(!p)return;
+    var n=norm(p.name||k);
+    if(!n)return;
+    (groups[n]=groups[n]||[]).push(k);
+  });
+  return Object.keys(groups).filter(function(n){return groups[n].length>1;}).map(function(n){return {norm:n, keys:groups[n]};});
+}
+window.profFindDuplicates=profFindDuplicates;
+
+function profDupBanner(){
+  var dups=profFindDuplicates();
+  if(!dups.length)return '';
+  return '<div style="background:#fff8ec;border:1px solid #EF9F2755;border-radius:8px;padding:10px 13px;margin-bottom:11px">'+
+    '<div style="font-size:11px;font-weight:800;color:#B26A00;margin-bottom:6px">⚠️ '+dups.length+' jugador'+(dups.length===1?'':'es')+' con perfiles duplicados</div>'+
+    dups.map(function(d){
+      var names=d.keys.map(function(k){return '"'+((PLAYER_PROFILES[k]&&PLAYER_PROFILES[k].name)||k)+'"';}).join(' + ');
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#444;padding:3px 0;flex-wrap:wrap">'+
+        '<span>'+names+'</span>'+
+        '<button onclick="profMergeDup(\''+d.norm.replace(/'/g,"\\'")+'\')" style="background:#fff;border:1px solid #EF9F27;color:#B26A00;border-radius:5px;padding:2px 10px;font-size:10px;font-weight:700;cursor:pointer">🔗 Fusionar</button>'+
+      '</div>';
+    }).join('')+
+  '</div>';
+}
+
+// Fusiona todos los perfiles de un grupo duplicado en uno solo.
+// Se queda con el nombre "mejor escrito" (el que tiene tildes/mayúsculas).
+function profMergeDup(normName){
+  var dups=profFindDuplicates();
+  var grp=dups.find(function(d){return d.norm===normName;});
+  if(!grp)return;
+  // Elegir destino: el nombre con más mayúsculas/tildes (mejor escrito)
+  var score=function(k){
+    var n=(PLAYER_PROFILES[k]&&PLAYER_PROFILES[k].name)||k;
+    var caps=(n.match(/[A-ZÁÉÍÓÚÑ]/g)||[]).length;
+    var acc=(n.match(/[áéíóúñÁÉÍÓÚÑ]/g)||[]).length;
+    return caps+acc*2;
+  };
+  var keys=grp.keys.slice().sort(function(a,b){return score(b)-score(a);});
+  var destKey=keys[0];
+  var destName=(PLAYER_PROFILES[destKey]&&PLAYER_PROFILES[destKey].name)||destKey;
+  var others=keys.slice(1);
+  var listado=others.map(function(k){return '"'+((PLAYER_PROFILES[k]&&PLAYER_PROFILES[k].name)||k)+'"';}).join(', ');
+  if(!confirm('Fusionar '+listado+' dentro de "'+destName+'".\n\n'+
+    'Todos los datos (wellness, PSE, tests, nutrición, gimnasio, lesiones) quedan bajo "'+destName+'".\n'+
+    'No se puede deshacer.'))return;
+  var total=0;
+  others.forEach(function(k){
+    var oldName=(PLAYER_PROFILES[k]&&PLAYER_PROFILES[k].name)||k;
+    var inj=(PLAYER_PROFILES[k]&&PLAYER_PROFILES[k].injuries)||[];
+    if(inj.length){
+      var d=PLAYER_PROFILES[destKey];
+      d.injuries=(d.injuries||[]).concat(inj);
+    }
+    var r=profRenameEverywhere(k, oldName, destName);
+    total+=r.records;
+    delete PLAYER_PROFILES[k];
+  });
+  if(_profEditKey&&others.indexOf(_profEditKey)>=0)_profEditKey=destKey;
+  saveData(); renderProfilesTable();
+  alert('Listo: quedó un solo perfil "'+destName+'".'+(total?'\n'+total+' registros reasignados.':''));
+}
+window.profMergeDup=profMergeDup;
+
 function editProfile(key){
   var p=PLAYER_PROFILES[key]; if(!p)return;
+  _profEditKey=key;   // v132: recordar QUÉ perfil se edita, para poder renombrarlo
   document.getElementById('prof-name').value=p.name||'';
   document.getElementById('prof-vmax').value=p.vmax||'';
   document.getElementById('prof-accmax').value=p.accmax||'';
@@ -7495,13 +7694,21 @@ function editProfile(key){
   profSetLockUI('vmax', !!locks.vmax);
   profSetLockUI('accmax', !!locks.accmax);
   profSetLockUI('dccmax', !!locks.dccmax);
+  var ind=document.getElementById('prof-edit-ind');
+  if(ind){
+    ind.style.display='';
+    ind.innerHTML='✏️ Editando <b>'+(p.name||key)+'</b> — al cambiar el nombre se renombra este perfil '+
+      '<button onclick="profNewBlank()" style="border:none;background:#fff;color:#3B4D88;border:1px solid #3B4D8855;border-radius:5px;padding:2px 9px;font-size:10px;font-weight:700;cursor:pointer;margin-left:6px">✕ Cancelar edición</button>';
+  }
   document.getElementById('prof-name').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 window.editProfile=editProfile;
 
 function deleteProfile(key){
   if(!confirm('¿Eliminar perfil de "'+(PLAYER_PROFILES[key]?.name||key)+'"?'))return;
-  delete PLAYER_PROFILES[key]; saveData(); renderProfilesTable();
+  delete PLAYER_PROFILES[key];
+  if(_profEditKey===key) profNewBlank();
+  saveData(); renderProfilesTable();
 }
 window.deleteProfile=deleteProfile;
 
@@ -7689,10 +7896,12 @@ function renderProfilesTable(){
   var badge=(v,ref,col)=>{if(!v)return'<span style="color:#ccc">—</span>';var pct=ref?'<span style="font-size:9px;color:'+col+';margin-left:3px">('+Math.round(v/ref*100)+'%)</span>':'';return'<span style="font-weight:700;color:'+col+'">'+v.toFixed(1)+'</span>'+pct;};
 
   var isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+  // v132: aviso de perfiles duplicados (mismo nombre con/sin tildes) + fusión
+  var dupBanner = (typeof profDupBanner==='function') ? profDupBanner() : '';
 
   if(isMobile){
     // ═══ VISTA MÓVIL: cards ═══
-    wrap.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px">'+
+    wrap.innerHTML = dupBanner + '<div style="display:flex;flex-direction:column;gap:8px">'+
       keys.sort().map(k=>{
         var p=PLAYER_PROFILES[k];
         var lesion=p.estado==='lesion';
@@ -7745,7 +7954,7 @@ function renderProfilesTable(){
   }
 
   // ═══ VISTA DESKTOP: tabla ═══
-  wrap.innerHTML='<div style="overflow-x:auto;border:1px solid #ddd;border-radius:7px"><table style="width:100%;border-collapse:collapse;font-size:11px">'+
+  wrap.innerHTML=dupBanner+'<div style="overflow-x:auto;border:1px solid #ddd;border-radius:7px"><table style="width:100%;border-collapse:collapse;font-size:11px">'+
     '<thead><tr style="background:#f5f5f5">'+
     '<th style="text-align:left;padding:5px 8px;border-bottom:1px solid #ddd">Jugador</th>'+
     '<th style="padding:5px 8px;border-bottom:1px solid #ddd;text-align:center">Pos</th>'+
