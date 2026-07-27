@@ -7448,6 +7448,56 @@ function profIsMetricLocked(playerKey, metric){
 }
 window.profIsMetricLocked = profIsMetricLocked;
 
+// ── TOMBSTONES DE PERFILES (v134) ─────────────────────────────────────────
+// BUG que esto arregla: el sync de perfiles sólo hacía UPSERT, nunca DELETE.
+// Al fusionar duplicados se borraba la key vieja SOLO en local; en Supabase
+// seguía existiendo y volvía en la próxima carga (sbLoadInitialData la
+// reinyecta). Por eso "la fusión no se guardaba".
+// PROF_DELETED = {id: fechaISO}, se une entre dispositivos igual que los
+// tombstones de drills y de tests.
+var PROF_DELETED={};
+try{
+  var _pd=JSON.parse(localStorage.getItem('profDeleted_v1')||'null');
+  if(_pd&&typeof _pd==='object'&&!Array.isArray(_pd))PROF_DELETED=_pd;
+}catch(e){}
+function profTombSave(){ try{ localStorage.setItem('profDeleted_v1',JSON.stringify(PROF_DELETED)); }catch(e){} }
+function profIsDeleted(id){ return id!=null && PROF_DELETED[String(id)]!==undefined; }
+window.profIsDeleted=profIsDeleted;
+function profTombAdd(ids){
+  var iso=new Date().toISOString();
+  (Array.isArray(ids)?ids:[ids]).forEach(function(id){ if(id!=null)PROF_DELETED[String(id)]=iso; });
+  profTombSave();
+}
+window.profTombAdd=profTombAdd;
+// Si se vuelve a crear un perfil con esa key, dejar de considerarlo borrado.
+function profTombClear(id){
+  if(id==null)return;
+  if(PROF_DELETED[String(id)]!==undefined){ delete PROF_DELETED[String(id)]; profTombSave(); }
+}
+window.profTombClear=profTombClear;
+// Saca de PLAYER_PROFILES lo que esté tombstoneado (por si la nube lo reinyectó)
+function profPurgeDeleted(){
+  var n=0;
+  Object.keys(PLAYER_PROFILES||{}).forEach(function(k){
+    if(profIsDeleted(k)){ delete PLAYER_PROFILES[k]; n++; }
+  });
+  return n;
+}
+window.profPurgeDeleted=profPurgeDeleted;
+// Borra el perfil también en la nube (si hay sesión)
+function profDeleteRemote(id){
+  try{
+    if(typeof sbProfilesDelete==='function' && typeof sbCurrentUser!=='undefined' && sbCurrentUser){
+      sbProfilesDelete(id).then(function(){
+        console.log('[Supabase] Perfil borrado en la nube: '+id);
+      }).catch(function(e){
+        console.warn('[Supabase] No se pudo borrar el perfil '+id+':', e.message||e);
+      });
+    }
+  }catch(e){}
+}
+window.profDeleteRemote=profDeleteRemote;
+
 // ── RENOMBRAR PERFILES (v132) ─────────────────────────────────────────────
 // BUG que esto arregla: editProfile() sólo llenaba el formulario, sin recordar
 // QUÉ perfil se estaba editando, y saveProfile() derivaba la key del nombre
@@ -7481,6 +7531,17 @@ function profRenameEverywhere(oldKey, oldName, newName){
       (t&&t.players||[]).forEach(function(p){ if(p&&sameName(p.name)){ p.name=newName; moved.records++; } });
     });
   }
+  // 2b) v134: MATCHES y MICROCICLO guardan players[] con .name. Faltaban acá,
+  // y por eso el nombre viejo seguía apareciendo en la pestaña Hoy (hoyRoster
+  // arma el plantel también desde estas dos fuentes).
+  [ (typeof MATCHES!=='undefined'?MATCHES:null),
+    (typeof MICROCICLO!=='undefined'?MICROCICLO:null)
+  ].forEach(function(arr){
+    if(!Array.isArray(arr))return;
+    arr.forEach(function(s){
+      (s&&s.players||[]).forEach(function(p){ if(p&&sameName(p.name)){ p.name=newName; moved.records++; } });
+    });
+  });
   // 3) Objetos indexados por key de jugador
   var newKey = profKeyOf(newName);
   [ (typeof NUTRITION_DATA!=='undefined'?NUTRITION_DATA:null),
@@ -7572,7 +7633,11 @@ function saveProfile(){
     // Propagar el nombre nuevo a todos los datos y borrar la entrada vieja.
     renameInfo = profRenameEverywhere(editKey, oldName, name.trim());
     delete PLAYER_PROFILES[editKey];
+    // v134: registrar el borrado y bajarlo también de la nube, si no vuelve
+    profTombAdd(editKey);
+    profDeleteRemote(editKey);
   }
+  profTombClear(key); // la key destino existe: no debe estar tombstoneada
 
   _profEditKey = key;  // seguimos editando el mismo jugador, ya con su key nueva
   saveData(); renderProfilesTable();
@@ -7673,7 +7738,10 @@ function profMergeDup(normName){
     var r=profRenameEverywhere(k, oldName, destName);
     total+=r.records;
     delete PLAYER_PROFILES[k];
+    profTombAdd(k);        // v134: sin esto la nube reinyectaba el duplicado
+    profDeleteRemote(k);
   });
+  profTombClear(destKey);
   if(_profEditKey&&others.indexOf(_profEditKey)>=0)_profEditKey=destKey;
   saveData(); renderProfilesTable();
   alert('Listo: quedó un solo perfil "'+destName+'".'+(total?'\n'+total+' registros reasignados.':''));
@@ -7707,6 +7775,8 @@ window.editProfile=editProfile;
 function deleteProfile(key){
   if(!confirm('¿Eliminar perfil de "'+(PLAYER_PROFILES[key]?.name||key)+'"?'))return;
   delete PLAYER_PROFILES[key];
+  profTombAdd(key);        // v134: que no vuelva desde la nube
+  profDeleteRemote(key);
   if(_profEditKey===key) profNewBlank();
   saveData(); renderProfilesTable();
 }
@@ -29780,13 +29850,19 @@ function sbLoadInitialData(){
       return;
     }
     // Mergear: los de Supabase pisan a los locales con el mismo id
+    // v134: salvo los que el usuario borró/fusionó (tombstone), que si no
+    // volverían a aparecer como duplicados en cada recarga.
+    var skipped=0;
     rows.forEach(function(row){
+      if(typeof profIsDeleted==='function' && profIsDeleted(row.id)){ skipped++; return; }
       var prof = Object.assign({}, row.data || {});
       prof.name = row.name;
       PLAYER_PROFILES[row.id] = prof;
     });
-    console.log('[Supabase] Cargados ' + rows.length + ' perfiles de jugadores.');
-    sbLoadingSet(35, 'Perfiles cargados', 'Perfiles: '+rows.length);
+    if(typeof profPurgeDeleted==='function') profPurgeDeleted();
+    if(skipped) console.log('[Supabase] '+skipped+' perfil(es) borrados localmente, ignorados de la nube.');
+    console.log('[Supabase] Cargados ' + (rows.length-skipped) + ' perfiles de jugadores.');
+    sbLoadingSet(35, 'Perfiles cargados', 'Perfiles: '+(rows.length-skipped));
   });
 }
 
@@ -29861,6 +29937,22 @@ function sbScheduleProfileSync(){
         console.log('[Supabase] Sync OK ('+ids.length+' perfiles)');
       }
     });
+    // v134: además del upsert, BORRAR de la nube los perfiles tombstoneados.
+    // Sin esto, fusionar o eliminar un perfil no se persistía: la fila seguía
+    // en Supabase y volvía en la próxima carga.
+    try{
+      if(typeof PROF_DELETED!=='undefined'){
+        var delIds=Object.keys(PROF_DELETED);
+        if(delIds.length){
+          sbClient.from('player_profiles').delete()
+            .eq('categoria', SB_CATEGORIA).in('id', delIds)
+            .then(function(dres){
+              if(dres.error) console.warn('[Supabase] Error borrando perfiles obsoletos:', dres.error.message||dres.error);
+              else console.log('[Supabase] Perfiles borrados sincronizados ('+delIds.length+')');
+            });
+        }
+      }
+    }catch(e){ console.warn('sync delete perfiles:',e); }
   }, 1500);
 }
 window.sbScheduleProfileSync = sbScheduleProfileSync;
@@ -32698,6 +32790,8 @@ document.addEventListener('DOMContentLoaded',function(){
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_CATALOG')<0)SB_SETTINGS_KEYS.push('TST_CATALOG');
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_DATA')<0)SB_SETTINGS_KEYS.push('TST_DATA');
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_DELETED')<0)SB_SETTINGS_KEYS.push('TST_DELETED');
+    // v134: tombstones de perfiles, para que fusionar/borrar se respete en todos los dispositivos
+    if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('PROF_DELETED')<0)SB_SETTINGS_KEYS.push('PROF_DELETED');
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('PLAN_GROUP_DEFAULTS')<0)SB_SETTINGS_KEYS.push('PLAN_GROUP_DEFAULTS');
     if(typeof window._sbApplySettingRow==='function'&&!window._sbApplySettingRowTstWrapped){
       var _origTst=window._sbApplySettingRow;
@@ -32711,9 +32805,20 @@ document.addEventListener('DOMContentLoaded',function(){
         // registrados en este dispositivo.
         var localTomb=null;
         if(row&&row.key==='TST_DELETED'&&typeof TST_DELETED!=='undefined'){ localTomb=Object.assign({},TST_DELETED); }
+        var localProfTomb=null;
+        if(row&&row.key==='PROF_DELETED'&&typeof PROF_DELETED!=='undefined'){ localProfTomb=Object.assign({},PROF_DELETED); }
         _origTst(row);
         // v129: TST_DELETED se UNE (nube ∪ local), nunca se pisa. Así el
         // borrado hecho en un dispositivo no lo deshace otro con datos viejos.
+        if(row&&row.key==='PROF_DELETED'){
+          try{
+            if(localProfTomb){ Object.keys(localProfTomb).forEach(function(k){ if(PROF_DELETED[k]===undefined)PROF_DELETED[k]=localProfTomb[k]; }); }
+            if(typeof profTombSave==='function')profTombSave();
+            var np=(typeof profPurgeDeleted==='function')?profPurgeDeleted():0;
+            if(np){ if(typeof saveData==='function')saveData(); if(typeof renderProfilesTable==='function'){try{renderProfilesTable();}catch(e){}} }
+          }catch(e){}
+          return;
+        }
         if(row&&row.key==='TST_DELETED'){
           try{
             // Unión: lo que ya está (viene de la nube tras _origTst) + lo local
@@ -36146,13 +36251,35 @@ function hoyShortName(n){
 
 // ── Plantel: mismos nombres que usa el kiosco ──
 function hoyRoster(){
-  if(typeof cargaSelfPlayerNames==='function') return cargaSelfPlayerNames();
-  var set={};
-  Object.values(typeof PLAYER_PROFILES!=='undefined'?PLAYER_PROFILES:{}).forEach(function(p){ if(p&&p.name) set[p.name]=true; });
-  (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){ (s.players||[]).forEach(function(p){ if(p.name) set[p.name]=true; }); });
-  (typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:[]).forEach(function(r){ if(r.name) set[r.name]=true; });
-  (typeof PSE_DATA!=='undefined'?PSE_DATA:[]).forEach(function(r){ if(r.name) set[r.name]=true; });
-  return Object.keys(set).sort(function(a,b){ return a.localeCompare(b,'es'); });
+  // v134: el plantel se arma desde varias fuentes (perfiles, GPS, wellness,
+  // PSE, microciclo). Si en alguna quedó una grafía vieja del nombre
+  // ("jeronimo moyano" vs "Jerónimo Moyano"), el jugador aparecía DOS VECES.
+  // Ahora se deduplica por nombre normalizado (sin tildes ni mayúsculas) y se
+  // muestra siempre la grafía del perfil, que es la fuente de verdad.
+  var raw=[];
+  if(typeof cargaSelfPlayerNames==='function'){ raw=cargaSelfPlayerNames(); }
+  else {
+    var set={};
+    Object.values(typeof PLAYER_PROFILES!=='undefined'?PLAYER_PROFILES:{}).forEach(function(p){ if(p&&p.name) set[p.name]=true; });
+    (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){ (s.players||[]).forEach(function(p){ if(p.name) set[p.name]=true; }); });
+    (typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:[]).forEach(function(r){ if(r.name) set[r.name]=true; });
+    (typeof PSE_DATA!=='undefined'?PSE_DATA:[]).forEach(function(r){ if(r.name) set[r.name]=true; });
+    raw=Object.keys(set);
+  }
+  // Nombre canónico por clave normalizada: gana el del perfil
+  var canon={};
+  Object.values(typeof PLAYER_PROFILES!=='undefined'?PLAYER_PROFILES:{}).forEach(function(p){
+    if(p&&p.name) canon[hoyNorm(p.name)]=p.name;
+  });
+  var out={};
+  raw.forEach(function(n){
+    if(!n)return;
+    var k=hoyNorm(n);
+    if(!k)return;
+    if(!out[k]) out[k]=canon[k]||n;
+  });
+  return Object.keys(out).map(function(k){return out[k];})
+    .sort(function(a,b){ return a.localeCompare(b,'es'); });
 }
 
 // ── Wellness de hoy de un jugador (o null) ──
