@@ -36912,9 +36912,17 @@ function hoyPlayerStatus(name, todayISO, profMap){
   var prof=(profMap||hoyProfileByNorm())[nameL];
   var est=prof&&prof.estado?prof.estado:'disponible';
   if(HOY_ESTADOS[est]){
+    // v139: si es un lesionado y ya se marcó cómo trabaja hoy (diferenciado,
+    // kinesio, ausente), mostrarlo junto al estado en vez de solo "Lesión".
+    var lbl=HOY_ESTADOS[est].lbl+' (estado en Perfiles)';
+    if(est==='lesion'){
+      var aTag=hoyAsistGet(todayISO, nameL);
+      if(aTag && HOY_ASIST_META[aTag]) lbl=HOY_ESTADOS[est].lbl+' · '+HOY_ASIST_META[aTag].lbl;
+    }
     return {name:name, nameL:nameL, level:'out', out:est,
-            reasons:[{t:'out', txt:HOY_ESTADOS[est].lbl+' (estado en Perfiles)'}],
-            wellness:null, acwr:null, flag:flag||null};
+            reasons:[{t:'out', txt:lbl}],
+            wellness:hoyWellnessToday(nameL, todayISO), acwr:null, flag:flag||null,
+            asist:hoyAsistGet(todayISO, nameL)||null};
   }
 
   // Asistencia del día: A = fuera del día; K = rojo; D = amarillo
@@ -37069,7 +37077,16 @@ function hoyAsistCycle(nameL){
   var today=hoyLocalISO();
   if(!HOY_ASIST[today])HOY_ASIST[today]={};
   var cur=HOY_ASIST[today][nameL];
-  var next=cur?HOY_ASIST_STATES[(HOY_ASIST_STATES.indexOf(cur)+1)%HOY_ASIST_STATES.length]:'P';
+  // v139: si el jugador está lesionado, el primer toque lo pone en
+  // "Diferenciado" (no en "Presente"): viene a entrenar pero trabaja aparte.
+  var prof=hoyProfileByNorm()[nameL];
+  var esLesion=prof&&prof.estado==='lesion';
+  var next;
+  if(!cur){
+    next=esLesion?'D':'P';
+  } else {
+    next=HOY_ASIST_STATES[(HOY_ASIST_STATES.indexOf(cur)+1)%HOY_ASIST_STATES.length];
+  }
   HOY_ASIST[today][nameL]=next;
   hoySaveAsist(); hoyRender();
 }
@@ -37243,7 +37260,10 @@ function hoyRender(){
     var cls=s.level==='red'?'r':(s.level==='amber'?'y':(s.level==='green'?'g':(s.level==='out'?('o '+(HOY_ESTADOS[s.out]?HOY_ESTADOS[s.out].cls:'')):'')));
     var dot=s.level==='red'?'🔴':(s.level==='amber'?'🟡':(s.level==='green'?'🟢':(s.level==='out'?(s.out==='lesion'?'🚑':(s.out==='primera'?'🟡':(s.out==='nodisp'?'⛔':'🔵'))):'⚪')));
     if(s.level==='out')dot='';
-    var sub=s.level==='none'?'sin check-in':(s.level==='out'?(HOY_ESTADOS[s.out]?HOY_ESTADOS[s.out].lbl:s.out):(s.reasons.length?(s.reasons[0].txt):'OK'));
+    // v139: en lesionados, mostrar además cómo trabajan hoy (dif./kinesio)
+    var outLbl=HOY_ESTADOS[s.out]?HOY_ESTADOS[s.out].lbl:s.out;
+    if(s.out==='lesion'&&s.asist&&HOY_ASIST_META[s.asist]) outLbl+=' · '+HOY_ASIST_META[s.asist].lbl;
+    var sub=s.level==='none'?'sin check-in':(s.level==='out'?outLbl:(s.reasons.length?(s.reasons[0].txt):'OK'));
     return '<div class="hoy-pl '+cls+'" onclick="hoyOpenPlayer('+i+')" data-hoy-idx="'+i+'" title="'+s.name.replace(/"/g,'&quot;')+'">'+
       '<b>'+dot+' '+hoyShortName(s.name)+'</b><small>'+sub+'</small></div>';
   }).join('');
@@ -37268,14 +37288,28 @@ function hoyRender(){
   // v133: la asistencia es SOLO del día y no cambia la disponibilidad del
   // plantel. Los porcentajes se calculan sobre los jugadores disponibles.
   var asistDay=HOY_ASIST[today]||{};
-  var asistables=statuses.filter(function(s){ return !(s.level==='out'&&s.out!=='ausente'); }); // Primera/Reserva/Lesión afuera
-  var nAsistables=asistables.length;
-  var nPres=asistables.filter(function(s){ return asistDay[s.nameL]==='P'; }).length;
+  // v139: los LESIONADOS también aparecen en asistencia. Se presentan al
+  // entrenamiento aunque trabajen aparte (diferenciado, kinesio), y si no se
+  // podían seleccionar parecía que no venían. Primera/Reserva/No disponible
+  // siguen afuera: esos no se presentan con el plantel.
+  var asistables=statuses.filter(function(s){
+    if(s.level!=='out') return true;
+    return s.out==='ausente' || s.out==='lesion';
+  });
+  var lesionados={};
+  asistables.forEach(function(s){ if(s.level==='out'&&s.out==='lesion') lesionados[s.nameL]=true; });
+  // Los conteos de "presentes" se calculan sobre los jugadores sanos: un
+  // lesionado en kinesio no es un presente disponible para entrenar.
+  var sanos=asistables.filter(function(s){ return !lesionados[s.nameL]; });
+  var nAsistables=sanos.length;
+  var nPres=sanos.filter(function(s){ return asistDay[s.nameL]==='P'; }).length;
   var nMarcados=asistables.filter(function(s){ return !!asistDay[s.nameL]; }).length;
+  var nLes=Object.keys(lesionados).length;
   var pctPres=nAsistables?Math.round(nPres*100/nAsistables):null;
-  var asistHeadHtml='<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+
+  var asistHeadHtml='<span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+
     (nMarcados?'<span class="hoy-count '+(pctPres>=85?'g':(pctPres>=70?'y':'r'))+'">'+nPres+'/'+nAsistables+' presentes</span>':
                '<span class="hoy-count n">sin marcar</span>')+
+    (nLes?'<span class="hoy-count r">'+nLes+' lesionado'+(nLes===1?'':'s')+'</span>':'')+
     '</span>';
   var asistHtml='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:9px">'+
     '<button class="hoy-btn" style="background:#1D9E75;padding:8px 14px" onclick="hoyAsistAllPresent()">✓ Todos presentes</button>'+
@@ -37286,12 +37320,21 @@ function hoyRender(){
     asistables.map(function(s){
       var st=asistDay[s.nameL]||null;
       var meta=st?HOY_ASIST_META[st]:null;
-      return '<div class="hoy-pl" style="'+(meta?('background:'+meta.bg+';border-color:'+meta.bd):'')+'" onclick="hoyAsistCycle(\''+s.nameL.replace(/'/g,"\\'")+'\')">'+
-        '<b>'+(meta?meta.ico+' ':'')+hoyShortName(s.name)+'</b>'+
-        '<small style="'+(meta?('color:'+meta.col+';font-weight:700'):'')+'">'+(meta?meta.lbl:'sin marcar')+'</small></div>';
+      var esLes=!!lesionados[s.nameL];
+      // El lesionado se marca con 🚑 en el borde para no confundirlo con un
+      // jugador sano, pero se puede tocar igual para ponerle D / K / A.
+      var baseStyle=meta?('background:'+meta.bg+';border-color:'+meta.bd)
+                        :(esLes?'background:#fff6f6;border-color:#E24B4A55':'');
+      return '<div class="hoy-pl" style="'+baseStyle+(esLes?';border-left:3px solid #E24B4A':'')+'" '+
+        'onclick="hoyAsistCycle(\''+s.nameL.replace(/'/g,"\\'")+'\')" '+
+        'title="'+(esLes?'Lesionado — tocá para marcar cómo trabaja hoy':'Tocá para cambiar')+'">'+
+        '<b>'+(meta?meta.ico+' ':(esLes?'🚑 ':''))+hoyShortName(s.name)+'</b>'+
+        '<small style="'+(meta?('color:'+meta.col+';font-weight:700'):(esLes?'color:#E24B4A;font-weight:700':''))+'">'+
+          (meta?meta.lbl:(esLes?'lesión — sin marcar':'sin marcar'))+'</small></div>';
     }).join('')+
   '</div>'+
-  (nAsistables?'':'<div style="font-size:11px;color:#888;padding:8px 0">Ningún jugador disponible hoy. Revisá la disponibilidad del plantel.</div>');
+  (nLes?'<div style="font-size:10px;color:#888;margin-top:7px">🚑 Los lesionados aparecen para que marques cómo trabajan hoy (diferenciado, kinesio o ausente). No cuentan en el total de presentes ni cambian su estado en el plantel.</div>':'')+
+  (asistables.length?'':'<div style="font-size:11px;color:#888;padding:8px 0">Ningún jugador disponible hoy. Revisá la disponibilidad del plantel.</div>');
 
   // ── Sesión de hoy ──
   function hoyVolsHtml(sum){
