@@ -890,6 +890,10 @@ document.addEventListener('click',function(e){
   <div style="font-size:11px;color:#666;margin:6px 0 8px">
     <strong>Mts/min</strong> ya es un valor por minuto. <strong>El resto (18-21, 21-25, +25, Acc, Dec, RHIE) son volúmenes totales</strong> — se dividen automáticamente por los minutos.
   </div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+    <button type="button" class="btn bb" onclick="gpsImpOpen('form')" style="font-size:10px;padding:4px 12px" title="Cargar las métricas desde un export del GPS">📡 Importar datos de GPS</button>
+    <span style="font-size:10px;color:#999">Subí el CSV/Excel del GPS y elegí a qué ejercicio corresponde.</span>
+  </div>
   <div class="fg">
     <div class="fn" style="min-width:180px;display:flex;flex-direction:column;gap:2px">
       <span style="font-size:10px;color:#555;font-weight:600">Minutos</span>
@@ -14935,6 +14939,15 @@ function exEditInfo(id){
   if(lEl)lEl.value=row.L||'';
   if(aEl)aEl.value=row.A||'';
   exiEiiHint();
+  // v138: mostrar si el ejercicio ya tiene métricas de GPS cargadas
+  var gnow=document.getElementById('exi-gps-now');
+  if(gnow){
+    var rw=row.raw||{};
+    var hasGps=(rw.mts>0)||(rw.hsr>0)||(rw.h25>0)||(row.vmax>0);
+    gnow.innerHTML = hasGps
+      ? '<span style="color:#1D9E75;font-weight:700">✓ Con datos</span> <span style="color:#888">'+(row.min||0)+"' · "+(rw.mts||0).toFixed(1)+' m/min'+(row.vmax?' · Vmax '+row.vmax.toFixed(1):'')+'</span>'
+      : '<span style="color:#E8A13C;font-weight:700">Sin datos de GPS todavía</span>';
+  }
   if(jEl&&!jEl._eiiWired){[jEl,lEl,aEl].forEach(function(el){if(el)el.addEventListener('input',exiEiiHint);});jEl._eiiWired=true;}
   exiVideoHint();
   var prev=document.getElementById('exi-prev');
@@ -14998,6 +15011,288 @@ function exiEiiHint(){
   h.textContent=(j>0&&l>0&&a>0)?('EII: '+Math.round(l*a/j)+' m²/jugador'):'Los tres valores son necesarios para el EII y el cuadrante.';
 }
 window.exiEiiHint=exiEiiHint;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IMPORTAR GPS A UN EJERCICIO (v138)
+// Permite tomar un export de GPS (CSV/Excel), ver la lista de ejercicios que
+// contiene, elegir UNO y volcar sus métricas:
+//   · al formulario "Diseñá tu ejercicio" (antes de crearlo), o
+//   · a un ejercicio YA creado, desde "Editar ejercicio".
+// Caso de uso: el técnico crea el ejercicio sin datos y el PF los completa
+// después con la planilla del GPS.
+// Reutiliza el parser y la auto-detección de columnas del importador masivo.
+// ═══════════════════════════════════════════════════════════════════════════
+var _gpsImpRows=[];      // filas parseadas del archivo
+var _gpsImpTarget=null;  // 'form' | id numérico del ejercicio
+var _gpsImpSel=null;     // índice de la fila elegida
+
+// Parseo independiente del importador masivo (no toca csvParsed/csvMapping,
+// así no interfiere con una importación en curso).
+function gpsImpParse(text){
+  var lines=String(text||'').trim().split(/\r?\n/).filter(function(l){return l.trim();});
+  if(lines.length<2) return {err:'El archivo necesita encabezados y al menos una fila.'};
+  var headers=parseRow(lines[0]).map(function(h){return String(h||'').replace(/^\uFEFF/,'');});
+  var map=csvAutoDetect(headers);           // misma auto-detección que el importador
+  var byField={};
+  Object.keys(map).forEach(function(i){ byField[map[i]]=parseInt(i); });
+  if(byField.n==null)   return {err:'No se encontró la columna con el nombre del ejercicio.'};
+  if(byField.min==null) return {err:'No se encontró la columna de minutos.'};
+
+  var get=function(row,k){ var i=byField[k]; return i==null?'':(row[i]||''); };
+  var pn=function(s){ var v=parseFloat(String(s||'').replace(',','.')); return isNaN(v)?0:v; };
+  var toMin=function(s){
+    s=String(s||'').trim();
+    if(/^\d{1,2}:\d{2}:\d{2}$/.test(s)){var p=s.split(':').map(Number);return p[0]*60+p[1]+p[2]/60;}
+    if(/^\d{1,2}:\d{2}$/.test(s)){var q=s.split(':').map(Number);return q[0]+q[1]/60;}
+    return pn(s);
+  };
+  var out=[];
+  for(var i=1;i<lines.length;i++){
+    var cols=parseRow(lines[i]);
+    var n=String(get(cols,'n')||'').trim();
+    if(!n||n==='NaN'||n.charAt(0)==='#')continue;
+    if(/^(total|promedio|average|prom)/i.test(n))continue;
+    var min=Math.round(toMin(get(cols,'min')))||1;
+    out.push({
+      n:n, min:min, date:String(get(cols,'date')||'').trim(),
+      mts:pn(get(cols,'mts')),
+      // volúmenes TOTALES (el formulario los pide así)
+      hsr:pn(get(cols,'hsr')), h2:pn(get(cols,'h2')), h25:pn(get(cols,'h25')),
+      acc:pn(get(cols,'acc')), dcc:pn(get(cols,'dcc')), rhie:pn(get(cols,'rhie')),
+      vmax:pn(get(cols,'vmax')), spr:pn(get(cols,'spr')), pl:pn(get(cols,'pl'))
+    });
+  }
+  if(!out.length) return {err:'No se encontraron filas de ejercicios válidas.'};
+  return {rows:out, headers:headers, map:map};
+}
+
+// Abre el selector. target: 'form' (formulario de creación) o un id de ejercicio.
+function gpsImpOpen(target){
+  _gpsImpTarget=(target==null?'form':target);
+  _gpsImpRows=[]; _gpsImpSel=null;
+  var m=document.getElementById('gpsimp-modal');
+  if(m) m.remove();
+  var name='';
+  if(_gpsImpTarget!=='form'){
+    var row=D.find(function(r){return r.id===_gpsImpTarget;});
+    name=row?row.n:'';
+  } else {
+    var nEl=document.getElementById('f-n');
+    name=(nEl&&nEl.value.trim())||'';
+  }
+  var d=document.createElement('div');
+  d.id='gpsimp-modal';
+  d.style.cssText='position:fixed;inset:0;background:rgba(10,16,28,.55);z-index:14000;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML=
+    '<div style="background:#fff;border-radius:12px;width:min(96vw,620px);max-height:92vh;overflow-y:auto;box-shadow:0 18px 60px rgba(0,0,0,.35)" onclick="event.stopPropagation()">'+
+      '<div style="background:#0D1B2A;padding:13px 16px;border-radius:12px 12px 0 0;display:flex;align-items:flex-start;justify-content:space-between;gap:10px">'+
+        '<div>'+
+          '<div style="color:#fff;font-size:14px;font-weight:800">📡 Importar datos de GPS</div>'+
+          '<div style="color:#9fb3c8;font-size:11px;margin-top:2px">'+
+            (_gpsImpTarget==='form'
+              ? 'Se completan los campos del ejercicio que estás creando.'
+              : 'Se aplican al ejercicio <b style="color:#fff">'+gpsImpEsc(name)+'</b>.')+
+          '</div>'+
+        '</div>'+
+        '<button onclick="gpsImpClose()" style="border:none;background:none;color:#9fb3c8;font-size:20px;cursor:pointer;line-height:1;padding:0">✕</button>'+
+      '</div>'+
+      '<div style="padding:14px 16px">'+
+        '<div id="gpsimp-drop" ondragover="event.preventDefault();this.style.borderColor=\'#3B4D88\'" ondragleave="this.style.borderColor=\'#ccc\'" ondrop="gpsImpDrop(event)" '+
+          'style="border:2px dashed #ccc;border-radius:9px;padding:18px 14px;text-align:center;background:#fafbfd">'+
+          '<div style="font-size:24px;margin-bottom:5px">📂</div>'+
+          '<div style="font-size:12px;color:#555;font-weight:600;margin-bottom:7px">Arrastrá el archivo del GPS acá</div>'+
+          '<label class="btn bb" style="font-size:11px;padding:5px 14px;cursor:pointer;margin:0;display:inline-block">'+
+            'Elegir archivo'+
+            '<input type="file" accept=".csv,.txt,.tsv,.xlsx,.xls" onchange="gpsImpFile(event)" style="display:none">'+
+          '</label>'+
+          '<div style="font-size:10px;color:#aaa;margin-top:6px">CSV o Excel exportado del GPS (Catapult y similares)</div>'+
+        '</div>'+
+        '<details style="margin-top:9px"><summary style="font-size:11px;color:#3B4D88;font-weight:700;cursor:pointer;outline:none">o pegar los datos</summary>'+
+          '<textarea id="gpsimp-raw" rows="4" placeholder="Name,Date,Minutos Prom,Mts por Min,..." style="width:100%;margin-top:6px;padding:7px;border:1px solid #ccc;border-radius:6px;font-size:10px;font-family:monospace;box-sizing:border-box"></textarea>'+
+          '<button class="btn bb" onclick="gpsImpFromText()" style="font-size:11px;padding:4px 12px;margin-top:5px">Leer datos</button>'+
+        '</details>'+
+        '<div id="gpsimp-msg" style="font-size:11px;margin-top:8px"></div>'+
+        '<div id="gpsimp-list"></div>'+
+      '</div>'+
+    '</div>';
+  d.onclick=gpsImpClose;
+  document.body.appendChild(d);
+}
+window.gpsImpOpen=gpsImpOpen;
+
+function gpsImpEsc(s){ return String(s||'').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function gpsImpClose(){ var m=document.getElementById('gpsimp-modal'); if(m)m.remove(); }
+window.gpsImpClose=gpsImpClose;
+
+function gpsImpMsg(txt,color){
+  var el=document.getElementById('gpsimp-msg');
+  if(el){ el.textContent=txt||''; el.style.color=color||'#666'; }
+}
+
+function gpsImpDrop(ev){
+  ev.preventDefault();
+  var el=document.getElementById('gpsimp-drop'); if(el)el.style.borderColor='#ccc';
+  var f=ev.dataTransfer&&ev.dataTransfer.files&&ev.dataTransfer.files[0];
+  if(f) gpsImpReadFile(f);
+}
+window.gpsImpDrop=gpsImpDrop;
+
+function gpsImpFile(ev){
+  var f=ev.target.files&&ev.target.files[0];
+  ev.target.value='';
+  if(f) gpsImpReadFile(f);
+}
+window.gpsImpFile=gpsImpFile;
+
+// Lee CSV/TXT como texto y XLSX/XLS con SheetJS (ya está cargado en la app)
+function gpsImpReadFile(file){
+  var nameL=(file.name||'').toLowerCase();
+  gpsImpMsg('Leyendo '+file.name+'…','#666');
+  if(/\.(xlsx|xls)$/.test(nameL)){
+    if(typeof XLSX==='undefined'){
+      gpsImpMsg('No se pudo leer el Excel. Guardalo como CSV y volvé a intentar.','#E24B4A');
+      return;
+    }
+    var fr=new FileReader();
+    fr.onload=function(e){
+      try{
+        var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        gpsImpHandleText(XLSX.utils.sheet_to_csv(ws));
+      }catch(err){ gpsImpMsg('No se pudo leer el Excel: '+(err.message||err),'#E24B4A'); }
+    };
+    fr.readAsArrayBuffer(file);
+  } else {
+    var r=new FileReader();
+    r.onload=function(e){ gpsImpHandleText(String(e.target.result||'').replace(/^\uFEFF/,'')); };
+    r.readAsText(file);
+  }
+}
+
+function gpsImpFromText(){
+  var ta=document.getElementById('gpsimp-raw');
+  gpsImpHandleText(ta?ta.value:'');
+}
+window.gpsImpFromText=gpsImpFromText;
+
+function gpsImpHandleText(text){
+  var res=gpsImpParse(text);
+  if(res.err){ gpsImpMsg(res.err,'#E24B4A'); return; }
+  _gpsImpRows=res.rows; _gpsImpSel=null;
+  gpsImpMsg('Se encontraron '+res.rows.length+' ejercicio(s). Elegí cuál corresponde:','#1D9E75');
+  gpsImpRenderList();
+}
+
+// Similitud de nombres, para sugerir la fila que probablemente corresponde
+function gpsImpScore(a,b){
+  var na=(typeof cargaNormName==='function')?cargaNormName(a):String(a||'').toLowerCase().trim();
+  var nb=(typeof cargaNormName==='function')?cargaNormName(b):String(b||'').toLowerCase().trim();
+  if(!na||!nb) return 0;
+  if(na===nb) return 1;
+  if(na.indexOf(nb)>=0||nb.indexOf(na)>=0) return 0.8;
+  var wa=na.split(/\s+/), wb=nb.split(/\s+/);
+  var common=wa.filter(function(w){ return w.length>2 && wb.indexOf(w)>=0; }).length;
+  return common?Math.min(0.75, common/Math.max(wa.length,wb.length)):0;
+}
+
+function gpsImpRenderList(){
+  var wrap=document.getElementById('gpsimp-list');
+  if(!wrap)return;
+  // Nombre de referencia para sugerir coincidencia
+  var refName='';
+  if(_gpsImpTarget==='form'){
+    var nEl=document.getElementById('f-n'); refName=(nEl&&nEl.value.trim())||'';
+  } else {
+    var row=D.find(function(r){return r.id===_gpsImpTarget;});
+    refName=row?row.n:'';
+  }
+  var best=-1, bestScore=0.45;
+  _gpsImpRows.forEach(function(r,i){
+    var s=gpsImpScore(r.n, refName);
+    if(s>bestScore){ bestScore=s; best=i; }
+  });
+  if(_gpsImpSel==null && best>=0) _gpsImpSel=best;
+
+  var html='<div style="margin-top:10px;border:1px solid #e4e6ec;border-radius:9px;overflow:hidden">';
+  _gpsImpRows.forEach(function(r,i){
+    var on=(i===_gpsImpSel);
+    var sug=(i===best);
+    html+='<div onclick="gpsImpPick('+i+')" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid #f0f2f6;display:flex;align-items:center;gap:9px;'+
+      (on?'background:#eef7f2':'background:#fff')+'">'+
+      '<span style="font-size:14px;color:'+(on?'#1D9E75':'#ddd')+'">'+(on?'●':'○')+'</span>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:12px;font-weight:700;color:#0D1B2A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+gpsImpEsc(r.n)+
+          (sug?' <span style="font-size:9px;color:#1D9E75;font-weight:700">· sugerido</span>':'')+'</div>'+
+        '<div style="font-size:10px;color:#888;margin-top:1px">'+
+          r.min+"' · "+r.mts.toFixed(1)+' m/min'+
+          (r.hsr?' · 18-21: '+Math.round(r.hsr)+'m':'')+
+          (r.h25?' · +25: '+Math.round(r.h25)+'m':'')+
+          (r.vmax?' · Vmax '+r.vmax.toFixed(1):'')+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  });
+  html+='</div>';
+  html+='<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">'+
+    '<button class="btn bc" onclick="gpsImpClose()" style="font-size:11px;padding:6px 14px">Cancelar</button>'+
+    '<button class="btn bg" onclick="gpsImpApply()" style="font-size:11px;padding:6px 16px">✓ Aplicar métricas</button>'+
+  '</div>';
+  wrap.innerHTML=html;
+}
+
+function gpsImpPick(i){ _gpsImpSel=i; gpsImpRenderList(); }
+window.gpsImpPick=gpsImpPick;
+
+function gpsImpApply(){
+  if(_gpsImpSel==null || !_gpsImpRows[_gpsImpSel]){
+    gpsImpMsg('Elegí primero cuál de los ejercicios corresponde.','#E24B4A');
+    return;
+  }
+  var r=_gpsImpRows[_gpsImpSel];
+  if(_gpsImpTarget==='form'){
+    // Volcar al formulario de creación. Los campos de volumen son TOTALES,
+    // que es exactamente como vienen en el export del GPS.
+    var setN=function(id,v){ var el=document.getElementById(id); if(el)el.value=(v>0)?(Math.round(v*100)/100):''; };
+    // Minutos: poner el widget en modo "directo" y cargar el total del GPS
+    var rs=document.getElementsByName('f-tn-mode');
+    for(var k=0;k<rs.length;k++){ if(rs[k].value==='direct'){ rs[k].checked=true; break; } }
+    var tnMins=document.getElementById('f-tn-mins'); if(tnMins)tnMins.value=r.min;
+    if(typeof tnSwitch==='function'){ try{ tnSwitch('f-tn'); }catch(e){} }
+    var minEl=document.getElementById('f-min'); if(minEl)minEl.value=r.min;
+    setN('f-mts',r.mts); setN('f-hsr',r.hsr); setN('f-h2',r.h2); setN('f-h25',r.h25);
+    setN('f-acc',r.acc); setN('f-dcc',r.dcc); setN('f-rhie',r.rhie);
+    setN('f-vmax',r.vmax); setN('f-spr',r.spr); setN('f-pl',r.pl);
+    if(typeof fUpdateQuadPreview==='function'){ try{ fUpdateQuadPreview(); }catch(e){} }
+    gpsImpClose();
+    var st=document.getElementById('f-msg');
+    if(st){ st.style.color='#1D9E75'; st.textContent='✓ Métricas de "'+r.n+'" cargadas. Revisá y apretá Agregar.'; setTimeout(function(){st.textContent='';},6000); }
+    return;
+  }
+  // Aplicar a un ejercicio ya creado
+  var row=D.find(function(x){return x.id===_gpsImpTarget;});
+  if(!row){ gpsImpMsg('No se encontró el ejercicio.','#E24B4A'); return; }
+  var min=r.min>0?r.min:(row.min||1);
+  row.min=min;
+  // raw guarda valores POR MINUTO (mts ya viene /min del GPS)
+  row.raw=(typeof mkRaw==='function')
+    ? mkRaw(r.mts,
+        min>0?r.hsr/min:0, min>0?r.h2/min:0, min>0?r.h25/min:0,
+        min>0?r.acc/min:0, min>0?r.dcc/min:0, min>0?r.rhie/min:0,
+        min>0?r.pl/min:0)
+    : {mts:r.mts, hsr:min>0?r.hsr/min:0, h2:min>0?r.h2/min:0, h25:min>0?r.h25/min:0,
+       acc:min>0?r.acc/min:0, dcc:min>0?r.dcc/min:0, rhie:min>0?r.rhie/min:0, pl:min>0?r.pl/min:0};
+  if(r.vmax>0)row.vmax=r.vmax;
+  if(r.spr>0)row.spr=r.spr;
+  if(r.date)row.date=r.date;
+  saveData();
+  if(typeof sbUpsertOneDrill==='function'){ try{ sbUpsertOneDrill(row); }catch(e){} }
+  gpsImpClose();
+  if(typeof drawTable==='function'&&typeof gf==='function'){ try{ drawTable(gf()); }catch(e){} }
+  var msg=document.getElementById('exi-msg');
+  if(msg){ msg.style.color='#1D9E75'; msg.textContent='✓ Métricas de GPS aplicadas ('+r.min+"' · "+r.mts.toFixed(1)+' m/min)'; }
+  if(typeof exiEiiHint==='function'){ try{ exiEiiHint(); }catch(e){} }
+}
+window.gpsImpApply=gpsImpApply;
 
 function exiSave(){
   if(_exInfoId===null)return;
@@ -15634,6 +15929,15 @@ document.addEventListener('DOMContentLoaded',function(){
         </label>
       </div>
       <div id="exi-eii-hint" style="font-size:9.5px;color:#888;margin-top:3px"></div>
+    </div>
+
+    <!-- v138: importar métricas de GPS a un ejercicio ya creado -->
+    <div style="background:#f4f8ff;border:1px solid #d5e3f7;border-radius:8px;padding:9px 11px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn bb" onclick="gpsImpOpen(_exInfoId)" style="font-size:10px;padding:4px 12px">📡 Importar datos de GPS</button>
+        <span id="exi-gps-now" style="font-size:10px;color:#666"></span>
+      </div>
+      <div style="font-size:9.5px;color:#8a93a5;margin-top:4px">Subí el CSV/Excel del GPS y elegí la fila que corresponde a este ejercicio.</div>
     </div>
 
     <!-- Descripción -->
