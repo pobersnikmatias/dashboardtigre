@@ -3857,6 +3857,76 @@ window.csvDrop=csvDrop;
 // defensive checks (typeof X !== 'undefined') for those.
 let MATCHES=[]; // [{id,rival,fecha,result,local,comp,min,mts,hsr,h2,h25,acc,dcc,rhie,vmax,spr}]
 let MICROCICLO=[];
+
+// ── TOMBSTONES DE SEMANAS (v136) ──────────────────────────────────────────
+// Por qué la cola de borrado no alcanzaba: la cola se VACÍA en cuanto Supabase
+// confirma el delete, y solo se consultaba en UN punto de carga. Pero
+// MICROCICLO también se restaura desde el payload completo (loadData y el
+// payload de la nube), que NO consultaban la cola. Entonces la semana volvía
+// desde ahí, y como la cola ya estaba vacía nada la frenaba: reaparecía en
+// cada arranque.
+// MC_WEEK_DELETED = {nombreSemana: fechaISO}. Es permanente (no se vacía al
+// confirmarse el delete), se comparte entre dispositivos vía app_settings y se
+// aplica en TODOS los caminos de entrada de datos.
+var MC_WEEK_DEL_KEY='mc_week_deleted_v1';
+var MC_WEEK_DELETED={};
+try{
+  var _mw=JSON.parse(localStorage.getItem(MC_WEEK_DEL_KEY)||'null');
+  if(_mw&&typeof _mw==='object'&&!Array.isArray(_mw))MC_WEEK_DELETED=_mw;
+}catch(e){}
+function mcWeekTombSave(){ try{ localStorage.setItem(MC_WEEK_DEL_KEY, JSON.stringify(MC_WEEK_DELETED)); }catch(e){} }
+function mcWeekIsDeleted(week){ return week!=null && MC_WEEK_DELETED[String(week)]!==undefined; }
+window.mcWeekIsDeleted=mcWeekIsDeleted;
+function mcWeekTombAdd(week){
+  if(week==null)return;
+  MC_WEEK_DELETED[String(week)]=new Date().toISOString();
+  mcWeekTombSave();
+}
+window.mcWeekTombAdd=mcWeekTombAdd;
+// Si se vuelve a crear una semana con ese nombre, dejar de bloquearla.
+function mcWeekTombClear(week){
+  if(week==null)return;
+  if(MC_WEEK_DELETED[String(week)]!==undefined){ delete MC_WEEK_DELETED[String(week)]; mcWeekTombSave(); }
+}
+window.mcWeekTombClear=mcWeekTombClear;
+// Saca de MICROCICLO todo lo que pertenezca a semanas borradas. Se llama en
+// cada punto donde entran datos (arranque, payload local, payload de la nube).
+function mcPurgeDeletedWeeks(){
+  if(typeof MICROCICLO==='undefined'||!Array.isArray(MICROCICLO))return 0;
+  var n=0;
+  for(var i=MICROCICLO.length-1;i>=0;i--){
+    var s=MICROCICLO[i];
+    if(s&&mcWeekIsDeleted(s.week)){ MICROCICLO.splice(i,1); n++; }
+  }
+  if(n)console.log('[Microciclo] '+n+' sesión(es) de semanas borradas descartadas.');
+  return n;
+}
+window.mcPurgeDeletedWeeks=mcPurgeDeletedWeeks;
+// Borra en la nube TODAS las filas de una semana (no día por día): más robusto
+// si algún día tenía valor nulo o quedó fuera de la cola.
+function mcDeleteWeekRemote(week){
+  try{
+    if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser){
+      setTimeout(function(){ mcDeleteWeekRemote(week); }, 5000);
+      return;
+    }
+    sbClient.from('microciclo').delete()
+      .eq('week', week).eq('categoria', SB_CATEGORIA)
+      .then(function(res){
+        if(res.error){
+          console.warn('[Supabase] Delete semana microciclo (se reintenta):', res.error.message||res.error);
+          setTimeout(function(){ mcDeleteWeekRemote(week); }, 15000);
+        } else {
+          console.log('[Supabase] Semana borrada de la nube:', week);
+        }
+      }).catch(function(e){
+        console.warn('[Supabase] Delete semana excepción (se reintenta):', e);
+        setTimeout(function(){ mcDeleteWeekRemote(week); }, 15000);
+      });
+  }catch(e){}
+}
+window.mcDeleteWeekRemote=mcDeleteWeekRemote;
+
 var PLAYER_PROFILES = {};
 // Datos nutricionales: { playerKey: [ {date, adiposa, muscular, residual, osea, peso, imo, suma6} ] }
 // Declarado aquí (no en el script block del final) para que loadData() pueda restaurarlo.
@@ -4556,7 +4626,9 @@ function applyPayload(p){
     if(p.BC)Object.assign(BC,p.BC);
     if(p.CS)Object.assign(CS,p.CS);
     if(p.REF){Object.assign(REF,p.REF);}
-    if(p.MICROCICLO){MICROCICLO.length=0;p.MICROCICLO.forEach(m=>MICROCICLO.push(m));}
+    // v136: filtrar semanas borradas — este era el camino por el que la semana
+    // "eliminada" volvía en cada arranque (no consultaba la cola de borrado).
+    if(p.MICROCICLO){MICROCICLO.length=0;p.MICROCICLO.forEach(function(m){ if(typeof mcWeekIsDeleted==='function'&&mcWeekIsDeleted(m&&m.week))return; MICROCICLO.push(m); });}
     if(p.PLAYER_PROFILES)Object.assign(PLAYER_PROFILES,p.PLAYER_PROFILES);
     if(p.MC_BANDS)Object.assign(MC_BANDS,p.MC_BANDS);
     if(p.MC_PLAYER_BANDS)Object.assign(MC_PLAYER_BANDS,p.MC_PLAYER_BANDS);
@@ -4576,7 +4648,7 @@ function applyPayload(p){
     if(p.NUT_COL_MAP && typeof NUT_COL_MAP!=='undefined')Object.assign(NUT_COL_MAP,p.NUT_COL_MAP);
     if(p.MOB_COL_MAP && typeof MOB_COL_MAP!=='undefined')Object.assign(MOB_COL_MAP,p.MOB_COL_MAP);
     if(p.EVAL_ALIASES && typeof EVAL_ALIASES!=='undefined')Object.assign(EVAL_ALIASES,p.EVAL_ALIASES);
-    if(p.PLAN_WEEKS&&p.PLAN_WEEKS.length){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});if(typeof planMigrateAll==='function')planMigrateAll();}
+    if(p.PLAN_WEEKS&&p.PLAN_WEEKS.length){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});if(typeof planMigrateAll==='function')planMigrateAll();if(typeof planPreserveEditing==='function')planPreserveEditing();}
     // Carga tab — WELLNESS_DATA/PSE_DATA/layouts declared early, safe to load here
     if(p.WELLNESS_DATA && typeof WELLNESS_DATA!=='undefined'){WELLNESS_DATA.length=0;p.WELLNESS_DATA.forEach(function(r){WELLNESS_DATA.push(r);});}
     if(p.PSE_DATA && typeof PSE_DATA!=='undefined'){PSE_DATA.length=0;p.PSE_DATA.forEach(function(r){PSE_DATA.push(r);});}
@@ -4676,7 +4748,8 @@ function importData(ev){
       if(p.BC)Object.assign(BC,p.BC);
       if(p.CS)Object.assign(CS,p.CS);
       if(p.REF)Object.assign(REF,p.REF);
-      if(p.MICROCICLO){MICROCICLO.length=0;p.MICROCICLO.forEach(function(m){MICROCICLO.push(m);});}
+      // v136: idem acá — el payload del compañero podía traer la semana borrada
+      if(p.MICROCICLO){MICROCICLO.length=0;p.MICROCICLO.forEach(function(m){ if(typeof mcWeekIsDeleted==='function'&&mcWeekIsDeleted(m&&m.week))return; MICROCICLO.push(m); });}
       if(p.PLAYER_PROFILES){Object.keys(PLAYER_PROFILES).forEach(function(k){delete PLAYER_PROFILES[k];});Object.assign(PLAYER_PROFILES,p.PLAYER_PROFILES);}
       if(p.MC_BANDS){Object.keys(MC_BANDS).forEach(function(k){delete MC_BANDS[k];});Object.assign(MC_BANDS,p.MC_BANDS);}
       if(p.MC_PLAYER_BANDS){Object.keys(MC_PLAYER_BANDS).forEach(function(k){delete MC_PLAYER_BANDS[k];});Object.assign(MC_PLAYER_BANDS,p.MC_PLAYER_BANDS);}
@@ -4692,7 +4765,7 @@ function importData(ev){
       if(p.NUT_COL_MAP && typeof NUT_COL_MAP!=='undefined')Object.assign(NUT_COL_MAP,p.NUT_COL_MAP);
       if(p.MOB_COL_MAP && typeof MOB_COL_MAP!=='undefined')Object.assign(MOB_COL_MAP,p.MOB_COL_MAP);
       if(p.EVAL_ALIASES)Object.assign(EVAL_ALIASES,p.EVAL_ALIASES);
-      if(p.PLAN_WEEKS){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});if(typeof planMigrateAll==='function')planMigrateAll();}
+      if(p.PLAN_WEEKS){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});if(typeof planMigrateAll==='function')planMigrateAll();if(typeof planPreserveEditing==='function')planPreserveEditing();}
       if(p.WELLNESS_DATA && typeof WELLNESS_DATA!=='undefined'){WELLNESS_DATA.length=0;p.WELLNESS_DATA.forEach(function(r){WELLNESS_DATA.push(r);});}
       if(p.PSE_DATA && typeof PSE_DATA!=='undefined'){PSE_DATA.length=0;p.PSE_DATA.forEach(function(r){PSE_DATA.push(r);});}
       if(p.WELLNESS_LAYOUT && typeof WELLNESS_LAYOUT!=='undefined')WELLNESS_LAYOUT=p.WELLNESS_LAYOUT;
@@ -4728,6 +4801,9 @@ function refresh(){
 
 // Cargar datos guardados antes de inicializar
 const hadSaved=loadData();
+// v136: red de seguridad — cualquier camino de carga que haya dejado pasar una
+// semana borrada queda limpio acá, antes del primer render.
+try{ if(typeof mcPurgeDeletedWeeks==='function') mcPurgeDeletedWeeks(); }catch(e){}
 
 // ── Overlay de IndexedDB (v92) ──
 // El arranque leyó el espejo localStorage (rápido y síncrono). Ahora se
@@ -5487,6 +5563,9 @@ function mcImport(){
   if(idx>-1)MICROCICLO.splice(idx,1);
   const avgDur=filteredRows.length?filteredRows.reduce((a,r)=>a+(r.tot_dur||0),0)/filteredRows.length:0;
   const ua=pse&&avgDur?Math.round(avgDur*pse):null;
+  // v136: si esta semana estaba borrada y el usuario la vuelve a cargar,
+  // dejar de bloquearla (si no, la nueva carga desaparecería al recargar).
+  if(typeof mcWeekTombClear==='function') mcWeekTombClear(week);
   MICROCICLO.push({week,day,fecha,ref,pse,ua,players:allPlayers,_hasExtra:extraPlayers.length>0});
   // Actualizar PLAYER_PROFILES con nuevos máximos de Vmax/AccMáx/DccMáx
   if(typeof mcUpdatePlayerProfilesFromSession==='function') mcUpdatePlayerProfilesFromSession(allPlayers);
@@ -6223,9 +6302,17 @@ function mcDeleteWeek(){
   // Guardar los días ANTES de filtrar, para poder borrarlos de Supabase
   var days=MICROCICLO.filter(function(s){return s.week===week;}).map(function(s){return s.day;});
   MICROCICLO=MICROCICLO.filter(s=>s.week!==week);
+  // v136: tombstone PERMANENTE de la semana. Sin esto la semana volvía desde
+  // el payload completo (local o de la nube), que no consultaba la cola de
+  // borrado — y por eso reaparecía en cada arranque.
+  if(typeof mcWeekTombAdd==='function') mcWeekTombAdd(week);
   // FIX v113: sin esto la semana solo se borraba localmente y "resucitaba"
   // al recargar (el sync normal hace upsert, nunca delete).
   if(typeof sbMicroDeleteSafe==='function'){ days.forEach(function(d){ sbMicroDeleteSafe(week,d); }); }
+  // v136: además, borrar la semana ENTERA en la nube de una sola vez. Cubre
+  // los casos que la cola día-por-día no alcanzaba (día null, filas que este
+  // dispositivo no tenía en memoria, sesiones subidas por el compañero).
+  if(typeof mcDeleteWeekRemote==='function') mcDeleteWeekRemote(week);
   saveData();mcRebuildWeekSel();
   if(typeof cargaRebuildWeekSel==='function') cargaRebuildWeekSel();
   mcRenderWeek();mcRenderLoad();
@@ -6431,6 +6518,7 @@ function mcEstSave(){
       }
     });
   } else {
+    if(typeof mcWeekTombClear==='function') mcWeekTombClear(week);
     MICROCICLO.push({week:week,day:day,fecha:fecha,ref:ref,pse:null,ua:null,players:allPlayers,_isEstimated:true});
   }
 
@@ -12977,6 +13065,12 @@ window.planNewWeek=planNewWeek;
 
 function planEditWeek(i){
   _planEditIdx=i;
+  // v135: garantizar uid estable ANTES de copiar, para que el autoguardado
+  // pueda reencontrar esta semana aunque el orden de PLAN_WEEKS cambie.
+  if(PLAN_WEEKS[i] && !PLAN_WEEKS[i].uid){
+    PLAN_WEEKS[i].uid='w'+Date.now()+Math.random().toString(36).slice(2,7);
+    planSave();
+  }
   _planEditData=JSON.parse(JSON.stringify(PLAN_WEEKS[i]));
   planMigrateWeek(_planEditData);
   if(!_planEditData.groups||!_planEditData.groups.length)
@@ -13134,6 +13228,27 @@ window.planSetExGroup=planSetExGroup;
 // se olvidaba de apretar "Guardar semana", se perdía todo el trabajo.
 // Si la semana todavía no existe en la lista, se crea al primer cambio para
 // que el borrador quede guardado igual.
+// ── v135: proteger la semana EN EDICIÓN de los payloads de la nube ──────────
+// loadData/aplicar payload hace PLAN_WEEKS.length=0 y reemplaza todo. Si en ese
+// momento alguien está editando una semana, la versión de la nube (más vieja)
+// pisaba su trabajo y después se resubía, borrando los ejercicios recién
+// agregados. Este guardián reinyecta la copia en edición, que es la más fresca.
+function planPreserveEditing(){
+  try{
+    if(typeof _planEditData==='undefined' || !_planEditData) return;
+    if(!_planEditData.uid) return;
+    var idx=-1;
+    for(var i=0;i<PLAN_WEEKS.length;i++){
+      if(PLAN_WEEKS[i] && PLAN_WEEKS[i].uid===_planEditData.uid){ idx=i; break; }
+    }
+    var mine=JSON.parse(JSON.stringify(_planEditData));
+    if(idx>=0){ PLAN_WEEKS[idx]=mine; if(typeof _planEditIdx!=='undefined')_planEditIdx=idx; }
+    else { PLAN_WEEKS.push(mine); if(typeof _planEditIdx!=='undefined')_planEditIdx=PLAN_WEEKS.length-1; }
+    console.log('[Plan] Semana en edición preservada frente al payload de la nube.');
+  }catch(e){ console.warn('planPreserveEditing:',e); }
+}
+window.planPreserveEditing=planPreserveEditing;
+
 function planAutoSave(){
   if(!_planEditData)return;
   try{
@@ -13142,27 +13257,88 @@ function planAutoSave(){
     if(nm)_planEditData.name=nm;
     var rmEl=document.getElementById('plan-ref-mode');
     if(rmEl&&rmEl.value)_planEditData.refMode=rmEl.value;
-    if(_planEditIdx===null){
-      if(!_planEditData.name)_planEditData.name='Semana '+(PLAN_WEEKS.length+1);
-      _planEditData.created=new Date().toISOString();
-      PLAN_WEEKS.push(JSON.parse(JSON.stringify(_planEditData)));
+
+    // v135: identificar la semana por un uid ESTABLE, no por índice posicional.
+    // El índice se desincronizaba cuando el sync con la nube reordenaba o
+    // agregaba semanas mientras se editaba: el autoguardado escribía en la
+    // semana equivocada, o en un índice fuera de rango, y el trabajo se perdía
+    // en silencio. Esto fue lo que le pasó a tu compañero.
+    if(!_planEditData.uid) _planEditData.uid='w'+Date.now()+Math.random().toString(36).slice(2,7);
+
+    var idx=-1;
+    for(var i=0;i<PLAN_WEEKS.length;i++){
+      if(PLAN_WEEKS[i] && PLAN_WEEKS[i].uid===_planEditData.uid){ idx=i; break; }
+    }
+    // Fallback para semanas viejas sin uid: usar el índice si el nombre coincide
+    if(idx<0 && _planEditIdx!==null && PLAN_WEEKS[_planEditIdx]
+       && (!PLAN_WEEKS[_planEditIdx].uid)
+       && PLAN_WEEKS[_planEditIdx].name===_planEditData.name){
+      idx=_planEditIdx;
+    }
+
+    var snapshot=JSON.parse(JSON.stringify(_planEditData));
+    if(idx>=0){
+      PLAN_WEEKS[idx]=snapshot;
+      _planEditIdx=idx;
+    } else {
+      // No existe todavía (semana nueva, o se perdió la referencia): crearla
+      if(!snapshot.name)snapshot.name='Semana '+(PLAN_WEEKS.length+1);
+      if(!snapshot.created)snapshot.created=new Date().toISOString();
+      _planEditData.name=snapshot.name;
+      _planEditData.created=snapshot.created;
+      PLAN_WEEKS.push(snapshot);
       _planEditIdx=PLAN_WEEKS.length-1;
       if(typeof planRenderWeeksList==='function')planRenderWeeksList();
-    } else {
-      PLAN_WEEKS[_planEditIdx]=JSON.parse(JSON.stringify(_planEditData));
     }
+
     planSave();
-    planAutoSaveFlash();
-  }catch(e){ console.warn('planAutoSave:',e); }
+    // Verificar que realmente quedó guardado (localStorage puede fallar por
+    // cuota llena y saveData no siempre lo informa).
+    var ok=planAutoSaveVerify(_planEditData.uid);
+    planAutoSaveFlash(ok);
+  }catch(e){
+    console.warn('planAutoSave:',e);
+    planAutoSaveFlash(false);
+  }
 }
 window.planAutoSave=planAutoSave;
 
-// Indicador discreto "Guardado ✓" al lado del botón Guardar semana.
+// Relee lo persistido y confirma que la semana está ahí con sus ejercicios.
+function planAutoSaveVerify(uid){
+  try{
+    if(typeof STORAGE_KEY==='undefined')return true; // no podemos verificar
+    var raw=localStorage.getItem(STORAGE_KEY);
+    if(!raw)return false;
+    var p=JSON.parse(raw);
+    var weeks=p&&p.PLAN_WEEKS;
+    if(!Array.isArray(weeks))return false;
+    var w=weeks.find(function(x){return x&&x.uid===uid;});
+    if(!w)return false;
+    // Contar ejercicios guardados vs en memoria
+    var count=function(wk){
+      var n=0;
+      (wk.days||[]).forEach(function(d){ (d.blocks||[]).forEach(function(b){ n+=((b.exercises||[]).length); }); });
+      return n;
+    };
+    return count(w)===count(_planEditData);
+  }catch(e){ return false; }
+}
+
+// Indicador junto al botón Guardar semana. Si el guardado falló, avisa fuerte:
+// es peor perder el trabajo en silencio que molestar con un cartel.
 var _planAutoSaveTimer=null;
-function planAutoSaveFlash(){
+function planAutoSaveFlash(ok){
   var el=document.getElementById('plan-autosave-ind');
   if(!el)return;
+  if(ok===false){
+    el.textContent='⚠️ NO se pudo guardar — tocá "Guardar semana"';
+    el.style.color='#E24B4A';
+    el.style.opacity='1';
+    if(_planAutoSaveTimer)clearTimeout(_planAutoSaveTimer);
+    return; // queda fijo hasta que se resuelva
+  }
   el.textContent='✓ Guardado';
+  el.style.color='#1D9E75';
   el.style.opacity='1';
   if(_planAutoSaveTimer)clearTimeout(_planAutoSaveTimer);
   _planAutoSaveTimer=setTimeout(function(){ el.style.opacity='0'; },1800);
@@ -13173,13 +13349,9 @@ function planSaveWeek(){
   if(!name){alert('Ingresá un nombre para la semana.');return;}
   _planEditData.name=name;
   _planEditData.refMode=document.getElementById('plan-ref-mode').value;
-  if(_planEditIdx!==null){
-    PLAN_WEEKS[_planEditIdx]=JSON.parse(JSON.stringify(_planEditData));
-  } else {
-    _planEditData.created=new Date().toISOString();
-    PLAN_WEEKS.push(JSON.parse(JSON.stringify(_planEditData)));
-  }
-  planSave();
+  // v135: reutilizar el autoguardado (identifica por uid, no por índice) para
+  // que el botón y el autoguardado nunca puedan discrepar.
+  planAutoSave();
   planRenderWeeksList();
   planCancelEdit();
 }
@@ -13319,9 +13491,19 @@ function planRenderDays(){
       var _parBtn=_canParallel
         ? '<button onclick="planToggleBlockParallel('+di+','+bi+')" title="Los ejercicios se hacen al mismo tiempo por distintos grupos" style="border:none;background:#f0f0f0;cursor:pointer;font-size:9px;color:#555;border-radius:4px;padding:1px 7px;white-space:nowrap">⇆ Marcar paralelo</button>'
         : '';
+      // v137: flechas para reordenar el bloque dentro del día (solo si hay 2+)
+      var _arrows='';
+      if(_nBlocks>1){
+        var _upOff=(bi===0), _dnOff=(bi===_nBlocks-1);
+        _arrows='<span style="display:inline-flex;gap:1px;align-items:center">'+
+          '<button onclick="planMoveBlock('+di+','+bi+',-1)" title="Subir bloque" style="border:none;background:none;cursor:pointer;color:#888;font-size:12px;padding:0 2px;line-height:1'+(_upOff?';opacity:.25;pointer-events:none':'')+'">↑</button>'+
+          '<button onclick="planMoveBlock('+di+','+bi+',1)" title="Bajar bloque" style="border:none;background:none;cursor:pointer;color:#888;font-size:12px;padding:0 2px;line-height:1'+(_dnOff?';opacity:.25;pointer-events:none':'')+'">↓</button>'+
+        '</span>';
+      }
       var blockLabel=isParallel
         ? '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;flex-wrap:wrap">'+
             '<span style="font-size:9px;font-weight:700;color:#7F77DD;background:#7F77DD18;border:1px solid #7F77DD44;border-radius:4px;padding:1px 7px;white-space:nowrap">⇆ BLOQUE '+(bi+1)+' · PARALELO</span>'+
+            _arrows+
             '<span style="font-size:9px;color:#888;flex:1;min-width:0">Duran lo del más largo · sus datos físicos mandan (empate → promedio)</span>'+
             '<button onclick="planToggleBlockParallel('+di+','+bi+')" style="border:none;background:none;cursor:pointer;font-size:10px;color:#aaa;padding:0 2px" title="Volver a secuencial">✕ Separar</button>'+
             (_nBlocks>1?'<button onclick="planRemoveBlock('+di+','+bi+')" style="border:none;background:none;cursor:pointer;font-size:10px;color:#E24B4A44;padding:0 2px" title="Eliminar bloque">🗑</button>':'')+
@@ -13329,6 +13511,7 @@ function planRenderDays(){
         : (_showLabel ?
             '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;flex-wrap:wrap">'+
               '<span style="font-size:9px;color:#999;font-weight:700;white-space:nowrap">Bloque '+(bi+1)+'</span>'+
+              _arrows+
               _parBtn+
               (_nBlocks>1?'<button onclick="planRemoveBlock('+di+','+bi+')" style="border:none;background:none;cursor:pointer;font-size:10px;color:#E24B4A44;padding:0 2px" title="Eliminar bloque">🗑</button>':'')+
             '</div>'
@@ -13484,8 +13667,27 @@ function planToggleCount(di, bi, ei, checked){
   _planEditData.days[di].blocks[bi].exercises[ei].countVolume=!!checked;
   planRenderDays();
   planRenderWeekSummary();
+  planAutoSave();
 }
 window.planToggleCount=planToggleCount;
+
+// ── v137: reordenar bloques dentro del día con flechas ↑ ↓ ────────────────
+// Mismo patrón que las flechas de categorías en Gimnasio → Biblioteca.
+// Cambia el orden de ejecución de los bloques en la sesión (útil cuando se
+// decide mover, por ejemplo, la activación o el trabajo específico de lugar).
+function planMoveBlock(di, bi, dir){
+  if(!_planEditData)return;
+  var day=_planEditData.days[di]; if(!day||!day.blocks)return;
+  var target=bi+dir;
+  if(target<0||target>=day.blocks.length)return;
+  var tmp=day.blocks[bi];
+  day.blocks[bi]=day.blocks[target];
+  day.blocks[target]=tmp;
+  planRenderDays();
+  planRenderWeekSummary();
+  planAutoSave();
+}
+window.planMoveBlock=planMoveBlock;
 
 function planToggleBlockParallel(di, bi){
   if(!_planEditData)return;
@@ -13510,6 +13712,9 @@ function planAddBlock(di){
   _planEditData.days[di].blocks.push(newBlock);
   var bi=_planEditData.days[di].blocks.length-1;
   planOpenModal(di, bi);
+  // v135: no autoguardamos el bloque vacío acá — si el usuario cancela el
+  // modal, planCloseModal lo descarta. El guardado ocurre al confirmar el
+  // ejercicio (planModalConfirm) o al descartar el bloque vacío.
 }
 window.planAddBlock=planAddBlock;
 
@@ -14214,6 +14419,23 @@ window.planOpenModal=planOpenModal;
 function planCloseModal(){
   document.getElementById('plan-modal').style.display='none';
   _planModalSelected=null;
+  // v135: si el modal se abrió desde "+ ejercicio a este bloque" / "+ bloque"
+  // y el usuario canceló, quedaba un bloque vacío colgado en la semana.
+  // Se descarta acá y se persiste el estado limpio.
+  try{
+    if(_planEditData && _planModalDayIdx!=null && _planEditData.days[_planModalDayIdx]){
+      var blocks=_planEditData.days[_planModalDayIdx].blocks||[];
+      var removed=false;
+      for(var i=blocks.length-1;i>=0;i--){
+        if(!blocks[i].exercises || !blocks[i].exercises.length){ blocks.splice(i,1); removed=true; }
+      }
+      if(removed){
+        if(typeof planRenderDays==='function')planRenderDays();
+        if(typeof planRenderWeekSummary==='function')planRenderWeekSummary();
+        if(typeof planAutoSave==='function')planAutoSave();
+      }
+    }
+  }catch(e){}
 }
 window.planCloseModal=planCloseModal;
 
@@ -14903,6 +15125,10 @@ window.planModalConfirm=function(){
   planCloseModal();
   planRenderDays();
   planRenderWeekSummary();
+  // v135: ESTE es el planModalConfirm que realmente corre (sobrescribe al de
+  // más arriba). Le faltaba el autoguardado, así que los ejercicios agregados
+  // NO se guardaban salvo que se apretara "Guardar semana". Era el bug.
+  planAutoSave();
 };
 
 var _origPlanCloseModal=window.planCloseModal;
@@ -30055,6 +30281,8 @@ function sbMicrocicloDelete(week, day){
 // Supabase confirme. Además, al cargar datos de la nube se ignoran las
 // sesiones que están pendientes de borrar — así NO pueden resucitar.
 var MC_DEL_KEY='mc_del_queue_v1';
+
+
 function _mcDelQueueGet(){ try{ var q=JSON.parse(localStorage.getItem(MC_DEL_KEY)||'[]'); return Array.isArray(q)?q:[]; }catch(e){ return []; } }
 function _mcDelQueueSet(q){ try{ localStorage.setItem(MC_DEL_KEY, JSON.stringify(q)); }catch(e){} }
 function mcDelQueuePending(week, day){
@@ -30119,9 +30347,14 @@ function sbScheduleMicrocicloSync(){
       console.log('[Supabase] MICROCICLO vacío, no se sube nada.');
       return;
     }
-    console.log('[Supabase] Sync de microciclos (' + MICROCICLO.length + ')');
+    // v136: purgar antes de subir y NUNCA incluir semanas borradas — si no,
+    // este sync volvía a subir a la nube la semana que se acababa de eliminar.
+    if(typeof mcPurgeDeletedWeeks==='function') mcPurgeDeletedWeeks();
+    var _toUp = MICROCICLO.filter(function(s){ return !(typeof mcWeekIsDeleted==='function' && mcWeekIsDeleted(s&&s.week)); });
+    if(!_toUp.length){ console.log('[Supabase] Nada para subir de microciclo.'); return; }
+    console.log('[Supabase] Sync de microciclos (' + _toUp.length + ')');
     // Batch upsert: subimos todas las sesiones de una vez
-    var payload = MICROCICLO.map(_sbMicrocicloToPayload);
+    var payload = _toUp.map(_sbMicrocicloToPayload);
     sbClient.from('microciclo').upsert(payload, { onConflict: 'week,day,categoria' }).then(function(res){
       if(res.error){
         console.error('[Supabase] Sync microciclos error:', res.error);
@@ -30154,16 +30387,25 @@ sbLoadInitialData = function(){
       var s = _sbMicrocicloFromRow(row);
       // v113: si esta sesión está pendiente de borrar, NO la resucitamos
       if(typeof mcDelQueuePending==='function' && mcDelQueuePending(s.week, s.day)) return;
+      // v136: tombstone permanente de la semana — cubre el caso de que la cola
+      // ya se haya vaciado y la fila siga (o vuelva) en la nube.
+      if(typeof mcWeekIsDeleted==='function' && mcWeekIsDeleted(s.week)){
+        if(typeof mcDeleteWeekRemote==='function') mcDeleteWeekRemote(s.week); // sanar la nube
+        return;
+      }
       sbKeys[s.week + '||' + s.day] = s;
     });
     // Reintentar borrados que quedaron pendientes de sesiones anteriores
     if(typeof sbMicroFlushDeletes==='function') setTimeout(sbMicroFlushDeletes, 2000);
     var localOnly = MICROCICLO.filter(function(s){
+      // v136: no preservar sesiones locales de semanas borradas
+      if(typeof mcWeekIsDeleted==='function' && mcWeekIsDeleted(s&&s.week)) return false;
       return !sbKeys[s.week + '||' + s.day];
     });
     MICROCICLO.length = 0;
     Object.values(sbKeys).forEach(function(s){ MICROCICLO.push(s); });
     localOnly.forEach(function(s){ MICROCICLO.push(s); });
+    if(typeof mcPurgeDeletedWeeks==='function') mcPurgeDeletedWeeks();
     console.log('[Supabase] Cargados ' + rows.length + ' microciclos de Supabase. ' +
                 (localOnly.length ? '(' + localOnly.length + ' locales preservados, subilos manualmente con "Subir microciclos")' : ''));
     sbLoadingSet(60, 'Microciclos cargados', _sbGetLoadingCounts());
@@ -30196,7 +30438,8 @@ function sbMigrateMicroclicosLocalToCloud(){
   function setStatus(t){ if(status) status.textContent = t; console.log('[Migrate-MC]', t); }
   setStatus('Subiendo... 0/' + total);
   // En lugar de uno por uno, hacemos batch (más rápido)
-  var payload = MICROCICLO.map(_sbMicrocicloToPayload);
+  // v136: excluir semanas borradas
+  var payload = MICROCICLO.filter(function(s){ return !(typeof mcWeekIsDeleted==='function' && mcWeekIsDeleted(s&&s.week)); }).map(_sbMicrocicloToPayload);
   sbClient.from('microciclo').upsert(payload, { onConflict: 'week,day,categoria' }).then(function(res){
     if(res.error){
       setStatus('✗ Error');
@@ -32792,6 +33035,8 @@ document.addEventListener('DOMContentLoaded',function(){
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_DELETED')<0)SB_SETTINGS_KEYS.push('TST_DELETED');
     // v134: tombstones de perfiles, para que fusionar/borrar se respete en todos los dispositivos
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('PROF_DELETED')<0)SB_SETTINGS_KEYS.push('PROF_DELETED');
+    // v136: tombstones de semanas de microciclo, compartidos entre dispositivos
+    if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('MC_WEEK_DELETED')<0)SB_SETTINGS_KEYS.push('MC_WEEK_DELETED');
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('PLAN_GROUP_DEFAULTS')<0)SB_SETTINGS_KEYS.push('PLAN_GROUP_DEFAULTS');
     if(typeof window._sbApplySettingRow==='function'&&!window._sbApplySettingRowTstWrapped){
       var _origTst=window._sbApplySettingRow;
@@ -32807,9 +33052,27 @@ document.addEventListener('DOMContentLoaded',function(){
         if(row&&row.key==='TST_DELETED'&&typeof TST_DELETED!=='undefined'){ localTomb=Object.assign({},TST_DELETED); }
         var localProfTomb=null;
         if(row&&row.key==='PROF_DELETED'&&typeof PROF_DELETED!=='undefined'){ localProfTomb=Object.assign({},PROF_DELETED); }
+        var localMcTomb=null;
+        if(row&&row.key==='MC_WEEK_DELETED'&&typeof MC_WEEK_DELETED!=='undefined'){ localMcTomb=Object.assign({},MC_WEEK_DELETED); }
         _origTst(row);
         // v129: TST_DELETED se UNE (nube ∪ local), nunca se pisa. Así el
         // borrado hecho en un dispositivo no lo deshace otro con datos viejos.
+        if(row&&row.key==='MC_WEEK_DELETED'){
+          try{
+            // Unión: nube ∪ local. Ningún dispositivo puede "desborrar" semanas.
+            if(localMcTomb){ Object.keys(localMcTomb).forEach(function(k){ if(MC_WEEK_DELETED[k]===undefined)MC_WEEK_DELETED[k]=localMcTomb[k]; }); }
+            if(typeof mcWeekTombSave==='function')mcWeekTombSave();
+            var nmc=(typeof mcPurgeDeletedWeeks==='function')?mcPurgeDeletedWeeks():0;
+            if(nmc){
+              if(typeof saveData==='function')saveData();
+              if(typeof mcRebuildWeekSel==='function'){try{mcRebuildWeekSel();}catch(e){}}
+              if(typeof cargaRebuildWeekSel==='function'){try{cargaRebuildWeekSel();}catch(e){}}
+              if(typeof mcRenderWeek==='function'){try{mcRenderWeek();}catch(e){}}
+              if(typeof cargaRender==='function'){try{cargaRender();}catch(e){}}
+            }
+          }catch(e){}
+          return;
+        }
         if(row&&row.key==='PROF_DELETED'){
           try{
             if(localProfTomb){ Object.keys(localProfTomb).forEach(function(k){ if(PROF_DELETED[k]===undefined)PROF_DELETED[k]=localProfTomb[k]; }); }
