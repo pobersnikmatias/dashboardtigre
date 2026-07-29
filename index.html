@@ -1429,6 +1429,121 @@ window.applyRef=applyRef;window.resetRef=resetRef;
 
 function mkRaw(mts,hsr,h2,h25,acc,dcc,rhie,pl){return{mts,hsr,h2,h25,acc,dcc,rhie,pl:pl||0};}
 
+// ── v140: SELLO DE MODIFICACIÓN LOCAL ─────────────────────────────────────
+// Cada vez que se crea o edita un ejercicio se marca `_upd` con la hora local.
+// El merge con la nube compara ese sello contra el de la nube y gana el MÁS
+// NUEVO. Sin esto, la carga inicial pisaba los cambios locales con la versión
+// (más vieja) de la nube cada vez que un upsert había fallado: era la causa de
+// "cargué los datos de GPS y aparecen sin datos".
+function drillTouch(row){
+  if(!row||typeof row!=='object')return row;
+  row._upd=Date.now();
+  return row;
+}
+window.drillTouch=drillTouch;
+
+// ── v140: SANEADOR DE `raw` ───────────────────────────────────────────────
+// `raw` debe ser {mts,hsr,h2,h25,acc,dcc,rhie,pl} con números por minuto.
+// Si llegó como array (formatos viejos / imports mal armados) o con strings,
+// los cálculos de volumen daban NaN y arrastraban todo el total del día a
+// cero. Esto lo normaliza una vez al arrancar, sin tocar los datos válidos.
+var _DRILL_RAW_KEYS=['mts','hsr','h2','h25','acc','dcc','rhie','pl'];
+function drillsSanitizeRaw(){
+  if(typeof D==='undefined'||!Array.isArray(D))return 0;
+  var fixed=0;
+  D.forEach(function(r){
+    if(!r||!r.raw)return;
+    var before=r.raw, out=null;
+    if(Array.isArray(before)){
+      out={};
+      _DRILL_RAW_KEYS.forEach(function(k,i){ var v=Number(before[i]); out[k]=isFinite(v)?v:0; });
+    } else if(typeof before==='object'){
+      var bad=false, tmp={};
+      _DRILL_RAW_KEYS.forEach(function(k){
+        var v=Number(before[k]);
+        if(before[k]!==undefined && !isFinite(v)) bad=true;
+        tmp[k]=isFinite(v)?v:0;
+      });
+      if(bad) out=tmp;
+    } else {
+      out=null; r.raw=null; fixed++; return;
+    }
+    if(out){ r.raw=out; fixed++; }
+  });
+  if(fixed){
+    console.warn('[Datos] Se normalizó el formato de métricas de '+fixed+' ejercicio(s).');
+    try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  }
+  return fixed;
+}
+window.drillsSanitizeRaw=drillsSanitizeRaw;
+
+// ── v140: DIAGNÓSTICO DE GUARDADO ─────────────────────────────────────────
+// Correr `diagnostico()` en la consola del navegador para ver el estado real:
+// cuántos ejercicios hay, cuántos esperan subir, si el guardado local funciona
+// y si hay datos con formato roto. Sirve para confirmar que todo persistió.
+// Sube a la nube los ejercicios locales que la salvaguarda dejó en espera.
+window.subirEjerciciosLocales=function(){
+  var list=window._drillOrphans||[];
+  if(!list.length){ console.log('No hay ejercicios en espera.'); return 0; }
+  if(typeof sbUpsertOneDrill!=='function'){ console.warn('Sin conexión a la nube.'); return 0; }
+  list.forEach(function(d){ if(typeof drillTouch==='function')drillTouch(d); sbUpsertOneDrill(d); });
+  console.log('Subiendo '+list.length+' ejercicio(s) a la nube…');
+  window._drillOrphans=[];
+  try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  return list.length;
+};
+
+window.diagnostico=function(){
+  var out={};
+  try{
+    out.ejercicios=(typeof D!=='undefined'&&Array.isArray(D))?D.length:0;
+    var sinDatos=0, conDatos=0, sinSello=0;
+    (typeof D!=='undefined'?D:[]).forEach(function(r){
+      var rw=r&&r.raw;
+      var tiene=rw&&typeof rw==='object'&&Number(rw.mts)>0;
+      if(tiene)conDatos++; else sinDatos++;
+      if(!r._upd)sinSello++;
+    });
+    out.conDatosGPS=conDatos;
+    out.sinDatosGPS=sinDatos;
+    out.sinSelloDeFecha=sinSello;
+    try{ out.pendientesDeSubir=JSON.parse(localStorage.getItem('drills_pending')||'[]').length; }catch(e){ out.pendientesDeSubir='?'; }
+    try{ out.borradosRegistrados=JSON.parse(localStorage.getItem('drills_deleted')||'[]').length; }catch(e){}
+    out.sincronizadoConLaNube=!!window._sbDrillsSynced;
+    out.sesionSupabase=(typeof sbCurrentUser!=='undefined'&&!!sbCurrentUser);
+    // Prueba de escritura real
+    try{
+      var probe='__probe_'+Date.now();
+      localStorage.setItem(probe,'1'); localStorage.removeItem(probe);
+      out.escrituraLocal='OK';
+    }catch(e){ out.escrituraLocal='FALLA (cuota llena) — los datos van a IndexedDB'; }
+    try{
+      var raw=localStorage.getItem(STORAGE_KEY);
+      out.tamanoEspejoLocal=raw?(Math.round(raw.length/1024)+' KB'):'vacío';
+      if(raw){ var p=JSON.parse(raw); out.ejerciciosEnDisco=(p.D||[]).length; out.ultimoGuardado=p.__ts?new Date(p.__ts).toLocaleString('es-AR'):'?'; }
+    }catch(e){}
+    out.semanasPlanificacion=(typeof PLAN_WEEKS!=='undefined')?PLAN_WEEKS.length:0;
+    console.log('══════ DIAGNÓSTICO DE GUARDADO ══════');
+    Object.keys(out).forEach(function(k){ console.log('  '+k+': '+out[k]); });
+    if(out.ejerciciosEnDisco!=null && out.ejerciciosEnDisco!==out.ejercicios){
+      console.warn('  ⚠ Diferencia entre memoria ('+out.ejercicios+') y disco ('+out.ejerciciosEnDisco+'). Tocá algo para forzar un guardado.');
+    }
+    if(out.pendientesDeSubir>0) console.warn('  ⚠ Hay '+out.pendientesDeSubir+' ejercicio(s) esperando subir a la nube. Se preservan localmente y se reintenta.');
+    if(!out.sesionSupabase) console.warn('  ⚠ Sin sesión de Supabase: se guarda solo local hasta que inicies sesión.');
+    console.log('═════════════════════════════════════');
+  }catch(e){ console.warn('diagnostico error:',e); }
+  return out;
+};
+// Marca + guarda + sube. Punto único para no olvidarse de ninguno de los tres.
+function drillSaveOne(row){
+  drillTouch(row);
+  try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  try{ if(typeof sbUpsertOneDrill==='function')sbUpsertOneDrill(row); }catch(e){}
+  return row;
+}
+window.drillSaveOne=drillSaveOne;
+
 // ── Helpers de métricas extra ──
 // Normaliza header del CSV para matching (lowercase, sin acentos, sin espacios extra)
 function _exNormHdr(s){return (s||'').toString().toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');}
@@ -1887,7 +2002,10 @@ function toggleStarred(id){
   var r = D.find(function(x){return x.id===id;});
   if(!r) return;
   r.starred = !r.starred;
-  if(typeof saveData === 'function') saveData();
+  // v140: sellar + guardar + subir. Antes sólo hacía saveData(), así que la
+  // nube pisaba el cambio en la próxima carga.
+  if(typeof drillSaveOne==='function') drillSaveOne(r);
+  else if(typeof saveData === 'function') saveData();
   // Refrescar tabla
   if(typeof drawTable === 'function' && typeof gf === 'function') drawTable(gf());
 }
@@ -1898,7 +2016,8 @@ function toggleStarredFromModal(id){
   var r = D.find(function(x){return x.id===id;});
   if(!r) return;
   r.starred = !r.starred;
-  if(typeof saveData === 'function') saveData();
+  if(typeof drillSaveOne==='function') drillSaveOne(r);
+  else if(typeof saveData === 'function') saveData();
   // Actualizar selector de cats (puede cambiar el contador de ⭐)
   var catSel = document.getElementById('plan-modal-cat');
   if(catSel){
@@ -2509,7 +2628,10 @@ function addRow(){
     nr.diag=window._fPendingDiag;
   }
   computeRatios(nr);D.push(nr);
-  if(typeof sbUpsertOneDrill==='function') sbUpsertOneDrill(nr);
+  // v140: sellar → guardar → subir, para que el ejercicio nuevo nunca pueda
+  // ser descartado por el merge con la nube.
+  if(typeof drillSaveOne==='function') drillSaveOne(nr);
+  else if(typeof sbUpsertOneDrill==='function') sbUpsertOneDrill(nr);
   rebuildCatBtns();
   ['f-n','f-min','f-mts','f-hsr','f-h2','f-h25','f-acc','f-dcc','f-rhie','f-vmax','f-spr','f-pl','f-jug','f-L','f-A','f-desc'].forEach(id=>{var el=document.getElementById(id);if(el)el.value='';});
   if(typeof tnReset==='function')tnReset('f-tn');
@@ -4808,6 +4930,11 @@ const hadSaved=loadData();
 // v136: red de seguridad — cualquier camino de carga que haya dejado pasar una
 // semana borrada queda limpio acá, antes del primer render.
 try{ if(typeof mcPurgeDeletedWeeks==='function') mcPurgeDeletedWeeks(); }catch(e){}
+// v140: sanear el `raw` de la biblioteca. Un `raw` en formato array o con
+// valores no numéricos hacía que los totales de planificación dieran NaN y las
+// métricas (distancia, HSR…) aparecieran en cero aunque los ejercicios
+// tuvieran datos cargados.
+try{ if(typeof drillsSanitizeRaw==='function') drillsSanitizeRaw(); }catch(e){}
 
 // ── Overlay de IndexedDB (v92) ──
 // El arranque leyó el espejo localStorage (rápido y síncrono). Ahora se
@@ -4829,7 +4956,17 @@ try{ if(typeof mcPurgeDeletedWeeks==='function') mcPurgeDeletedWeeks(); }catch(e
     if(!p.__ts || p.__ts<=lsTs) return; // el espejo estaba al día
     console.log('[dstore] Espejo localStorage desactualizado; aplicando IndexedDB ('+new Date(p.__ts).toLocaleString('es-AR')+').');
     function applyAll(){
-      try{ applyPayload(p); }catch(e){ console.warn('[dstore] overlay apply:',e); }
+      // v140: si el merge con la nube ya corrió, NO pisar D con el payload de
+      // IndexedDB: ese merge ya combinó nube + local por timestamp y es el
+      // estado bueno. Era una carrera que podía revertir el merge y hacer
+      // "desaparecer" ejercicios recién guardados.
+      if(window._sbDrillsSynced && p.D){
+        console.log('[dstore] Merge con la nube ya aplicado: se omite D del overlay para no pisarlo.');
+        var pNoD=Object.assign({},p); delete pNoD.D;
+        try{ applyPayload(pNoD); }catch(e){ console.warn('[dstore] overlay apply:',e); }
+      } else {
+        try{ applyPayload(p); }catch(e){ console.warn('[dstore] overlay apply:',e); }
+      }
       try{ if(typeof gymLoadDataFromPayload==='function')gymLoadDataFromPayload(p); }catch(e){}
       try{ if(typeof mainView!=='undefined'&&typeof setMainView==='function')setMainView(mainView); }catch(e){}
     }
@@ -4860,7 +4997,7 @@ function setOrientOverride(id, val){
   var row=D.find(function(r){return r.id===id;});
   if(!row)return;
   row.orientOverride = val||null;
-  saveData();
+  if(typeof drillSaveOne==='function') drillSaveOne(row); else saveData();
   drawTable(gf());
 }
 window.setOrientOverride=setOrientOverride;
@@ -12698,19 +12835,41 @@ function planCalcExVol(ex, mins){
   // ex = exercise row from D[], mins = assigned minutes
   // Volume = raw[k]/min * mins  (raw is per-minute value)
   // mts_min is already /min; hsr,h2,h25,acc,dcc,rhie stored as ratio vs REF → need raw
-  var raw=ex.raw||null;
+  // v140: normalizar `raw` antes de usarlo. Si venía como ARRAY (formatos
+  // viejos o un import mal armado), ex.raw.mts era undefined y TODO el total
+  // del día se volvía NaN: las métricas del resumen quedaban en cero o vacías
+  // aunque los ejercicios tuvieran datos. Ahora se convierte y se sanea.
+  var raw=planNormRaw(ex);
+  function num(v){ v=Number(v); return isFinite(v)?v:0; }
   function vol(k){
-    if(raw&&raw[k]!=null) return raw[k]*mins;      // raw is value/min → × mins
-    return (ex[k]||0)*REF[k]*mins;                  // ratio × REF/min × mins
+    if(raw&&raw[k]!=null) return num(raw[k])*mins;  // raw is value/min → × mins
+    return num(ex[k])*num(REF[k])*mins;             // ratio × REF/min × mins
   }
+  var mtsMin = raw ? num(raw.mts) : num(ex.mts)*num(REF.mts);
   return{
-    mts: (ex.raw?ex.raw.mts:ex.mts*REF.mts)*mins,  // mts/min × mins
-    mts_min: ex.raw?ex.raw.mts:ex.mts*REF.mts,      // reference intensity
+    mts: mtsMin*mins,
+    mts_min: mtsMin,
     hsr: vol('hsr'), h2: vol('h2'), h25: vol('h25'),
     acc: vol('acc'), dcc: vol('dcc'), rhie: vol('rhie'),
     mins: mins
   };
 }
+// Devuelve el `raw` del ejercicio como OBJETO {mts,hsr,...} o null si no tiene.
+// Convierte el formato array y repara la fila para que no vuelva a pasar.
+var _PLAN_RAW_KEYS=['mts','hsr','h2','h25','acc','dcc','rhie','pl'];
+function planNormRaw(ex){
+  if(!ex||!ex.raw) return null;
+  var r=ex.raw;
+  if(Array.isArray(r)){
+    var o={};
+    _PLAN_RAW_KEYS.forEach(function(k,i){ var v=Number(r[i]); o[k]=isFinite(v)?v:0; });
+    ex.raw=o;               // reparar en memoria
+    return o;
+  }
+  if(typeof r!=='object') return null;
+  return r;
+}
+window.planNormRaw=planNormRaw;
 
 // ── BLOQUES PARALELOS (v130) ──────────────────────────────────────────────
 // Regla: en un bloque paralelo los ejercicios se hacen AL MISMO TIEMPO por
@@ -15284,8 +15443,11 @@ function gpsImpApply(){
   if(r.vmax>0)row.vmax=r.vmax;
   if(r.spr>0)row.spr=r.spr;
   if(r.date)row.date=r.date;
-  saveData();
-  if(typeof sbUpsertOneDrill==='function'){ try{ sbUpsertOneDrill(row); }catch(e){} }
+  // v140: sellar → guardar → subir, en ese orden. Si se guardaba antes de
+  // sellar, el sello no quedaba en disco y al recargar la nube pisaba los
+  // datos de GPS recién cargados.
+  if(typeof drillSaveOne==='function') drillSaveOne(row);
+  else { saveData(); if(typeof sbUpsertOneDrill==='function'){ try{ sbUpsertOneDrill(row); }catch(e){} } }
   gpsImpClose();
   if(typeof drawTable==='function'&&typeof gf==='function'){ try{ drawTable(gf()); }catch(e){} }
   var msg=document.getElementById('exi-msg');
@@ -15313,8 +15475,8 @@ function exiSave(){
   if(a>0)row.A=a;
   row.img=_exInfoImg||null;
   if(row.img&&row.diag)row.diag=null;
-  saveData();
-  if(typeof sbUpsertOneDrill==='function'){ try{ sbUpsertOneDrill(row); }catch(e){} }
+  if(typeof drillSaveOne==='function') drillSaveOne(row);
+  else { saveData(); if(typeof sbUpsertOneDrill==='function'){ try{ sbUpsertOneDrill(row); }catch(e){} } }
   var msg=document.getElementById('exi-msg');
   msg.style.color='#1D9E75'; msg.textContent='✓ Guardado';
   setTimeout(function(){ exiClose(); drawTable(gf()); },700);
@@ -31635,6 +31797,11 @@ function _sbDrillToPayload(d){
 // imagen). Se usa al combinar/crear ejercicios para que queden guardados en
 // la nube y aparezcan al re-iniciar sesión, incluso desde otro dispositivo.
 function sbUpsertOneDrill(d){
+  // v140: sellar SIEMPRE la modificación local, antes de cualquier return.
+  // El sello es local y es lo que permite que el merge sepa que esta versión
+  // es más nueva que la de la nube — hace falta también (y sobre todo) cuando
+  // no se puede subir: offline, sin sesión, o antes de la sincronización.
+  try{ if(d && typeof drillTouch==='function') drillTouch(d); }catch(e){}
   // Antes de la reconciliación inicial, no subir: encolar en pendientes.
   // La carga inicial preserva y sube los pendientes que no estén en la nube.
   if(!window._sbDrillsSynced){
@@ -31915,6 +32082,13 @@ function _sbDrillFromRow(row){
   d.id = row.id;
   d.n = row.n;
   if(row.cat) d.cat = row.cat;
+  // v140: preservar la marca de tiempo de la nube para poder comparar
+  // "quién es más nuevo" en el merge. Si data._upd no viajó (filas viejas),
+  // se usa updated_at de la columna.
+  if(d._upd==null && row.updated_at){
+    var t=Date.parse(row.updated_at);
+    if(!isNaN(t)) d._upd=t;
+  }
   return d;
 }
 
@@ -32018,8 +32192,17 @@ function sbScheduleTanda2bSync(){
               if(r2.error) console.error('[Supabase] Sync drills_exercises error:', r2.error);
               else {
                 console.log('[Supabase] Sync drills_exercises OK');
-                // Todo D subió correctamente → ya no hay pendientes
-                try{ localStorage.setItem('drills_pending', '[]'); }catch(e){}
+                // v140: NO vaciar la lista completa de pendientes. Antes se
+                // hacía `drills_pending=[]` y eso borraba marcas de ejercicios
+                // modificados mientras el batch viajaba; después la carga
+                // inicial los descartaba por "no estar pendientes". Ahora se
+                // quitan sólo los ids que realmente se subieron en este batch.
+                try{
+                  var subidos={}; dPayload.forEach(function(x){ subidos[Number(x.id)]=true; });
+                  var pnd=JSON.parse(localStorage.getItem('drills_pending')||'[]');
+                  pnd=pnd.filter(function(id){ return !subidos[Number(id)]; });
+                  localStorage.setItem('drills_pending', JSON.stringify(pnd));
+                }catch(e){}
               }
             });
           }
@@ -32063,14 +32246,22 @@ sbLoadInitialData = function(){
       tomb.forEach(function(t){ tombSet[Number(t)]=true; });
       try{ Object.keys(window._drillTombCloudCache||{}).forEach(function(k){ tombSet[Number(k)]=true; }); }catch(e){}
       try{ Object.keys(_drillTombCloudLocal()).forEach(function(k){ tombSet[Number(k)]=true; }); }catch(e){}
-      // Pendientes: ejercicios creados/combinados recién que quizá no llegaron a subir.
-      // SOLO estos se preservan si no están en la nube. Todo lo demás: la nube manda,
-      // así no se resucita basura vieja de localStorage.
+      // ── v140: MERGE POR TIMESTAMP (last-write-wins real) ──
+      // ANTES: todo ejercicio local que no estuviera en la nube y no figurara
+      // en `drills_pending` se DESCARTABA ("la nube manda"), y los que sí
+      // estaban en la nube eran pisados por la versión remota sin comparar
+      // fechas. Si un upsert había fallado (sin sesión, RLS, red), el trabajo
+      // local se perdía en silencio: ejercicios nuevos que desaparecían y
+      // datos de GPS que volvían a aparecer vacíos.
+      // AHORA: la nube es la base, pero cada ejercicio local gana si su sello
+      // `_upd` es más nuevo, y los que no están en la nube SIEMPRE se
+      // preservan (el tombstone es la única autoridad para borrar).
+      // Pendientes: ids que quedaron esperando subir a la nube
       var pend = [];
       try{ pend = JSON.parse(localStorage.getItem('drills_pending')||'[]'); }catch(e){}
       var pendSet = {};
       pend.forEach(function(t){ pendSet[Number(t)]=true; });
-      var keys = {};
+      var cloud = {};
       (rows||[]).forEach(function(row){
         if(tombSet[Number(row.id)]){
           if(typeof sbClient!=='undefined' && sbClient && sbCurrentUser){
@@ -32078,25 +32269,64 @@ sbLoadInitialData = function(){
           }
           return;
         }
-        keys[Number(row.id)] = _sbDrillFromRow(row);
+        cloud[Number(row.id)] = _sbDrillFromRow(row);
       });
-      // Preservar sólo los PENDIENTES que no están en la nube (no cualquier local viejo)
-      var localOnly = D.filter(function(d){
-        return !(Number(d.id) in keys) && !tombSet[Number(d.id)] && pendSet[Number(d.id)];
+      var merged = {};
+      Object.keys(cloud).forEach(function(id){ merged[id] = cloud[id]; });
+
+      var toUpload = [], nLocalWin = 0, nLocalOnly = 0;
+      var orphansNoStamp = [];   // locales sin sello y ausentes de la nube
+      D.forEach(function(d){
+        var id = Number(d.id);
+        if(isNaN(id)) return;
+        if(tombSet[id]) return;                 // borrado: no revive
+        var c = merged[id];
+        if(!c){                                  // sólo existe local
+          merged[id] = d; nLocalOnly++;
+          // Si tiene sello o está pendiente, es trabajo reciente de este
+          // dispositivo → subir. Si NO tiene ninguno de los dos, podría ser
+          // residuo de otra base/categoría: se conserva pero no se sube hasta
+          // confirmar (ver salvaguarda abajo).
+          if(d._upd || pendSet[id]) toUpload.push(d);
+          else orphansNoStamp.push(d);
+          return;
+        }
+        var lu = Number(d._upd||0), cu = Number(c._upd||0);
+        if(lu > cu){                             // local más nuevo → gana y se resube
+          merged[id] = d; toUpload.push(d); nLocalWin++;
+        }
       });
-      var descartados = D.filter(function(d){
-        return !(Number(d.id) in keys) && !tombSet[Number(d.id)] && !pendSet[Number(d.id)];
-      }).length;
-      console.log('[Supabase] Drills — en la nube: '+Object.keys(keys).length+' · pendientes preservados: '+localOnly.length+(localOnly.length?' → ids '+localOnly.map(function(d){return d.id;}).join(','):'')+(descartados?' · locales viejos descartados (la nube manda): '+descartados:'')+(tomb.length?' · borrados ignorados: '+tomb.length:''));
+
+      // Salvaguarda: si aparecen muchos ejercicios locales sin sello que la
+      // nube no tiene, es sospechoso de datos de otra base/categoría. Se
+      // conservan en pantalla pero NO se suben automáticamente, para no
+      // contaminar la nube con ejercicios ajenos.
+      var nCloudCount = Object.keys(cloud).length;
+      var sospechoso = orphansNoStamp.length > Math.max(8, Math.ceil(nCloudCount*0.30));
+      if(orphansNoStamp.length && !sospechoso){
+        orphansNoStamp.forEach(function(d){ toUpload.push(d); });
+      } else if(sospechoso){
+        console.warn('[Supabase] '+orphansNoStamp.length+' ejercicio(s) locales sin registro de modificación no están en la nube. '+
+          'Se muestran pero NO se suben automáticamente (podrían venir de otra base de datos). '+
+          'Si son tuyos y querés subirlos, corré: subirEjerciciosLocales()');
+        window._drillOrphans = orphansNoStamp.slice();
+      }
+
+      console.log('[Supabase] Drills — nube: '+nCloudCount+
+        ' · sólo local (preservados): '+nLocalOnly+
+        ' · local más nuevo (gana): '+nLocalWin+
+        ' · total: '+Object.keys(merged).length+
+        (tomb.length?' · borrados ignorados: '+tomb.length:''));
+
       D.length = 0;
-      Object.values(keys).forEach(function(d){ D.push(d); });
-      localOnly.forEach(function(d){ D.push(d); });
+      Object.keys(merged).forEach(function(id){ D.push(merged[id]); });
       // La nube ya mandó: desde ahora los syncs quedan habilitados
       window._sbDrillsSynced = true;
-      // Subir a la nube los pendientes que faltaban
-      if(localOnly.length && typeof sbUpsertOneDrill==='function'){
-        localOnly.forEach(function(d){ sbUpsertOneDrill(d); });
+      // Subir lo que la nube no tiene o tiene desactualizado
+      if(toUpload.length && typeof sbUpsertOneDrill==='function'){
+        toUpload.forEach(function(d){ sbUpsertOneDrill(d); });
       }
+      try{ if(typeof saveData==='function') saveData(); }catch(e){}
       // Refrescar la biblioteca con el estado real de la nube (antes quedaba
       // el render viejo de localStorage hasta que el usuario tocaba algo)
       try{
