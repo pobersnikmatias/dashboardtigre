@@ -15614,6 +15614,21 @@ function planEditItem(di,bi,ei){
   if(jugEl)jugEl.value=item.customJug!=null?item.customJug:(ex&&ex.jug?ex.jug:'');
   if(largEl)largEl.value=item.customL!=null?item.customL:(ex&&ex.L?ex.L:'');
   if(anchEl)anchEl.value=item.customA!=null?item.customA:(ex&&ex.A?ex.A:'');
+  // v141: precargar el tiempo tal como está guardado en la tarea, para poder
+  // corregirlo sin tener que borrar el ejercicio y volver a agregarlo.
+  var mnEl=document.getElementById('pei-mins');
+  var nsEl=document.getElementById('pei-nseries');
+  var stEl=document.getElementById('pei-serietime');
+  var ptEl=document.getElementById('pei-pausetime');
+  if(mnEl){
+    mnEl.value=item.mins||'';
+    if(item.minsTotal!=null) mnEl.dataset.totalSec=Math.round(item.minsTotal*60);
+    else delete mnEl.dataset.totalSec;
+  }
+  if(nsEl)nsEl.value=item.numSeries||'';
+  if(stEl)stEl.value=item.serieTime?_planFmtMinSec(item.serieTime):'';
+  if(ptEl)ptEl.value=item.pauseTime?_planFmtMinSec(item.pauseTime):'';
+  peiTimeSync(item.numSeries&&item.serieTime?'series':'none');
   // Jugadores
   var listEl=document.getElementById('pei-players-list');
   var playersWrap=document.getElementById('pei-players-wrap');
@@ -15664,6 +15679,41 @@ function peiPlayerToggle(cb){
 }
 window.peiPlayerToggle=peiPlayerToggle;
 
+// v141: mismo comportamiento que el modal de agregar: si se cargan series, los
+// minutos se recalculan como tiempo efectivo de trabajo y se guarda aparte el
+// tiempo total (trabajo + pausas), que es lo que ocupa en la sesión.
+function peiTimeSync(source){
+  var nsEl=document.getElementById('pei-nseries');
+  var stEl=document.getElementById('pei-serietime');
+  var ptEl=document.getElementById('pei-pausetime');
+  var mnEl=document.getElementById('pei-mins');
+  var ntEl=document.getElementById('pei-nettime');
+  if(!mnEl)return;
+  var ns=parseInt(nsEl?nsEl.value:0)||0;
+  var stRaw=parseDurSec(stEl?stEl.value:'');
+  var stSec=stRaw!==null ? ((stEl.value||'').match(/[:\mMs]/i) ? stRaw : stRaw*60) : 0;
+  var ptRaw=parseDurSec(ptEl?ptEl.value:'');
+  var ptSec=ptRaw!==null ? ((ptEl.value||'').match(/[:\msMS]/) ? ptRaw : ptRaw*60) : 0;
+
+  var fmt=function(sec){
+    var m=Math.floor(sec/60), s=Math.round(sec%60);
+    return m>0 ? (s>0 ? m+"'"+s+'"' : m+"'") : s+'"';
+  };
+  if(ns && stSec){
+    var trabajoSec=ns*stSec;
+    var totalSec=trabajoSec+Math.max(0,ns-1)*ptSec;
+    mnEl.value=Math.max(1,Math.round(trabajoSec/60));
+    mnEl.dataset.totalSec=totalSec;
+    if(ntEl) ntEl.innerHTML='<span title="Tiempo efectivo de trabajo (se usa para el volumen)">⚡ '+fmt(trabajoSec)+' trabajo</span> · '+
+      '<span title="Tiempo total que ocupa en la sesión" style="color:#888">⏱ '+fmt(totalSec)+' total</span>';
+  } else if(source==='mins' || !ns){
+    // Minutos directos: se descarta la estructura de series
+    delete mnEl.dataset.totalSec;
+    if(ntEl) ntEl.textContent='';
+  }
+}
+window.peiTimeSync=peiTimeSync;
+
 function peiSave(){
   var di=window._peiDi,bi=window._peiBi,ei=window._peiEi;
   if(di==null||bi==null||ei==null||!_planEditData)return;
@@ -15681,6 +15731,33 @@ function peiSave(){
     if(!cb.checked)noDisp.push(cb.value);
   });
   item.noDisp=noDisp.length?noDisp:null;
+  // v141: guardar el tiempo editado con la misma estructura que usa el modal
+  // de agregar: mins = trabajo efectivo, minsTotal = trabajo + pausas.
+  var mnEl=document.getElementById('pei-mins');
+  var nsEl=document.getElementById('pei-nseries');
+  var stEl=document.getElementById('pei-serietime');
+  var ptEl=document.getElementById('pei-pausetime');
+  var minsV=parseInt(mnEl?mnEl.value:0)||0;
+  if(minsV>0) item.mins=minsV;
+  var nsV=parseInt(nsEl?nsEl.value:0)||0;
+  var stRaw=parseDurSec(stEl?stEl.value:'');
+  var stSecV=stRaw!==null ? ((stEl.value||'').match(/[:\mMs]/i) ? stRaw : stRaw*60) : null;
+  var ptRaw=parseDurSec(ptEl?ptEl.value:'');
+  var ptSecV=ptRaw!==null ? ((ptEl.value||'').match(/[:\msMS]/) ? ptRaw : ptRaw*60) : null;
+  if(nsV>0 && stSecV){
+    item.numSeries=nsV;
+    item.serieTime=stSecV;
+    if(ptSecV!==null && ptSecV>=0) item.pauseTime=ptSecV; else delete item.pauseTime;
+    var totalSec=mnEl&&mnEl.dataset.totalSec ? parseFloat(mnEl.dataset.totalSec)
+               : (nsV*stSecV + Math.max(0,nsV-1)*(ptSecV||0));
+    item.minsTotal=Math.round(totalSec/60*10)/10;
+  } else {
+    // Volvió a minutos directos: limpiar la estructura de series
+    delete item.numSeries;
+    delete item.serieTime;
+    delete item.pauseTime;
+    delete item.minsTotal;
+  }
   document.getElementById('pei-modal').style.display='none';
   window._peiDi=null;window._peiBi=null;window._peiEi=null;
   planRenderDays();planRenderWeekSummary();
@@ -16170,6 +16247,27 @@ document.addEventListener('DOMContentLoaded',function(){
         <div id="pei-name" style="font-size:11px;color:#666;margin-top:2px"></div>
       </div>
       <button onclick="peiClose()" style="border:none;background:none;font-size:20px;cursor:pointer;color:#aaa;padding:0;line-height:1">✕</button>
+    </div>
+    <!-- v141: tiempo editable (minutos / series / pausa) -->
+    <div style="background:#f2f8ff;border:1px solid #cfe0f5;border-radius:6px;padding:10px">
+      <div style="font-size:10px;font-weight:700;color:#0C447C;margin-bottom:7px">⏱ Tiempo en esta sesión</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:10px;color:#555;display:flex;flex-direction:column;gap:3px">Minutos
+          <input id="pei-mins" type="number" min="1" step="1" oninput="peiTimeSync('mins')" style="width:64px;padding:4px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center;font-weight:700">
+        </label>
+        <span style="font-size:10px;color:#aaa;padding-bottom:6px">o por series:</span>
+        <label style="font-size:10px;color:#555;display:flex;flex-direction:column;gap:3px">Series
+          <input id="pei-nseries" type="number" min="1" step="1" placeholder="—" oninput="peiTimeSync('series')" style="width:52px;padding:4px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center">
+        </label>
+        <label style="font-size:10px;color:#555;display:flex;flex-direction:column;gap:3px">Duración
+          <input id="pei-serietime" type="text" placeholder="4:00" oninput="peiTimeSync('series')" title="Formato minutos:segundos (ej: 4:00). También 90s o 2m." style="width:56px;padding:4px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center">
+        </label>
+        <label style="font-size:10px;color:#555;display:flex;flex-direction:column;gap:3px">Pausa
+          <input id="pei-pausetime" type="text" placeholder="1:30" oninput="peiTimeSync('series')" title="Formato minutos:segundos (ej: 1:30 = 90 segundos)." style="width:56px;padding:4px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:center">
+        </label>
+      </div>
+      <div id="pei-nettime" style="font-size:10px;color:#1D9E75;font-weight:700;margin-top:6px;min-height:13px"></div>
+      <div style="font-size:9px;color:#9aa5b5;margin-top:3px">Si cargás series, los minutos se recalculan solos. Para volver a minutos directos, borrá el campo Series.</div>
     </div>
     <!-- Dims custom -->
     <div style="background:#fffdf0;border:1px solid #f0e8b0;border-radius:6px;padding:10px">
