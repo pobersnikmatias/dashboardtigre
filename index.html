@@ -8251,6 +8251,11 @@ function nameAuditBestName(names){
 function nameAuditMerge(variants, canonical){
   if(!canonical||!variants||!variants.length) return 0;
   var moved=0;
+  var oldNames=[];
+  variants.forEach(function(v){
+    var nm=(typeof v==='string')?v:v.name;
+    if(nm&&nm!==canonical) oldNames.push(nm);
+  });
   variants.forEach(function(v){
     var from=(typeof v==='string')?v:v.name;
     if(!from||from===canonical)return;
@@ -8285,9 +8290,222 @@ function nameAuditMerge(variants, canonical){
     else PLAYER_PROFILES[ck].name=canonical;
     if(typeof profTombClear==='function') profTombClear(ck);
   }catch(e){}
+  // v145: deduplicar y BORRAR de la nube las filas con el nombre viejo. Sin
+  // esto la fusión sólo vivía en memoria y volvía al reiniciar sesión.
+  try{ nameDedupeRecords(); }catch(e){}
+  try{ nameSyncAfterMerge(oldNames, canonical); }catch(e){}
   return moved;
 }
 window.nameAuditMerge=nameAuditMerge;
+
+// ── PERSISTENCIA DE LA FUSIÓN EN LA NUBE (v145) ──────────────────────────
+// BUG que esto arregla: en varias tablas de Supabase el NOMBRE es parte de la
+// clave primaria (wellness_data: name+date · pse_data: name+date+week+day ·
+// nutrition/mobility/gym_evals: player_key). Al renombrar, el upsert creaba
+// una fila NUEVA y la vieja quedaba intacta en la nube. Al volver a iniciar
+// sesión se cargaban las dos y el duplicado reaparecía: la fusión "no se
+// guardaba".
+// Ahora, después de fusionar: se deduplica en memoria, se suben las filas con
+// el nombre nuevo y se BORRAN las filas viejas de cada tabla.
+
+// Quita registros que quedaron duplicados tras el rename (mismo jugador,
+// misma fecha). Conserva el más completo.
+function nameDedupeRecords(){
+  var removed=0;
+  var norm=function(s){ return (typeof cargaNormName==='function')?cargaNormName(s):String(s||'').toLowerCase().trim(); };
+  var pass=function(arr, keyFn){
+    if(!Array.isArray(arr))return;
+    var seen={};
+    for(var i=arr.length-1;i>=0;i--){
+      var r=arr[i]; if(!r)continue;
+      var k=keyFn(r);
+      if(seen[k]===undefined){ seen[k]=i; continue; }
+      // Duplicado: conservar el que tenga más campos con datos
+      var other=arr[seen[k]];
+      var score=function(x){ return Object.keys(x||{}).filter(function(f){ return x[f]!=null&&x[f]!==''; }).length; };
+      if(score(r)>score(other)){ arr.splice(seen[k],1); seen[k]=i>seen[k]?i-1:i; }
+      else { arr.splice(i,1); }
+      removed++;
+    }
+  };
+  pass(typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:null, function(r){ return norm(r.name)+'||'+(r.date||''); });
+  pass(typeof PSE_DATA!=='undefined'?PSE_DATA:null, function(r){ return norm(r.name)+'||'+(r.date||'')+'||'+(r.week||'')+'||'+(r.day||''); });
+  pass(typeof TST_DATA!=='undefined'?TST_DATA:null, function(r){ return norm(r.name)+'||'+(r.date||'')+'||'+(r.testId||''); });
+  if(removed) console.log('[Nombres] '+removed+' registro(s) duplicado(s) eliminados tras la fusión.');
+  return removed;
+}
+window.nameDedupeRecords=nameDedupeRecords;
+
+// Borra en la nube todo rastro de los nombres viejos y sube el estado nuevo.
+function nameSyncAfterMerge(oldNames, canonical){
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser){
+    console.warn('[Nombres] Sin sesión: la fusión quedó local. Se sincroniza al iniciar sesión.');
+    // Dejar registrado para reintentar al conectar
+    try{
+      var pend=JSON.parse(localStorage.getItem('nameMergePending_v1')||'[]');
+      pend.push({old:oldNames, canonical:canonical, ts:Date.now()});
+      localStorage.setItem('nameMergePending_v1', JSON.stringify(pend));
+    }catch(e){}
+    return;
+  }
+  var cat=SB_CATEGORIA;
+  var uniq=(oldNames||[]).filter(function(n){ return n && n!==canonical; });
+  if(!uniq.length) return;
+  console.log('[Nombres] Limpiando en la nube: '+uniq.join(' · ')+' → '+canonical);
+
+  // 1) Borrar filas viejas de las tablas donde el NOMBRE es clave
+  uniq.forEach(function(oldN){
+    sbClient.from('wellness_data').delete().eq('name', oldN).eq('categoria', cat)
+      .then(function(r){ if(r.error)console.warn('[Nombres] wellness:',r.error.message); });
+    sbClient.from('pse_data').delete().eq('name', oldN).eq('categoria', cat)
+      .then(function(r){ if(r.error)console.warn('[Nombres] pse:',r.error.message); });
+    var oldKey=(typeof profKeyOf==='function')?profKeyOf(oldN):String(oldN).toLowerCase();
+    ['nutrition_data','mobility_data','gym_evals'].forEach(function(tbl){
+      sbClient.from(tbl).delete().eq('player_key', oldKey).eq('categoria', cat)
+        .then(function(r){ if(r.error)console.warn('[Nombres] '+tbl+':',r.error.message); });
+    });
+  });
+
+  // 2) Subir el estado actual (ya con el nombre canónico)
+  setTimeout(function(){
+    try{
+      if(typeof WELLNESS_DATA!=='undefined'&&WELLNESS_DATA.length&&typeof _sbWellnessToPayload==='function'){
+        var wp=WELLNESS_DATA.map(_sbWellnessToPayload).filter(Boolean);
+        if(wp.length) sbClient.from('wellness_data').upsert(wp,{onConflict:'name,date,categoria'}).then(function(r){
+          if(r.error)console.warn('[Nombres] subir wellness:',r.error.message); else console.log('[Nombres] wellness actualizado ('+wp.length+')');
+        });
+      }
+      if(typeof PSE_DATA!=='undefined'&&PSE_DATA.length&&typeof _sbPseToPayload==='function'){
+        var pp=PSE_DATA.map(_sbPseToPayload).filter(Boolean);
+        if(pp.length) sbClient.from('pse_data').upsert(pp,{onConflict:'name,date,week,day,categoria'}).then(function(r){
+          if(r.error)console.warn('[Nombres] subir pse:',r.error.message); else console.log('[Nombres] PSE actualizado ('+pp.length+')');
+        });
+      }
+      if(typeof NUTRITION_DATA!=='undefined'&&typeof _sbNutritionToPayloads==='function'){
+        var np=_sbNutritionToPayloads(NUTRITION_DATA);
+        if(np&&np.length) sbClient.from('nutrition_data').upsert(np,{onConflict:'player_key,categoria'}).then(function(){});
+      }
+      if(typeof MOBILITY_DATA!=='undefined'&&typeof _sbMobilityToPayloads==='function'){
+        var mp=_sbMobilityToPayloads(MOBILITY_DATA);
+        if(mp&&mp.length) sbClient.from('mobility_data').upsert(mp,{onConflict:'player_key,categoria'}).then(function(){});
+      }
+      if(typeof GYM_EVALS!=='undefined'&&typeof _sbGymEvalsToPayloads==='function'){
+        var gp=_sbGymEvalsToPayloads(GYM_EVALS);
+        if(gp&&gp.length) sbClient.from('gym_evals').upsert(gp,{onConflict:'player_key,categoria'}).then(function(){});
+      }
+      // GPS y partidos: el nombre va dentro del JSON, así que el upsert por su
+      // propia clave ya reemplaza la fila con los nombres corregidos.
+      if(typeof sbScheduleMicrocicloSync==='function') sbScheduleMicrocicloSync();
+      if(typeof MATCHES!=='undefined'&&MATCHES.length&&typeof _sbMatchToPayload==='function'){
+        var mtp=MATCHES.map(_sbMatchToPayload).filter(Boolean);
+        if(mtp.length) sbClient.from('matches').upsert(mtp,{onConflict:'id'}).then(function(){});
+      }
+      // Tests y alias viajan por app_settings
+      if(typeof sbScheduleTanda3Sync==='function') sbScheduleTanda3Sync();   // TST_DATA, alias
+      if(typeof sbScheduleTanda1Sync==='function') sbScheduleTanda1Sync();   // nutrición, gym sessions
+      if(typeof sbScheduleTanda2aSync==='function') sbScheduleTanda2aSync(); // gym evals
+      if(typeof sbScheduleTanda2bSync==='function') sbScheduleTanda2bSync(); // matches
+      if(typeof sbScheduleWellPseSync==='function') sbScheduleWellPseSync();
+      if(typeof sbScheduleProfileSync==='function') sbScheduleProfileSync();
+      console.log('[Nombres] Sincronización de la fusión enviada.');
+    }catch(e){ console.warn('[Nombres] sync:',e); }
+  }, 600);
+}
+window.nameSyncAfterMerge=nameSyncAfterMerge;
+
+// Reintenta fusiones que quedaron pendientes por falta de sesión
+function nameFlushPendingMerges(){
+  var pend=[];
+  try{ pend=JSON.parse(localStorage.getItem('nameMergePending_v1')||'[]'); }catch(e){}
+  if(!pend.length)return;
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return;
+  console.log('[Nombres] Reintentando '+pend.length+' fusión(es) pendiente(s).');
+  pend.forEach(function(p){ nameSyncAfterMerge(p.old, p.canonical); });
+  try{ localStorage.setItem('nameMergePending_v1','[]'); }catch(e){}
+}
+window.nameFlushPendingMerges=nameFlushPendingMerges;
+
+// ── CORRECCIÓN AUTOMÁTICA AL CARGAR (v145) ────────────────────────────────
+// Última línea de defensa. Aunque un nombre viejo vuelva a entrar —porque el
+// compañero tenía la app abierta con datos viejos y los resubió, o porque una
+// planilla nueva trae la grafía anterior— se corrige solo al cargar, usando
+// los alias que quedaron registrados al fusionar. Así la fusión es definitiva
+// y no depende de que todos recarguen al mismo tiempo.
+function nameCanonical(n){
+  if(!n) return n;
+  try{
+    if(typeof CARGA_NAME_ALIASES==='undefined'||!CARGA_NAME_ALIASES) return n;
+    var k=(typeof cargaNormName==='function')?cargaNormName(n):String(n).toLowerCase().trim();
+    var c=CARGA_NAME_ALIASES[k];
+    return c||n;
+  }catch(e){ return n; }
+}
+window.nameCanonical=nameCanonical;
+
+// Recorre todos los datasets aplicando los alias. Devuelve cuántos corrigió.
+function nameApplyAliases(){
+  var fixed=0;
+  var fix=function(obj,prop){
+    if(!obj||!obj[prop])return;
+    var c=nameCanonical(obj[prop]);
+    if(c && c!==obj[prop]){ obj[prop]=c; fixed++; }
+  };
+  [typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:null,
+   typeof PSE_DATA!=='undefined'?PSE_DATA:null,
+   typeof TST_DATA!=='undefined'?TST_DATA:null
+  ].forEach(function(arr){ if(Array.isArray(arr)) arr.forEach(function(r){ fix(r,'name'); }); });
+  [typeof MICROCICLO!=='undefined'?MICROCICLO:null,
+   typeof MATCHES!=='undefined'?MATCHES:null
+  ].forEach(function(arr){
+    if(!Array.isArray(arr))return;
+    arr.forEach(function(s){ (s&&s.players||[]).forEach(function(p){ fix(p,'name'); }); });
+  });
+  try{ if(Array.isArray(RESI_TESTS)) RESI_TESTS.forEach(function(t){
+    (t&&t.players||[]).forEach(function(p){ fix(p,'name'); });
+  }); }catch(e){}
+  // Objetos indexados por key de jugador
+  [typeof NUTRITION_DATA!=='undefined'?NUTRITION_DATA:null,
+   typeof GYM_EVALS!=='undefined'?GYM_EVALS:null,
+   typeof MOBILITY_DATA!=='undefined'?MOBILITY_DATA:null
+  ].forEach(function(obj){
+    if(!obj||typeof obj!=='object')return;
+    Object.keys(obj).forEach(function(k){
+      var c=nameCanonical(k);
+      if(!c||c===k)return;
+      var nk=(typeof profKeyOf==='function')?profKeyOf(c):String(c).toLowerCase();
+      if(nk===k)return;
+      if(obj[nk]===undefined) obj[nk]=obj[k];
+      else if(Array.isArray(obj[nk])&&Array.isArray(obj[k])) obj[nk]=obj[nk].concat(obj[k]);
+      delete obj[k]; fixed++;
+    });
+  });
+  // Perfiles: no debería quedar ninguno con la grafía vieja
+  try{
+    Object.keys(PLAYER_PROFILES||{}).forEach(function(k){
+      var p=PLAYER_PROFILES[k]; if(!p||!p.name)return;
+      var c=nameCanonical(p.name);
+      if(!c||c===p.name)return;
+      var nk=(typeof profKeyOf==='function')?profKeyOf(c):String(c).toLowerCase();
+      if(nk===k){ p.name=c; fixed++; return; }
+      if(!PLAYER_PROFILES[nk]) PLAYER_PROFILES[nk]=Object.assign({},p,{name:c});
+      else {
+        var d=PLAYER_PROFILES[nk];
+        if(p.injuries&&p.injuries.length) d.injuries=(d.injuries||[]).concat(p.injuries);
+      }
+      delete PLAYER_PROFILES[k];
+      if(typeof profTombAdd==='function') profTombAdd(k);
+      if(typeof profDeleteRemote==='function') profDeleteRemote(k);
+      fixed++;
+    });
+  }catch(e){}
+  if(fixed){
+    try{ nameDedupeRecords(); }catch(e){}
+    console.log('[Nombres] '+fixed+' referencia(s) corregida(s) automáticamente con los alias guardados.');
+    try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  }
+  return fixed;
+}
+window.nameApplyAliases=nameApplyAliases;
 
 // ── PANEL ──
 var _nameAuditSel={};   // {indiceGrupo: nombreCanónicoElegido}
@@ -8385,6 +8603,7 @@ window.nameAuditMergeAll=nameAuditMergeAll;
 
 function nameAuditAfterMerge(moved, n){
   try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  try{ if(typeof dstoreSet==='function'&&typeof _buildFullPayload==='function') dstoreSet(_buildFullPayload(true)); }catch(e){}
   try{ if(typeof renderProfilesTable==='function')renderProfilesTable(); }catch(e){}
   try{ if(typeof cargaRender==='function'&&typeof mainView!=='undefined'&&mainView==='carga')cargaRender(); }catch(e){}
   try{ if(typeof hoyRender==='function'&&typeof mainView!=='undefined'&&mainView==='hoy')hoyRender(); }catch(e){}
@@ -31310,6 +31529,20 @@ function sbOnLoginSuccess(){
     if(typeof fixtureRender === 'function') try{ fixtureRender(); }catch(e){}
     if(typeof fixSubTab === 'function') try{ fixSubTab('fixture'); }catch(e){}
     if(typeof fixRenderJugadores === 'function') try{ fixRenderJugadores(); }catch(e){}
+    // v145: con TODOS los datos ya cargados de la nube, aplicar los alias de
+    // nombres. Si volvió a entrar una grafía vieja (resubida por el compañero
+    // o por una planilla), se corrige acá y la fusión queda firme.
+    try{
+      if(typeof nameApplyAliases==='function'){
+        var _nf=nameApplyAliases();
+        if(_nf && typeof nameSyncAfterMerge==='function'){
+          // Reponer en la nube el estado corregido
+          try{ if(typeof sbScheduleWellPseSync==='function')sbScheduleWellPseSync(); }catch(e){}
+          try{ if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync(); }catch(e){}
+        }
+      }
+      if(typeof nameFlushPendingMerges==='function') nameFlushPendingMerges();
+    }catch(e){ console.warn('[Nombres] post-carga:',e); }
     // Tanda 2b refrescos de otras vistas (sin duplicar los anteriores)
     if(typeof cargaRebuildWeekSel === 'function') try{ cargaRebuildWeekSel(); }catch(e){}
     if(typeof mcRenderWeek === 'function') try{ mcRenderWeek(); }catch(e){}
