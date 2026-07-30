@@ -4196,6 +4196,11 @@ function setMainView(v){
     // Planificación abre directamente en "Planificación semanal".
     if(typeof planRenderWeeksList==='function') planRenderWeeksList();
     try{ if(typeof planSwitchSubtab==='function') planSwitchSubtab('weeks'); }catch(e){}
+    // v143: refresco automático mientras se trabaja acá, para ver en vivo lo
+    // que va agregando el compañero desde su cuenta.
+    try{ if(typeof planPollStart==='function'){ planPollStart(); planPollOnce(); } }catch(e){}
+  } else {
+    try{ if(typeof planPollStop==='function') planPollStop(); }catch(e){}
   }
   if(v==='gym'){
     // Prep. física tiene 2 subpestañas internas: Gimnasio (default) y Resistencia.
@@ -7211,6 +7216,27 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
           <span id="plan-autosave-ind" style="font-size:10px;color:#1D9E75;font-weight:700;opacity:0;transition:opacity .35s;white-space:nowrap">✓ Guardado</span>
           <button class="btn bc" onclick="planCancelEdit()" style="font-size:10px;padding:4px 12px">✕ Cancelar</button>
         </div>
+        <!-- v142: fecha de inicio y duración del microciclo. Con esto el
+             wellness/PSE que cargan los chicos cae en la semana correcta sin
+             esperar al Excel de GPS. -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#555;padding:6px 10px;background:#fff;border:1px solid #dde;border-radius:6px">
+          <span style="font-weight:600">📅 Microciclo:</span>
+          <label style="display:flex;align-items:center;gap:4px">arranca el
+            <input id="plan-week-start" type="date" onchange="planWeekMetaChange()" style="font-size:11px;padding:3px 6px;border:1px solid #ccc;border-radius:4px">
+          </label>
+          <label style="display:flex;align-items:center;gap:4px">y dura
+            <select id="plan-week-len" onchange="planWeekMetaChange()" style="font-size:11px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;background:#fff">
+              <option value="5">5 días</option>
+              <option value="6">6 días</option>
+              <option value="7" selected>7 días</option>
+              <option value="8">8 días</option>
+              <option value="9">9 días</option>
+              <option value="10">10 días</option>
+              <option value="14">14 días</option>
+            </select>
+          </label>
+          <span id="plan-week-range" style="font-size:10px;color:#1D9E75;font-weight:600"></span>
+        </div>
         <!-- Partido de referencia selector -->
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#555;padding:6px 10px;background:#fff;border:1px solid #dde;border-radius:6px">
           <span style="font-weight:600">📊 Referencia partido:</span>
@@ -7783,7 +7809,32 @@ function profRenameEverywhere(oldKey, oldName, newName){
     delete obj[oldKey];
     moved.buckets++;
   });
-  // 4) Alias: que futuros CSV/planillas con el nombre VIEJO caigan en el nuevo
+  // 4) v144: datasets de la pestaña Hoy, indexados por nombre NORMALIZADO.
+  // Faltaban acá, y por eso la asistencia/flags de un jugador renombrado
+  // quedaban colgadas del nombre viejo.
+  var oldN=(typeof cargaNormName==='function')?cargaNormName(oldName):String(oldName||'').toLowerCase().trim();
+  var newN=(typeof cargaNormName==='function')?cargaNormName(newName):String(newName||'').toLowerCase().trim();
+  if(oldN && newN && oldN!==newN){
+    try{
+      if(typeof HOY_ASIST!=='undefined'&&HOY_ASIST){
+        Object.keys(HOY_ASIST).forEach(function(d){
+          var day=HOY_ASIST[d]; if(!day||day[oldN]===undefined)return;
+          if(day[newN]===undefined) day[newN]=day[oldN];
+          delete day[oldN]; moved.buckets++;
+        });
+        try{ if(typeof hoySaveAsist==='function')hoySaveAsist(); }catch(e){}
+      }
+    }catch(e){}
+    [ (typeof HOY_FLAGS!=='undefined'?HOY_FLAGS:null),
+      (typeof HOY_TODOS!=='undefined'?HOY_TODOS:null)
+    ].forEach(function(obj){
+      if(!obj||typeof obj!=='object')return;
+      if(obj[oldN]===undefined)return;
+      if(obj[newN]===undefined) obj[newN]=obj[oldN];
+      delete obj[oldN]; moved.buckets++;
+    });
+  }
+  // 5) Alias: que futuros CSV/planillas con el nombre VIEJO caigan en el nuevo
   if(typeof CARGA_NAME_ALIASES!=='undefined' && typeof cargaNormName==='function'){
     CARGA_NAME_ALIASES[cargaNormName(oldName)]=newName;
     // Y si el nombre viejo era alias de algo, reapuntarlo
@@ -7921,6 +7972,21 @@ function profFindDuplicates(){
 window.profFindDuplicates=profFindDuplicates;
 
 function profDupBanner(){
+  // v144: el aviso ahora cubre TODA la app, no sólo los perfiles. Detecta
+  // variantes del mismo nombre en wellness, PSE, GPS, tests, nutrición y gym.
+  var gAll=[];
+  try{ gAll=(typeof nameAuditGroups==='function')?nameAuditGroups():[]; }catch(e){}
+  if(gAll.length){
+    return '<div style="background:#fff8ec;border:1px solid #EF9F2755;border-radius:8px;padding:11px 13px;margin-bottom:11px">'+
+      '<div style="font-size:11.5px;font-weight:800;color:#B26A00;margin-bottom:4px">⚠️ '+gAll.length+' jugador'+(gAll.length===1?'':'es')+' con el nombre escrito de varias formas</div>'+
+      '<div style="font-size:10.5px;color:#7a6338;margin-bottom:8px">'+
+        gAll.slice(0,3).map(function(g){
+          return g.variants.map(function(v){return '"'+v.name+'"';}).join(' = ');
+        }).join(' · ')+(gAll.length>3?' · y '+(gAll.length-3)+' más':'')+
+      '</div>'+
+      '<button onclick="nameAuditOpen()" style="background:#EF9F27;border:none;color:#fff;border-radius:6px;padding:5px 14px;font-size:11px;font-weight:700;cursor:pointer">🔤 Revisar y unificar</button>'+
+    '</div>';
+  }
   var dups=profFindDuplicates();
   if(!dups.length)return '';
   return '<div style="background:#fff8ec;border:1px solid #EF9F2755;border-radius:8px;padding:10px 13px;margin-bottom:11px">'+
@@ -7976,6 +8042,358 @@ function profMergeDup(normName){
   alert('Listo: quedó un solo perfil "'+destName+'".'+(total?'\n'+total+' registros reasignados.':''));
 }
 window.profMergeDup=profMergeDup;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDITOR GLOBAL DE NOMBRES (v144)
+// Los nombres de jugadores entran por muchas puertas: perfiles, CSV de GPS,
+// wellness/PSE de la tablet, tests, nutrición, gimnasio. Cada fuente los
+// escribe distinto ("Jerónimo Moyano", "Moyano Jerónimo", "MOYANO J.",
+// "jeronimo moyano") y terminaban conviviendo como jugadores distintos.
+// Esto escanea TODOS los datasets, agrupa las variantes del mismo jugador y
+// permite fusionarlas dejando un solo nombre bien escrito con todos sus datos.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Normalización base: sin tildes, sin puntuación, minúsculas, espacios simples.
+function nameNormBase(s){
+  return String(s||'')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[.,_\-]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+// Clave "suelta": tokens ordenados alfabéticamente. Agrupa el orden invertido
+// ("Moyano Jerónimo" ≡ "Jerónimo Moyano"), que es el caso más común entre el
+// export del GPS (Apellido Nombre) y la carga manual (Nombre Apellido).
+function nameKeyLoose(s){
+  var t=nameNormBase(s).split(' ').filter(Boolean);
+  return t.slice().sort().join(' ');
+}
+// Claves por apellido + inicial: agrupan "MOYANO J." con "Jerónimo Moyano".
+// No se puede saber cuál token es el apellido (el orden varía según la fuente),
+// así que se generan TODAS las combinaciones token+inicial-del-otro y se
+// agrupa si alguna coincide. Si hay una inicial suelta, esa manda.
+function nameKeyInitials(s){
+  var t=nameNormBase(s).split(' ').filter(Boolean);
+  if(!t.length) return [];
+  if(t.length===1) return [t[0]];
+  var out=[];
+  var inis=t.filter(function(x){return x.length===1;});
+  var fulls=t.filter(function(x){return x.length>1;});
+  if(inis.length && fulls.length){
+    // "MOYANO J." → el token largo es el apellido, seguro
+    fulls.forEach(function(f){ inis.forEach(function(i){ out.push(f+'|'+i); }); });
+    return out;
+  }
+  // Nombre completo: probar cada token como apellido
+  t.forEach(function(cand){
+    t.forEach(function(other){
+      if(cand===other)return;
+      out.push(cand+'|'+other.charAt(0));
+    });
+  });
+  return out;
+}
+function nameKeyInitial(s){ var k=nameKeyInitials(s); return k.length?k[0]:''; }
+window.nameKeyLoose=nameKeyLoose;
+
+// Recorre todos los datasets y devuelve {nombreExacto: {total, por dataset}}
+function nameAuditCollect(){
+  var reg={};
+  var add=function(name, ds){
+    var n=String(name||'').trim();
+    if(!n)return;
+    if(!reg[n]) reg[n]={name:n, total:0, ds:{}};
+    reg[n].total++;
+    reg[n].ds[ds]=(reg[n].ds[ds]||0)+1;
+  };
+  // Perfiles (la fuente de verdad de la grafía)
+  try{ Object.keys(PLAYER_PROFILES||{}).forEach(function(k){
+    var p=PLAYER_PROFILES[k]; if(p&&p.name) add(p.name,'perfil');
+  }); }catch(e){}
+  // Registros con .name
+  [['wellness',typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:null],
+   ['pse',typeof PSE_DATA!=='undefined'?PSE_DATA:null],
+   ['tests',typeof TST_DATA!=='undefined'?TST_DATA:null]
+  ].forEach(function(pair){
+    var arr=pair[1]; if(!Array.isArray(arr))return;
+    arr.forEach(function(r){ if(r&&r.name) add(r.name,pair[0]); });
+  });
+  // Sesiones con players[]
+  [['gps',typeof MICROCICLO!=='undefined'?MICROCICLO:null],
+   ['partidos',typeof MATCHES!=='undefined'?MATCHES:null]
+  ].forEach(function(pair){
+    var arr=pair[1]; if(!Array.isArray(arr))return;
+    arr.forEach(function(s){ (s&&s.players||[]).forEach(function(p){ if(p&&p.name) add(p.name,pair[0]); }); });
+  });
+  // Resistencia
+  try{ if(Array.isArray(RESI_TESTS)) RESI_TESTS.forEach(function(t){
+    (t&&t.players||[]).forEach(function(p){ if(p&&p.name) add(p.name,'resistencia'); });
+  }); }catch(e){}
+  // Indexados por key de jugador: la key ES el nombre en minúsculas
+  [['nutricion',typeof NUTRITION_DATA!=='undefined'?NUTRITION_DATA:null],
+   ['gimnasio',typeof GYM_EVALS!=='undefined'?GYM_EVALS:null],
+   ['movilidad',typeof MOBILITY_DATA!=='undefined'?MOBILITY_DATA:null]
+  ].forEach(function(pair){
+    var obj=pair[1]; if(!obj||typeof obj!=='object')return;
+    Object.keys(obj).forEach(function(k){
+      var v=obj[k];
+      var cnt=Array.isArray(v)?v.length:(v&&typeof v==='object'?Object.keys(v).length:1);
+      if(!cnt)return;
+      // Buscar la grafía linda en perfiles; si no, usar la key
+      var pretty=k;
+      try{ if(PLAYER_PROFILES&&PLAYER_PROFILES[k]&&PLAYER_PROFILES[k].name) pretty=PLAYER_PROFILES[k].name; }catch(e){}
+      if(!reg[pretty]) reg[pretty]={name:pretty,total:0,ds:{}};
+      reg[pretty].total+=cnt;
+      reg[pretty].ds[pair[0]]=(reg[pretty].ds[pair[0]]||0)+cnt;
+    });
+  });
+  return reg;
+}
+window.nameAuditCollect=nameAuditCollect;
+
+// Agrupa las variantes del mismo jugador. Devuelve [{key, variants:[...], suggested}]
+function nameAuditGroups(){
+  var reg=nameAuditCollect();
+  var names=Object.keys(reg);
+  // 1ª pasada: agrupar por clave suelta (tolera orden invertido y tildes)
+  var byLoose={};
+  names.forEach(function(n){
+    var k=nameKeyLoose(n);
+    if(!k)return;
+    (byLoose[k]=byLoose[k]||[]).push(n);
+  });
+  // 2ª pasada: unir grupos que compartan apellido+inicial (cubre abreviados)
+  var groups=Object.keys(byLoose).map(function(k){ return {keys:[k], names:byLoose[k].slice()}; });
+  // Unión por inicial: SÓLO cuando una de las variantes viene abreviada
+  // ("MOYANO J."). Si los dos nombres están completos y son distintos, son
+  // personas distintas — sin esto se agrupaba "Lucas Gómez" con "Lucía Gómez".
+  var byIniAbbr={}, byIniFull={};
+  var hasInitial=function(n){
+    return nameNormBase(n).split(' ').filter(Boolean).some(function(t){ return t.length===1; });
+  };
+  groups.forEach(function(g,gi){
+    g.names.forEach(function(n){
+      var abbr=hasInitial(n);
+      nameKeyInitials(n).forEach(function(ik){
+        if(!ik)return;
+        var bag=abbr?byIniAbbr:byIniFull;
+        (bag[ik]=bag[ik]||[]).push(gi);
+      });
+    });
+  });
+  var byIni={};
+  Object.keys(byIniAbbr).forEach(function(ik){
+    // Une el abreviado con los completos que compartan apellido+inicial
+    var list=byIniAbbr[ik].concat(byIniFull[ik]||[]);
+    if(list.length>1) byIni[ik]=list;
+  });
+  var parent=groups.map(function(_,i){return i;});
+  function find(i){ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; }
+  function union(a,b){ a=find(a); b=find(b); if(a!==b) parent[b]=a; }
+  Object.keys(byIni).forEach(function(ik){
+    var idxs=byIni[ik];
+    // Solo unir si el apellido tiene largo razonable (evita falsos positivos)
+    if(ik.split('|')[0].length<4) return;
+    for(var i=1;i<idxs.length;i++) union(idxs[0],idxs[i]);
+  });
+  var merged={};
+  groups.forEach(function(g,i){
+    var r=find(i);
+    if(!merged[r]) merged[r]={names:[]};
+    merged[r].names=merged[r].names.concat(g.names);
+  });
+  // Armar el resultado, sólo grupos con más de una variante
+  var out=[];
+  Object.keys(merged).forEach(function(r){
+    var vs=merged[r].names.filter(function(v,i,a){return a.indexOf(v)===i;});
+    if(vs.length<2)return;
+    var variants=vs.map(function(n){ return reg[n]; }).sort(function(a,b){ return b.total-a.total; });
+    out.push({
+      key:nameKeyLoose(vs[0]),
+      variants:variants,
+      suggested:nameAuditBestName(vs)
+    });
+  });
+  return out.sort(function(a,b){ return a.suggested.localeCompare(b.suggested,'es'); });
+}
+window.nameAuditGroups=nameAuditGroups;
+
+// Elige el nombre "mejor escrito": prioriza el del perfil, después el que
+// tiene tildes y mayúsculas correctas, y por último el más largo/completo.
+function nameAuditBestName(names){
+  var profNames={};
+  try{ Object.keys(PLAYER_PROFILES||{}).forEach(function(k){
+    var p=PLAYER_PROFILES[k]; if(p&&p.name) profNames[p.name]=true;
+  }); }catch(e){}
+  var score=function(n){
+    var s=0;
+    var toks=n.split(/\s+/).filter(Boolean);
+    // Un nombre abreviado ("MOYANO J.") nunca debería ganar
+    if(toks.some(function(t){ return t.replace(/\./g,'').length===1; })) s-=200;
+    if(profNames[n]) s+=100;                                  // está en perfiles
+    // Capitalización correcta: cada palabra con mayúscula inicial y resto en
+    // minúscula. Es la forma "bien escrita" que buscamos.
+    var wellCased=toks.every(function(t){
+      return /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ'']*$/.test(t);
+    });
+    if(wellCased) s+=60;
+    if(/^[a-záéíóúñ '']+$/.test(n)) s-=40;                    // todo minúscula
+    if(/^[A-ZÁÉÍÓÚÑ '']+$/.test(n)) s-=45;                    // TODO MAYÚSCULA
+    s+=(n.match(/[áéíóúñÁÉÍÓÚÑ]/g)||[]).length*10;            // conserva tildes
+    s+=Math.min(toks.length,3)*3;                             // más completo
+    return s;
+  };
+  return names.slice().sort(function(a,b){ return score(b)-score(a); })[0];
+}
+
+// Fusiona todas las variantes de un grupo en el nombre canónico elegido.
+function nameAuditMerge(variants, canonical){
+  if(!canonical||!variants||!variants.length) return 0;
+  var moved=0;
+  variants.forEach(function(v){
+    var from=(typeof v==='string')?v:v.name;
+    if(!from||from===canonical)return;
+    var r=(typeof profRenameEverywhere==='function')
+      ? profRenameEverywhere((typeof profKeyOf==='function'?profKeyOf(from):from.toLowerCase()), from, canonical)
+      : {records:0};
+    moved+=(r&&r.records)||0;
+    // Si había un perfil con la grafía vieja, eliminarlo (sus datos ya migraron)
+    try{
+      var oldKey=(typeof profKeyOf==='function')?profKeyOf(from):from.toLowerCase();
+      var newKey=(typeof profKeyOf==='function')?profKeyOf(canonical):canonical.toLowerCase();
+      if(oldKey!==newKey && PLAYER_PROFILES[oldKey]){
+        var oldP=PLAYER_PROFILES[oldKey];
+        // Conservar lesiones y datos que el canónico no tenga
+        if(!PLAYER_PROFILES[newKey]){
+          PLAYER_PROFILES[newKey]=Object.assign({},oldP,{name:canonical});
+        } else {
+          var dst=PLAYER_PROFILES[newKey];
+          if(oldP.injuries&&oldP.injuries.length) dst.injuries=(dst.injuries||[]).concat(oldP.injuries);
+          ['vmax','accmax','dccmax','pos'].forEach(function(f){ if(dst[f]==null&&oldP[f]!=null) dst[f]=oldP[f]; });
+        }
+        delete PLAYER_PROFILES[oldKey];
+        if(typeof profTombAdd==='function') profTombAdd(oldKey);
+        if(typeof profDeleteRemote==='function') profDeleteRemote(oldKey);
+      }
+    }catch(e){}
+  });
+  // Asegurar que exista el perfil canónico
+  try{
+    var ck=(typeof profKeyOf==='function')?profKeyOf(canonical):canonical.toLowerCase();
+    if(!PLAYER_PROFILES[ck]) PLAYER_PROFILES[ck]={name:canonical,estado:'disponible'};
+    else PLAYER_PROFILES[ck].name=canonical;
+    if(typeof profTombClear==='function') profTombClear(ck);
+  }catch(e){}
+  return moved;
+}
+window.nameAuditMerge=nameAuditMerge;
+
+// ── PANEL ──
+var _nameAuditSel={};   // {indiceGrupo: nombreCanónicoElegido}
+
+function nameAuditOpen(){
+  var groups=nameAuditGroups();
+  var old=document.getElementById('nameaudit-modal'); if(old)old.remove();
+  _nameAuditSel={};
+  var d=document.createElement('div');
+  d.id='nameaudit-modal';
+  d.style.cssText='position:fixed;inset:0;background:rgba(10,16,28,.6);z-index:15000;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:#fff;border-radius:12px;width:min(96vw,720px);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.4)" onclick="event.stopPropagation()">'+
+    '<div style="background:#0D1B2A;padding:13px 16px;border-radius:12px 12px 0 0;display:flex;align-items:flex-start;justify-content:space-between;gap:10px">'+
+      '<div>'+
+        '<div style="color:#fff;font-size:14px;font-weight:800">🔤 Unificar nombres duplicados</div>'+
+        '<div style="color:#9fb3c8;font-size:11px;margin-top:2px">Revisa perfiles, wellness, PSE, GPS, tests, nutrición y gimnasio.</div>'+
+      '</div>'+
+      '<button onclick="nameAuditClose()" style="border:none;background:none;color:#9fb3c8;font-size:20px;cursor:pointer;line-height:1;padding:0">✕</button>'+
+    '</div>'+
+    '<div id="nameaudit-body" style="padding:14px 16px;overflow-y:auto;flex:1"></div>'+
+    '<div style="padding:11px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'+
+      '<button class="btn bc" onclick="nameAuditClose()" style="font-size:11px;padding:6px 14px">Cerrar</button>'+
+      '<button id="nameaudit-all" class="btn bg" onclick="nameAuditMergeAll()" style="font-size:11px;padding:6px 16px">✓ Unificar todos</button>'+
+    '</div>'+
+  '</div>';
+  d.onclick=nameAuditClose;
+  document.body.appendChild(d);
+  nameAuditRender(groups);
+}
+window.nameAuditOpen=nameAuditOpen;
+function nameAuditClose(){ var m=document.getElementById('nameaudit-modal'); if(m)m.remove(); }
+window.nameAuditClose=nameAuditClose;
+
+function nameAuditRender(groups){
+  var body=document.getElementById('nameaudit-body');
+  if(!body)return;
+  window._nameAuditGroups=groups;
+  if(!groups.length){
+    body.innerHTML='<div style="padding:26px;text-align:center;color:#1D9E75;font-size:13px;font-weight:700">✓ No se encontraron nombres duplicados.</div>';
+    var btn=document.getElementById('nameaudit-all'); if(btn)btn.style.display='none';
+    return;
+  }
+  var esc=function(s){ return String(s).replace(/</g,'&lt;').replace(/"/g,'&quot;'); };
+  var html='<div style="font-size:11px;color:#666;margin-bottom:11px">Se detectaron <b>'+groups.length+'</b> jugador'+(groups.length===1?'':'es')+' con el nombre escrito de varias formas. Elegí con cuál quedarte:</div>';
+  groups.forEach(function(g,gi){
+    if(_nameAuditSel[gi]===undefined)_nameAuditSel[gi]=g.suggested;
+    html+='<div style="border:1px solid #e4e6ec;border-radius:9px;padding:11px 13px;margin-bottom:10px;background:#fafbfd">';
+    g.variants.forEach(function(v){
+      var sel=(_nameAuditSel[gi]===v.name);
+      var dsTxt=Object.keys(v.ds).map(function(k){ return k+' ('+v.ds[k]+')'; }).join(' · ');
+      html+='<label style="display:flex;align-items:flex-start;gap:8px;padding:6px 7px;border-radius:6px;cursor:pointer;'+
+        (sel?'background:#e8f8f0;border:1px solid #1D9E7555':'border:1px solid transparent')+'">'+
+        '<input type="radio" name="na'+gi+'" '+(sel?'checked':'')+' onchange="nameAuditPick('+gi+',\''+esc(v.name).replace(/'/g,"\\'")+'\')" style="accent-color:#1D9E75;margin-top:2px">'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:12.5px;font-weight:700;color:#0D1B2A">'+esc(v.name)+
+            (v.name===g.suggested?' <span style="font-size:9px;color:#1D9E75">· sugerido</span>':'')+'</div>'+
+          '<div style="font-size:10px;color:#8a93a5;margin-top:1px">'+v.total+' registro'+(v.total===1?'':'s')+' — '+dsTxt+'</div>'+
+        '</div>'+
+      '</label>';
+    });
+    html+='<div style="display:flex;justify-content:flex-end;margin-top:6px">'+
+      '<button onclick="nameAuditMergeOne('+gi+')" style="background:#fff;border:1px solid #1D9E75;color:#1D9E75;border-radius:6px;padding:4px 12px;font-size:10.5px;font-weight:700;cursor:pointer">🔗 Unificar este</button>'+
+    '</div>';
+    html+='</div>';
+  });
+  body.innerHTML=html;
+}
+function nameAuditPick(gi,name){ _nameAuditSel[gi]=name; nameAuditRender(window._nameAuditGroups); }
+window.nameAuditPick=nameAuditPick;
+
+function nameAuditMergeOne(gi){
+  var groups=window._nameAuditGroups||[];
+  var g=groups[gi]; if(!g)return;
+  var canonical=_nameAuditSel[gi]||g.suggested;
+  var others=g.variants.map(function(v){return v.name;}).filter(function(n){return n!==canonical;});
+  if(!confirm('Unificar como "'+canonical+'":\n\n'+others.map(function(n){return '• '+n;}).join('\n')+
+    '\n\nTodos los datos (wellness, PSE, GPS, tests, nutrición, gimnasio) quedan bajo "'+canonical+'".\nNo se puede deshacer.'))return;
+  var moved=nameAuditMerge(g.variants, canonical);
+  nameAuditAfterMerge(moved, 1);
+}
+window.nameAuditMergeOne=nameAuditMergeOne;
+
+function nameAuditMergeAll(){
+  var groups=window._nameAuditGroups||[];
+  if(!groups.length)return;
+  if(!confirm('Unificar los '+groups.length+' jugadores detectados con el nombre elegido en cada uno.\n\nNo se puede deshacer.'))return;
+  var moved=0;
+  groups.forEach(function(g,gi){
+    var canonical=_nameAuditSel[gi]||g.suggested;
+    moved+=nameAuditMerge(g.variants, canonical);
+  });
+  nameAuditAfterMerge(moved, groups.length);
+}
+window.nameAuditMergeAll=nameAuditMergeAll;
+
+function nameAuditAfterMerge(moved, n){
+  try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  try{ if(typeof renderProfilesTable==='function')renderProfilesTable(); }catch(e){}
+  try{ if(typeof cargaRender==='function'&&typeof mainView!=='undefined'&&mainView==='carga')cargaRender(); }catch(e){}
+  try{ if(typeof hoyRender==='function'&&typeof mainView!=='undefined'&&mainView==='hoy')hoyRender(); }catch(e){}
+  var groups=nameAuditGroups();
+  _nameAuditSel={};
+  nameAuditRender(groups);
+  alert('Listo: '+n+' jugador'+(n===1?'':'es')+' unificado'+(n===1?'':'s')+'.'+(moved?'\n'+moved+' registros reasignados.':''));
+}
+
 
 function editProfile(key){
   var p=PLAYER_PROFILES[key]; if(!p)return;
@@ -13183,6 +13601,9 @@ function planDeleteWeek(i){
   var w=PLAN_WEEKS[i];
   // Borrar también de la nube (si no, reaparece al recargar)
   if(w && typeof sbPlanWeekDelete==='function'){ try{ sbPlanWeekDelete(w.name, w.created); }catch(e){} }
+  // v143: tombstone, para que el merge con la nube (o el sync del compañero)
+  // no la vuelva a insertar.
+  try{ if(typeof planTombAdd==='function') planTombAdd(planWeekKey(w)); }catch(e){}
   PLAN_WEEKS.splice(i,1);
   planSave();
   planRenderWeeksList();
@@ -13215,8 +13636,39 @@ function planNewWeek(){
       return{label:lbl, mdLabel:PLAN_MD_DEFAULTS[i], blocks:[]};
     })
   };
-  document.getElementById('plan-week-name').value='';
+  // v142: proponer nombre, fecha de inicio y duración continuando la última
+  // semana con fechas. Así crear la semana siguiente es un solo click.
+  var _prev=(typeof planWeeksWithDates==='function')?planWeeksWithDates():[];
+  var _last=_prev.length?_prev[_prev.length-1]:null;
+  var _sugName='', _sugStart='', _sugLen=7;
+  if(_last){
+    _sugLen=_last.len||7;
+    _sugStart=planShiftISO(_last.end,1);
+    var _nn=planWeekNextName(_last.week);
+    if(_nn)_sugName=_nn;
+  } else {
+    // Sin semanas con fecha: proponer el lunes de esta semana
+    var _t=new Date();
+    var _dow=(_t.getDay()+6)%7;
+    _t.setDate(_t.getDate()-_dow);
+    _sugStart=_t.getFullYear()+'-'+String(_t.getMonth()+1).padStart(2,'0')+'-'+String(_t.getDate()).padStart(2,'0');
+    // Continuar la numeración del microciclo según el GPS, si lo hay
+    var _wks=(typeof cargaMicroWeeksByDate==='function')?cargaMicroWeeksByDate():[];
+    if(_wks.length){
+      var _nn2=planWeekNextName(_wks[_wks.length-1].week);
+      if(_nn2)_sugName=_nn2;
+    }
+  }
+  _planEditData.startDate=_sugStart;
+  _planEditData.weekLen=_sugLen;
+  if(_sugName)_planEditData.name=_sugName;
+  document.getElementById('plan-week-name').value=_sugName;
   document.getElementById('plan-ref-mode').value='current';
+  var _sEl2=document.getElementById('plan-week-start');
+  var _lEl2=document.getElementById('plan-week-len');
+  if(_sEl2)_sEl2.value=_sugStart;
+  if(_lEl2)_lEl2.value=String(_sugLen);
+  planWeekRangeHint();
   planRefModeChange();
   document.getElementById('plan-editor').style.display='';
   planRenderGroups();
@@ -13240,6 +13692,12 @@ function planEditWeek(i){
     _planEditData.groups=planTemplateGroups();
   document.getElementById('plan-week-name').value=_planEditData.name;
   document.getElementById('plan-ref-mode').value=_planEditData.refMode||'current';
+  // v142: cargar fecha de inicio y duración del microciclo
+  var _sEl=document.getElementById('plan-week-start');
+  var _lEl=document.getElementById('plan-week-len');
+  if(_sEl)_sEl.value=_planEditData.startDate||'';
+  if(_lEl)_lEl.value=String(_planEditData.weekLen||7);
+  planWeekRangeHint();
   planRefModeChange();
   document.getElementById('plan-editor').style.display='';
   planRenderGroups();
@@ -13379,6 +13837,7 @@ window.planRemoveGroup=planRemoveGroup;
 function planSetExGroup(di,bi,ei,group){
   if(!_planEditData) return;
   _planEditData.days[di].blocks[bi].exercises[ei].group=group;
+  planTouchDay(di);
   planRenderDays();
   planRenderWeekSummary();
   planAutoSave();
@@ -13411,6 +13870,172 @@ function planPreserveEditing(){
   }catch(e){ console.warn('planPreserveEditing:',e); }
 }
 window.planPreserveEditing=planPreserveEditing;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRABAJO COLABORATIVO EN PLANIFICACIÓN (v143)
+// PROBLEMA: el sync subía SIEMPRE el array completo de semanas con la copia
+// que tenía cada dispositivo en memoria, y la carga reemplazaba la semana
+// entera con la de la nube sin comparar fechas. Resultado: "último que guarda
+// gana" a nivel de semana completa — si tu compañero tocaba cualquier cosa,
+// su copia (sin tus ejercicios recién agregados) pisaba la tuya y los
+// ejercicios desaparecían. Y viceversa.
+// SOLUCIÓN: sello de modificación por DÍA. El merge compara día por día y se
+// queda con el más nuevo de cada uno. Si él edita el MD-3 y vos el MD-1 de la
+// misma semana, se conservan los dos. Además el sync sube sólo lo que cambió
+// y hay refresco automático para ver los cambios del otro sin recargar.
+function planTouchDay(di){
+  if(!_planEditData||!_planEditData.days||!_planEditData.days[di])return;
+  _planEditData.days[di]._upd=Date.now();
+  _planEditData._upd=Date.now();
+  _planEditData._dirty=true;
+}
+window.planTouchDay=planTouchDay;
+
+// Marca la semana entera (cambios que no son de un día puntual: nombre, grupos…)
+function planTouchWeek(){
+  if(!_planEditData)return;
+  _planEditData._upd=Date.now();
+  _planEditData._dirty=true;
+}
+window.planTouchWeek=planTouchWeek;
+
+// Fusiona dos versiones de una MISMA semana quedándose con lo más nuevo de
+// cada día. `mine` y `theirs` son objetos de semana con el mismo uid.
+function planMergeWeek(mine, theirs){
+  if(!mine) return theirs;
+  if(!theirs) return mine;
+  var mu=Number(mine._upd||0), tu=Number(theirs._upd||0);
+  // La base es la versión más nueva a nivel de semana (nombre, grupos, fechas)
+  var base = (tu>mu) ? JSON.parse(JSON.stringify(theirs)) : JSON.parse(JSON.stringify(mine));
+  var other = (tu>mu) ? mine : theirs;
+  if(!Array.isArray(base.days)||!Array.isArray(other.days)) return base;
+  // Y dentro, cada día gana por su propio sello
+  var n=Math.max(base.days.length, other.days.length);
+  for(var i=0;i<n;i++){
+    var bd=base.days[i], od=other.days[i];
+    if(!od) continue;
+    if(!bd){ base.days[i]=JSON.parse(JSON.stringify(od)); continue; }
+    var bu=Number(bd._upd||0), ou=Number(od._upd||0);
+    if(ou>bu) base.days[i]=JSON.parse(JSON.stringify(od));
+  }
+  base._upd=Math.max(mu,tu);
+  return base;
+}
+window.planMergeWeek=planMergeWeek;
+
+// Identidad estable de una semana (uid nuevo, o name+created para las viejas)
+function planWeekKey(w){
+  if(!w) return '';
+  if(w.uid) return 'uid:'+w.uid;
+  return 'nc:'+(w.name||'')+'||'+(w.created||'');
+}
+window.planWeekKey=planWeekKey;
+
+// ── Tombstones de semanas borradas ──
+var PLAN_DELETED={};
+try{
+  var _pdw=JSON.parse(localStorage.getItem('planDeleted_v1')||'null');
+  if(_pdw&&typeof _pdw==='object'&&!Array.isArray(_pdw))PLAN_DELETED=_pdw;
+}catch(e){}
+function planTombSave(){ try{ localStorage.setItem('planDeleted_v1',JSON.stringify(PLAN_DELETED)); }catch(e){} }
+function planTombAdd(key){ if(!key)return; PLAN_DELETED[key]=new Date().toISOString(); planTombSave(); }
+function planTombHas(key){ return key && PLAN_DELETED[key]!==undefined; }
+window.planTombAdd=planTombAdd;
+window.planTombHas=planTombHas;
+
+// Fusiona un conjunto de semanas de la nube con las locales.
+// Devuelve {weeks, changed} — changed indica si algo cambió respecto a lo local.
+function planMergeAll(cloudWeeks){
+  var byKey={}, changed=false;
+  (PLAN_WEEKS||[]).forEach(function(w){
+    var k=planWeekKey(w);
+    if(planTombHas(k))return;
+    byKey[k]=w;
+  });
+  (cloudWeeks||[]).forEach(function(cw){
+    var k=planWeekKey(cw);
+    if(planTombHas(k)) return;          // borrada acá: no revive
+    var mine=byKey[k];
+    if(!mine){ byKey[k]=cw; changed=true; return; }
+    var merged=planMergeWeek(mine, cw);
+    if(JSON.stringify(merged)!==JSON.stringify(mine)) changed=true;
+    byKey[k]=merged;
+  });
+  var out=Object.keys(byKey).map(function(k){return byKey[k];});
+  return {weeks:out, changed:changed};
+}
+window.planMergeAll=planMergeAll;
+
+// ── REFRESCO AUTOMÁTICO (v143) ────────────────────────────────────────────
+// Cada 20 segundos, mientras se está mirando la pestaña Planificación, se
+// consulta la nube y se fusiona lo que hizo el compañero. Antes había que
+// recargar para enterarse, y en el medio se pisaban cosas.
+var _planPollTimer=null, _planPollBusy=false;
+function planPollStart(){
+  if(_planPollTimer)return;
+  _planPollTimer=setInterval(planPollOnce, 20000);
+}
+function planPollStop(){
+  if(_planPollTimer){ clearInterval(_planPollTimer); _planPollTimer=null; }
+}
+window.planPollStart=planPollStart;
+window.planPollStop=planPollStop;
+
+function planPollOnce(){
+  if(_planPollBusy)return;
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return;
+  if(typeof document!=='undefined'&&document.hidden)return;   // pestaña en segundo plano
+  if(typeof mainView!=='undefined'&&mainView!=='plan')return; // sólo en Planificación
+  _planPollBusy=true;
+  sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
+    _planPollBusy=false;
+    if(!r||r.error||!r.data)return;
+    var cloud=r.data.map(_sbPlanWeekFromRow);
+    var res=planMergeAll(cloud);
+    if(!res.changed)return;
+    PLAN_WEEKS.length=0;
+    res.weeks.forEach(function(w){ PLAN_WEEKS.push(w); });
+    // Si hay una semana abierta en el editor, actualizarla con lo fusionado
+    var reopened=false;
+    if(_planEditData&&_planEditData.uid){
+      var k=planWeekKey(_planEditData);
+      var updated=PLAN_WEEKS.find(function(w){ return planWeekKey(w)===k; });
+      if(updated){
+        var merged=planMergeWeek(_planEditData, updated);
+        if(JSON.stringify(merged)!==JSON.stringify(_planEditData)){
+          _planEditData=merged;
+          var idx=PLAN_WEEKS.findIndex(function(w){ return planWeekKey(w)===k; });
+          if(idx>=0){ PLAN_WEEKS[idx]=merged; _planEditIdx=idx; }
+          try{ planRenderDays(); planRenderWeekSummary(); }catch(e){}
+          reopened=true;
+        }
+      }
+    }
+    try{ if(typeof saveData==='function')saveData(); }catch(e){}
+    try{ if(typeof planRenderWeeksList==='function')planRenderWeeksList(); }catch(e){}
+    if(reopened) planShowSyncToast('Se actualizó con los cambios de tu compañero');
+    console.log('[Plan] Refresco: cambios del compañero aplicados.');
+  }).catch(function(){ _planPollBusy=false; });
+}
+window.planPollOnce=planPollOnce;
+
+// Aviso discreto cuando entran cambios de otra cuenta
+function planShowSyncToast(msg){
+  var el=document.getElementById('plan-sync-toast');
+  if(!el){
+    el=document.createElement('div');
+    el.id='plan-sync-toast';
+    el.style.cssText='position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#0D1B2A;color:#fff;'+
+      'padding:9px 16px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 6px 24px rgba(0,0,0,.3);'+
+      'opacity:0;transition:opacity .3s;pointer-events:none';
+    document.body.appendChild(el);
+  }
+  el.textContent='🔄 '+msg;
+  el.style.opacity='1';
+  clearTimeout(el._t);
+  el._t=setTimeout(function(){ el.style.opacity='0'; },3500);
+}
+window.planShowSyncToast=planShowSyncToast;
 
 function planAutoSave(){
   if(!_planEditData)return;
@@ -13506,6 +14131,78 @@ function planAutoSaveFlash(ok){
   if(_planAutoSaveTimer)clearTimeout(_planAutoSaveTimer);
   _planAutoSaveTimer=setTimeout(function(){ el.style.opacity='0'; },1800);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CALENDARIO DEL MICROCICLO (v142)
+// Problema: las semanas se derivaban SOLO del Excel de GPS, así que el
+// wellness/PSE que cargan los chicos desde la tablet quedaba huérfano ("Sem
+// 27/07") hasta que se importaba el Excel.
+// Solución: (C) la semana de planificación puede llevar fecha de inicio y
+// duración —  y esa es la fuente más exacta, porque se planifica ANTES de
+// entrenar — y (A) si no hay ninguna, se continúa automáticamente la
+// numeración desde la última semana conocida.
+// La duración es configurable (5 a 14 días) para clubes con microciclos cortos.
+function planWeekMetaChange(){
+  if(!_planEditData)return;
+  var sEl=document.getElementById('plan-week-start');
+  var lEl=document.getElementById('plan-week-len');
+  var start=sEl&&sEl.value?sEl.value:'';
+  var len=lEl?(parseInt(lEl.value)||7):7;
+  if(start) _planEditData.startDate=start; else delete _planEditData.startDate;
+  _planEditData.weekLen=len;
+  planWeekRangeHint();
+  planAutoSave();
+}
+window.planWeekMetaChange=planWeekMetaChange;
+
+// Muestra el rango cubierto ("28/07 → 03/08 · 7 días")
+function planWeekRangeHint(){
+  var el=document.getElementById('plan-week-range');
+  if(!el)return;
+  var s=_planEditData&&_planEditData.startDate;
+  if(!s){ el.textContent=''; return; }
+  var len=(_planEditData.weekLen)||7;
+  var end=planShiftISO(s,len-1);
+  var f=function(iso){ return iso.slice(8,10)+'/'+iso.slice(5,7); };
+  el.textContent=f(s)+' → '+f(end)+' · '+len+' días';
+}
+function planShiftISO(iso,days){
+  var d=new Date(iso+'T12:00:00');
+  d.setDate(d.getDate()+days);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+window.planShiftISO=planShiftISO;
+
+// Semanas de planificación que tienen fecha: [{week,start,end,len}]
+function planWeeksWithDates(){
+  var out=[];
+  (typeof PLAN_WEEKS!=='undefined'?PLAN_WEEKS:[]).forEach(function(w){
+    if(!w||!w.startDate)return;
+    var len=parseInt(w.weekLen)||7;
+    out.push({week:w.name||'Semana', start:w.startDate, end:planShiftISO(w.startDate,len-1), len:len});
+  });
+  return out.sort(function(a,b){return a.start<b.start?-1:1;});
+}
+window.planWeeksWithDates=planWeeksWithDates;
+
+// Extrae el número de un nombre de semana ("Semana 27", "MC 27", "27 - vs X")
+function planWeekNum(name){
+  var m=String(name||'').match(/(\d+)/);
+  return m?parseInt(m[1]):null;
+}
+// Construye el nombre de la siguiente semana conservando el estilo del anterior
+function planWeekNextName(name){
+  var n=planWeekNum(name);
+  if(n==null) return null;
+  // Reemplaza el PRIMER número por n+1, conservando prefijo ("Semana 28")
+  var replaced=false;
+  return String(name).replace(/\d+/, function(m){
+    if(replaced)return m;
+    replaced=true;
+    return String(n+1);
+  }).replace(/\s*[—-]\s*.*$/,'').trim(); // sin el sufijo del rival
+}
+window.planWeekNextName=planWeekNextName;
 
 function planSaveWeek(){
   var name=document.getElementById('plan-week-name').value.trim();
@@ -13807,6 +14504,7 @@ function planSetExMins(di, bi, ei, val){
   if(!_planEditData)return;
   var v=parseInt(val)||1;
   _planEditData.days[di].blocks[bi].exercises[ei].mins=v;
+  planTouchDay(di);
   planRenderDays();
   planRenderWeekSummary();
   planAutoSave();
@@ -13819,6 +14517,7 @@ function planRemoveEx(di, bi, ei){
   block.exercises.splice(ei,1);
   // Remove empty block if it has no exercises
   if(!block.exercises.length) _planEditData.days[di].blocks.splice(bi,1);
+  planTouchDay(di);
   planRenderDays();
   planRenderWeekSummary();
   planAutoSave();
@@ -13828,6 +14527,7 @@ window.planRemoveEx=planRemoveEx;
 function planToggleCount(di, bi, ei, checked){
   if(!_planEditData)return;
   _planEditData.days[di].blocks[bi].exercises[ei].countVolume=!!checked;
+  planTouchDay(di);
   planRenderDays();
   planRenderWeekSummary();
   planAutoSave();
@@ -13846,6 +14546,7 @@ function planMoveBlock(di, bi, dir){
   var tmp=day.blocks[bi];
   day.blocks[bi]=day.blocks[target];
   day.blocks[target]=tmp;
+  planTouchDay(di);
   planRenderDays();
   planRenderWeekSummary();
   planAutoSave();
@@ -13856,6 +14557,7 @@ function planToggleBlockParallel(di, bi){
   if(!_planEditData)return;
   var block=_planEditData.days[di].blocks[bi];
   block.parallel=!block.parallel;
+  planTouchDay(di);
   // When switching to parallel, default: first exercise counts, rest don't
   if(block.parallel){
     block.exercises.forEach(function(e,i){ e.countVolume=(i===0); });
@@ -13885,6 +14587,7 @@ function planRemoveBlock(di, bi){
   if(!_planEditData)return;
   if(!confirm('¿Eliminar este bloque y todos sus ejercicios?'))return;
   _planEditData.days[di].blocks.splice(bi,1);
+  planTouchDay(di);
   planRenderDays();
   planRenderWeekSummary();
   planAutoSave();
@@ -15577,6 +16280,7 @@ window.planModalConfirm=function(){
   if(ptSec2!==null && ptSec2>=0) item.pauseTime=ptSec2;
 
   block.exercises.push(item);
+  planTouchDay(_planModalDayIdx);   // v143: sellar el día para el merge
 
   // Cerrar modal y renderizar con datos ya completos
   planCloseModal();
@@ -15759,6 +16463,7 @@ function peiSave(){
     delete item.minsTotal;
   }
   document.getElementById('pei-modal').style.display='none';
+  planTouchDay(di);
   window._peiDi=null;window._peiBi=null;window._peiEi=null;
   planRenderDays();planRenderWeekSummary();
   planAutoSave();
@@ -24958,13 +25663,35 @@ function _cargaEqPeriods(){
   var periods=[];
   if(wks.length){
     wks.forEach(function(w){
-      var ds=isoList.filter(function(d){ return d>=w.start && d<=w.end; });
+      // v142: usar el rango EXTENDIDO, para que una fecha de wellness caiga en
+      // su semana aunque el GPS de ese día todavía no se haya importado.
+      var s0=w.startExt||w.start, e0=w.endExt||w.end;
+      var ds=isoList.filter(function(d){ return d>=s0 && d<=e0; });
       if(ds.length) periods.push({week:w.week, dates:ds, dateToDay:w.dateToDay||{}});
     });
   }
   var covered={};
   periods.forEach(function(p){ p.dates.forEach(function(d){ covered[d]=true; }); });
   var orphan=isoList.filter(function(d){ return !covered[d]; });
+  // v142 (A): antes de caer en "Sem DD/MM", continuar la numeración del
+  // microciclo. Es lo que hace que el wellness/PSE cargado desde la tablet
+  // aparezca como "Semana 28" sin esperar al Excel de carga externa.
+  if(orphan.length && wks.length && typeof cargaProjectWeek==='function'){
+    var projected={};
+    orphan.forEach(function(d){
+      var pw=cargaProjectWeek(d,wks);
+      if(!pw)return;
+      if(!projected[pw.week]) projected[pw.week]={week:pw.week,dates:[],dateToDay:{},_projected:true};
+      projected[pw.week].dates.push(d);
+      covered[d]=true;
+    });
+    Object.keys(projected).forEach(function(k){
+      projected[k].dates.sort();
+      periods.push(projected[k]);
+    });
+    periods.sort(function(a,b){ return a.dates[0]<b.dates[0]?-1:1; });
+    orphan=isoList.filter(function(d){ return !covered[d]; });
+  }
   if(orphan.length){
     var byMon={};
     orphan.forEach(function(d){
@@ -26130,6 +26857,35 @@ function cargaMicroWeeksByDate(){
     }
     if(c.day && !byW[c.week].dateToDay[f])byW[c.week].dateToDay[f]=c.day;
   });
+  // v142 (C): semanas de PLANIFICACIÓN con fecha de inicio. Es la fuente más
+  // exacta y la que resuelve el caso real: los chicos cargan wellness/PSE
+  // desde la tablet ANTES de que exista el Excel de GPS, y sin esto quedaban
+  // huérfanos con nombre de semana calendario ("Sem 27/07").
+  // Prioridad: define el rango, pero no pisa los rótulos de día del GPS.
+  try{
+    if(typeof planWeeksWithDates==='function'){
+      planWeeksWithDates().forEach(function(pw){
+        if(!byW[pw.week]){
+          byW[pw.week]={week:pw.week,start:pw.start,end:pw.end,dateToDay:{},_fromPlan:true,_len:pw.len};
+        } else {
+          // Ya existe por GPS/contexto: ampliar el rango con lo planificado
+          if(pw.start<byW[pw.week].start)byW[pw.week].start=pw.start;
+          if(pw.end>byW[pw.week].end)byW[pw.week].end=pw.end;
+          byW[pw.week]._len=pw.len;
+        }
+        // Rótulos MD-N de la planificación, sin pisar los del GPS
+        var w=(typeof PLAN_WEEKS!=='undefined'?PLAN_WEEKS:[]).find(function(x){return x&&x.name===pw.week&&x.startDate;});
+        if(w&&Array.isArray(w.days)){
+          w.days.forEach(function(d,di){
+            if(!d||!d.mdLabel)return;
+            var iso=planShiftISO(pw.start,di);
+            if(iso>pw.end)return;
+            if(!byW[pw.week].dateToDay[iso])byW[pw.week].dateToDay[iso]=d.mdLabel;
+          });
+        }
+      });
+    }
+  }catch(e){ console.warn('planWeeksWithDates:',e); }
   // Ordenar por start
   var wks = Object.values(byW).sort(function(a,b){return a.start<b.start?-1:1;});
   // Expandir rangos: cada semana cubre del día siguiente al fin de la anterior
@@ -26158,7 +26914,18 @@ function cargaMicroWeeksByDate(){
         w.startExt = shiftDate(prevEnd, halfGap + 1);
       }
     }
-    w.endExt = (i === wks.length-1) ? shiftDate(w.end, 7) : w.endExt || shiftDate(w.end, 1);
+    // v142: la ÚLTIMA semana se cerraba con +7 días desde su fin, así que se
+    // "tragaba" los días del microciclo siguiente y la continuación automática
+    // nunca se activaba. Ahora se cierra según la duración real del microciclo
+    // contada desde su INICIO (5, 7, 10 días… configurable en la planificación).
+    if(i === wks.length-1){
+      var _len = parseInt(w._len) || 7;
+      var _byLen = shiftDate(w.startExt || w.start, _len - 1);
+      // Nunca cortar antes de la última sesión efectivamente cargada
+      w.endExt = (_byLen < w.end) ? w.end : _byLen;
+    } else {
+      w.endExt = w.endExt || shiftDate(w.end, 1);
+    }
   });
   // Re-calcular endExt para todas menos la última
   for(var j = 0; j < wks.length - 1; j++){
@@ -26184,8 +26951,36 @@ function cargaMicroWeekForDate(iso,wks){
     var endCheck = wks[i].endExt || wks[i].end;
     if(iso>=startCheck&&iso<=endCheck)return wks[i];
   }
-  return null;
+  // v142 (A): CONTINUACIÓN AUTOMÁTICA. Si la fecha es posterior a la última
+  // semana conocida, se proyecta la numeración hacia adelante en bloques de la
+  // misma duración. Así el wellness/PSE de la tablet cae en "Semana 28" apenas
+  // termina la 27, sin esperar el Excel ni configurar nada.
+  return cargaProjectWeek(iso,wks);
 }
+// Proyecta hacia adelante desde la última semana conocida.
+function cargaProjectWeek(iso,wks){
+  if(!iso||!wks||!wks.length)return null;
+  var last=wks[wks.length-1];
+  var lastEnd=last.endExt||last.end;
+  if(iso<=lastEnd)return null;
+  var num=(typeof planWeekNum==='function')?planWeekNum(last.week):null;
+  if(num==null)return null;             // sin número no se puede continuar
+  var len=parseInt(last._len)||7;
+  var shift=function(d,n){
+    var x=new Date(d+'T12:00:00'); x.setDate(x.getDate()+n);
+    return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+  };
+  var days=Math.floor((new Date(iso+'T12:00:00')-new Date(lastEnd+'T12:00:00'))/86400000);
+  var blocks=Math.ceil(days/len);       // cuántos microciclos pasaron
+  if(blocks<1)blocks=1;
+  if(blocks>60)return null;             // demasiado lejos: probablemente un error de fecha
+  var start=shift(lastEnd,(blocks-1)*len+1);
+  var end=shift(start,len-1);
+  var name=String(last.week).replace(/\d+/, String(num+blocks)).replace(/\s*[—-]\s*.*$/,'').trim();
+  return {week:name, start:start, end:end, startExt:start, endExt:end,
+          dateToDay:{}, _projected:true, _len:len};
+}
+window.cargaProjectWeek=cargaProjectWeek;
 
 // Día del microciclo para una fecha. Si hay match exacto en sesiones cargadas, devuelve ese día.
 // Si NO hay match exacto (porque la sesión de ese día no se cargó en MICROCICLO),
@@ -31437,11 +32232,48 @@ function sbScheduleTanda1Sync(){
     _sbTanda1SyncTimer = null;
     // PLAN_WEEKS
     if(typeof PLAN_WEEKS!=='undefined' && Array.isArray(PLAN_WEEKS) && PLAN_WEEKS.length){
-      var pPayload = PLAN_WEEKS.map(_sbPlanWeekToPayload);
-      console.log('[Supabase] Sync plan_weeks (' + pPayload.length + ')');
-      sbClient.from('plan_weeks').upsert(pPayload, { onConflict: 'name,created,categoria' }).then(function(res){
-        if(res.error) console.error('[Supabase] Sync plan_weeks error:', res.error);
-        else console.log('[Supabase] Sync plan_weeks OK');
+      // v143: no subir el array completo a ciegas. Primero se lee la nube y se
+      // fusiona día por día; recién ahí se sube lo que corresponde. Sin esto,
+      // el dispositivo que guardaba último pisaba el trabajo del otro.
+      sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
+        var cloud = (r && r.data) ? r.data.map(_sbPlanWeekFromRow) : [];
+        var cloudByKey = {};
+        cloud.forEach(function(cw){ cloudByKey[planWeekKey(cw)] = cw; });
+        var toUpload = [];
+        PLAN_WEEKS.forEach(function(mine){
+          var k = planWeekKey(mine);
+          if(planTombHas(k)) return;
+          var theirs = cloudByKey[k];
+          if(!theirs){ toUpload.push(mine); return; }
+          var merged = planMergeWeek(mine, theirs);
+          // Reflejar el merge en memoria para no perder lo del compañero
+          var idx = PLAN_WEEKS.indexOf(mine);
+          if(idx>=0) PLAN_WEEKS[idx] = merged;
+          if(JSON.stringify(merged) !== JSON.stringify(theirs)) toUpload.push(merged);
+        });
+        if(typeof planPreserveEditing==='function') planPreserveEditing();
+        // Borrar de la nube lo que se eliminó acá
+        var delKeys = Object.keys(PLAN_DELETED||{});
+        if(delKeys.length && cloud.length){
+          cloud.forEach(function(cw){
+            var k=planWeekKey(cw);
+            if(!planTombHas(k))return;
+            sbClient.from('plan_weeks').delete()
+              .eq('name', cw.name||'').eq('created', cw.created||'').eq('categoria', SB_CATEGORIA)
+              .then(function(){});
+          });
+        }
+        if(!toUpload.length){ console.log('[Supabase] plan_weeks sin cambios para subir.'); return; }
+        var pPayload = toUpload.map(_sbPlanWeekToPayload);
+        console.log('[Supabase] Sync plan_weeks (' + pPayload.length + ' de ' + PLAN_WEEKS.length + ')');
+        sbClient.from('plan_weeks').upsert(pPayload, { onConflict: 'name,created,categoria' }).then(function(res){
+          if(res.error) console.error('[Supabase] Sync plan_weeks error:', res.error);
+          else {
+            console.log('[Supabase] Sync plan_weeks OK');
+            try{ if(typeof saveData==='function') saveData(); }catch(e){}
+            try{ if(typeof planRenderWeeksList==='function') planRenderWeeksList(); }catch(e){}
+          }
+        });
       });
     }
     // GYM_SESSIONS
@@ -31485,14 +32317,17 @@ sbLoadInitialData = function(){
     return sbPlanWeeksFetchAll();
   }).then(function(rows){
     if(typeof PLAN_WEEKS!=='undefined' && rows && rows.length){
-      // Supabase es fuente de verdad. Preservar locales que no estén en la nube.
-      var keys = {};
-      rows.forEach(function(row){ keys[row.name+'||'+(row.created||'')] = _sbPlanWeekFromRow(row); });
-      var localOnly = PLAN_WEEKS.filter(function(p){ return !keys[(p.name||'')+'||'+(p.created||'')]; });
+      // v143: MERGE POR DÍA en vez de reemplazar la semana entera. Antes la
+      // versión de la nube pisaba la local sin comparar fechas, y por eso
+      // desaparecían los ejercicios que uno acababa de agregar mientras el
+      // compañero guardaba su copia vieja.
+      var cloud = rows.map(_sbPlanWeekFromRow);
+      var res = planMergeAll(cloud);
       PLAN_WEEKS.length = 0;
-      Object.values(keys).forEach(function(p){ PLAN_WEEKS.push(p); });
-      localOnly.forEach(function(p){ PLAN_WEEKS.push(p); });
-      console.log('[Supabase] Cargados ' + rows.length + ' plan_weeks.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
+      res.weeks.forEach(function(p){ PLAN_WEEKS.push(p); });
+      if(typeof planPreserveEditing==='function') planPreserveEditing();
+      console.log('[Supabase] plan_weeks: '+rows.length+' en la nube · '+PLAN_WEEKS.length+' tras el merge.');
+      try{ if(typeof planRenderWeeksList==='function') planRenderWeeksList(); }catch(e){}
     } else {
       console.log('[Supabase] No hay plan_weeks en Supabase todavía.');
     }
