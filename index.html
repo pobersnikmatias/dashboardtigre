@@ -4196,11 +4196,9 @@ function setMainView(v){
     // Planificación abre directamente en "Planificación semanal".
     if(typeof planRenderWeeksList==='function') planRenderWeeksList();
     try{ if(typeof planSwitchSubtab==='function') planSwitchSubtab('weeks'); }catch(e){}
-    // v143: refresco automático mientras se trabaja acá, para ver en vivo lo
-    // que va agregando el compañero desde su cuenta.
-    try{ if(typeof planPollStart==='function'){ planPollStart(); planPollOnce(); } }catch(e){}
-  } else {
-    try{ if(typeof planPollStop==='function') planPollStop(); }catch(e){}
+    // v146: al entrar a Planificación, refrescar de inmediato (además del
+    // poller global que corre en todas las vistas).
+    try{ if(typeof planPollOnce==='function') planPollOnce(); }catch(e){}
   }
   if(v==='gym'){
     // Prep. física tiene 2 subpestañas internas: Gimnasio (default) y Resistencia.
@@ -7920,7 +7918,8 @@ function saveProfile(){
   profTombClear(key); // la key destino existe: no debe estar tombstoneada
 
   _profEditKey = key;  // seguimos editando el mismo jugador, ya con su key nueva
-  saveData(); renderProfilesTable();
+  if(typeof profSaveOne==='function') profSaveOne(key); else saveData();
+  renderProfilesTable();
   var lockedCount = (locks.vmax?1:0)+(locks.accmax?1:0)+(locks.dccmax?1:0);
   msg.style.color='#1D9E75';
   if(collides){
@@ -8943,7 +8942,7 @@ function toggleProfileEstado(key){
   var p=PLAYER_PROFILES[key]; if(!p)return;
   var cycle={disponible:'lesion', lesion:'reserva', reserva:'primera', primera:'nodisp', nodisp:'disponible'};
   p.estado=cycle[p.estado||'disponible']||'disponible';
-  saveData();
+  if(typeof profSaveOne==='function') profSaveOne(key); else saveData();
   renderProfilesTable();
 }
 window.toggleProfileEstado=toggleProfileEstado;
@@ -14082,10 +14081,24 @@ function planPreserveEditing(){
     for(var i=0;i<PLAN_WEEKS.length;i++){
       if(PLAN_WEEKS[i] && PLAN_WEEKS[i].uid===_planEditData.uid){ idx=i; break; }
     }
-    var mine=JSON.parse(JSON.stringify(_planEditData));
-    if(idx>=0){ PLAN_WEEKS[idx]=mine; if(typeof _planEditIdx!=='undefined')_planEditIdx=idx; }
-    else { PLAN_WEEKS.push(mine); if(typeof _planEditIdx!=='undefined')_planEditIdx=PLAN_WEEKS.length-1; }
-    console.log('[Plan] Semana en edición preservada frente al payload de la nube.');
+    if(idx>=0){
+      // v146: FUSIONAR con lo que trajo la nube, no pisarlo. Antes esta función
+      // reinyectaba la copia en edición tal cual, así que borraba los días que
+      // el compañero acababa de modificar — era la causa de "hay tareas que no
+      // le aparecen y otras que le aparecen eliminadas".
+      var merged=(typeof planMergeWeek==='function')
+        ? planMergeWeek(_planEditData, PLAN_WEEKS[idx])
+        : JSON.parse(JSON.stringify(_planEditData));
+      PLAN_WEEKS[idx]=merged;
+      _planEditData=merged;
+      if(typeof _planEditIdx!=='undefined')_planEditIdx=idx;
+      // Refrescar la vista si la semana abierta cambió
+      try{ if(typeof planRenderDays==='function'){ planRenderDays(); planRenderWeekSummary(); } }catch(e){}
+    } else {
+      var mine=JSON.parse(JSON.stringify(_planEditData));
+      PLAN_WEEKS.push(mine);
+      if(typeof _planEditIdx!=='undefined')_planEditIdx=PLAN_WEEKS.length-1;
+    }
   }catch(e){ console.warn('planPreserveEditing:',e); }
 }
 window.planPreserveEditing=planPreserveEditing;
@@ -14189,10 +14202,14 @@ window.planMergeAll=planMergeAll;
 // Cada 20 segundos, mientras se está mirando la pestaña Planificación, se
 // consulta la nube y se fusiona lo que hizo el compañero. Antes había que
 // recargar para enterarse, y en el medio se pisaban cosas.
+// ── REFRESCO AUTOMÁTICO GLOBAL (v146) ─────────────────────────────────────
+// Antes esto sólo corría dentro de la pestaña Planificación, así que los
+// cambios de estado de jugadores (Perfiles / Hoy) nunca llegaban al otro sin
+// recargar. Ahora refresca planificación Y perfiles, en cualquier vista.
 var _planPollTimer=null, _planPollBusy=false;
 function planPollStart(){
   if(_planPollTimer)return;
-  _planPollTimer=setInterval(planPollOnce, 20000);
+  _planPollTimer=setInterval(planPollOnce, 15000);
 }
 function planPollStop(){
   if(_planPollTimer){ clearInterval(_planPollTimer); _planPollTimer=null; }
@@ -14200,30 +14217,80 @@ function planPollStop(){
 window.planPollStart=planPollStart;
 window.planPollStop=planPollStop;
 
+// Trae perfiles de la nube y aplica el mismo criterio: gana el más nuevo.
+function profPollOnce(){
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(false);
+  return sbClient.from('player_profiles').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
+    if(!r||r.error||!r.data)return false;
+    var changed=false, cloudIds={};
+    r.data.forEach(function(row){
+      cloudIds[row.id]=true;
+      if(typeof profIsDeleted==='function'&&profIsDeleted(row.id))return;
+      var prof=Object.assign({}, row.data||{});
+      prof.name=row.name;
+      if(prof._upd==null&&row.updated_at){ var t=Date.parse(row.updated_at); if(!isNaN(t))prof._upd=t; }
+      var mine=PLAYER_PROFILES[row.id];
+      if(mine && Number(mine._upd||0) >= Number(prof._upd||0)) return;   // el mío manda
+      if(!mine || JSON.stringify(mine)!==JSON.stringify(prof)){
+        PLAYER_PROFILES[row.id]=prof; changed=true;
+      }
+    });
+    // Borrados hechos por el compañero
+    Object.keys(PLAYER_PROFILES).forEach(function(k){
+      if(cloudIds[k]||_profDirty[k])return;
+      delete PLAYER_PROFILES[k]; changed=true;
+    });
+    if(changed){
+      try{ if(typeof nameApplyAliases==='function') nameApplyAliases(); }catch(e){}
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      try{ if(typeof renderProfilesTable==='function')renderProfilesTable(); }catch(e){}
+      try{ if(typeof mainView!=='undefined'&&mainView==='hoy'&&typeof hoyRender==='function')hoyRender(); }catch(e){}
+      console.log('[Sync] Perfiles actualizados desde la nube.');
+    }
+    return changed;
+  }).catch(function(){ return false; });
+}
+window.profPollOnce=profPollOnce;
+
 function planPollOnce(){
   if(_planPollBusy)return;
   if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return;
   if(typeof document!=='undefined'&&document.hidden)return;   // pestaña en segundo plano
-  if(typeof mainView!=='undefined'&&mainView!=='plan')return; // sólo en Planificación
   _planPollBusy=true;
+  // Perfiles siempre (el estado de un jugador afecta a todas las vistas)
+  profPollOnce();
   sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
     _planPollBusy=false;
     if(!r||r.error||!r.data)return;
     var cloud=r.data.map(_sbPlanWeekFromRow);
     var res=planMergeAll(cloud);
+    // Propagar semanas borradas por el compañero
+    var cloudKeys={};
+    cloud.forEach(function(cw){ cloudKeys[planWeekKey(cw)]=true; });
+    var kept=[];
+    res.weeks.forEach(function(w){
+      var k=planWeekKey(w);
+      // Si no está en la nube y tampoco la estoy editando ni es nueva sin subir,
+      // el compañero la borró.
+      if(!cloudKeys[k] && !w._dirty && cloud.length){
+        if(_planEditData && planWeekKey(_planEditData)===k){ kept.push(w); return; }
+        res.changed=true; return;
+      }
+      kept.push(w);
+    });
     if(!res.changed)return;
     PLAN_WEEKS.length=0;
-    res.weeks.forEach(function(w){ PLAN_WEEKS.push(w); });
-    // Si hay una semana abierta en el editor, actualizarla con lo fusionado
+    kept.forEach(function(w){ PLAN_WEEKS.push(w); });
+    // Si hay una semana abierta en el editor, fusionarla en vivo
     var reopened=false;
     if(_planEditData&&_planEditData.uid){
-      var k=planWeekKey(_planEditData);
-      var updated=PLAN_WEEKS.find(function(w){ return planWeekKey(w)===k; });
+      var k2=planWeekKey(_planEditData);
+      var updated=PLAN_WEEKS.find(function(w){ return planWeekKey(w)===k2; });
       if(updated){
         var merged=planMergeWeek(_planEditData, updated);
         if(JSON.stringify(merged)!==JSON.stringify(_planEditData)){
           _planEditData=merged;
-          var idx=PLAN_WEEKS.findIndex(function(w){ return planWeekKey(w)===k; });
+          var idx=PLAN_WEEKS.findIndex(function(w){ return planWeekKey(w)===k2; });
           if(idx>=0){ PLAN_WEEKS[idx]=merged; _planEditIdx=idx; }
           try{ planRenderDays(); planRenderWeekSummary(); }catch(e){}
           reopened=true;
@@ -14233,7 +14300,7 @@ function planPollOnce(){
     try{ if(typeof saveData==='function')saveData(); }catch(e){}
     try{ if(typeof planRenderWeeksList==='function')planRenderWeeksList(); }catch(e){}
     if(reopened) planShowSyncToast('Se actualizó con los cambios de tu compañero');
-    console.log('[Plan] Refresco: cambios del compañero aplicados.');
+    console.log('[Sync] Planificación actualizada desde la nube.');
   }).catch(function(){ _planPollBusy=false; });
 }
 window.planPollOnce=planPollOnce;
@@ -31554,6 +31621,18 @@ function sbOnLoginSuccess(){
     if(typeof gymRefreshSessions === 'function') try{ gymRefreshSessions(); }catch(e){}
     sbLoadingSet(100, '¡Listo!', '');
     setTimeout(sbLoadingHide, 400);
+    // v146: refresco automático global (planificación + perfiles), en toda la
+    // app y no sólo dentro de la pestaña Planificación.
+    try{ if(typeof planPollStart==='function') planPollStart(); }catch(e){}
+    // Refrescar también al volver a la pestaña del navegador
+    try{
+      if(!window._syncVisWired){
+        window._syncVisWired=true;
+        document.addEventListener('visibilitychange', function(){
+          if(!document.hidden && typeof planPollOnce==='function') planPollOnce();
+        });
+      }
+    }catch(e){}
   }).catch(function(err){
     console.error('[Supabase] Error en carga inicial:', err);
     sbLoadingHide();
@@ -31614,17 +31693,61 @@ function sbProfilesFetchAll(){
     });
 }
 
+// ── SELLO DE MODIFICACIÓN POR PERFIL (v146) ───────────────────────────────
+// BUG que esto arregla: el sync subía TODOS los perfiles con updated_at = now,
+// hubieran cambiado o no. Si tu compañero tenía en memoria el estado viejo de
+// un jugador y tocaba cualquier otra cosa, su copia vieja se subía con fecha
+// nueva y PISABA tu cambio. Por eso "cambié el estado y a él no le aparecía",
+// y por eso volvían los nombres ya unificados.
+// Ahora cada perfil lleva `_upd` sellado en el momento en que se modifica, se
+// sube sólo lo que cambió, y al recibir gana el `_upd` más nuevo.
+function profTouch(key){
+  try{
+    var p=PLAYER_PROFILES[key];
+    if(p&&typeof p==='object'){ p._upd=Date.now(); _profDirty[key]=true; }
+  }catch(e){}
+}
+window.profTouch=profTouch;
+var _profDirty={};
+try{
+  var _pd0=JSON.parse(localStorage.getItem('profDirty_v1')||'null');
+  if(_pd0&&typeof _pd0==='object') _profDirty=_pd0;
+}catch(e){}
+function profDirtySave(){ try{ localStorage.setItem('profDirty_v1',JSON.stringify(_profDirty)); }catch(e){} }
+function profDirtyClear(keys){
+  (keys||[]).forEach(function(k){ delete _profDirty[k]; });
+  profDirtySave();
+}
+window.profDirtyClear=profDirtyClear;
+
+// Guarda + sella + sube un perfil puntual. Punto único de modificación.
+function profSaveOne(key){
+  profTouch(key);
+  profDirtySave();
+  try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  try{
+    if(typeof sbProfilesUpsert==='function'&&typeof sbCurrentUser!=='undefined'&&sbCurrentUser&&PLAYER_PROFILES[key]){
+      sbProfilesUpsert(key, PLAYER_PROFILES[key]).then(function(){
+        profDirtyClear([key]);
+      }).catch(function(e){ console.warn('[Perfiles] no se pudo subir '+key+':', e.message||e); });
+    }
+  }catch(e){}
+}
+window.profSaveOne=profSaveOne;
+
 function sbProfilesUpsert(id, profile){
   if(!sbClient || !sbCurrentUser) return Promise.reject(new Error('No hay sesión activa'));
   // Separamos name (columna dedicada) del resto (data JSONB)
   var data = Object.assign({}, profile);
   delete data.name; // se guarda aparte
+  // v146: el sello viaja DENTRO de data para poder comparar quién es más nuevo.
+  if(data._upd==null) data._upd=Date.now();
   var payload = {
     id: id,
     name: profile.name || '(sin nombre)',
     data: data,
     categoria: SB_CATEGORIA,
-    updated_at: new Date().toISOString()
+    updated_at: new Date(data._upd).toISOString()
   };
   return sbClient.from('player_profiles')
     .upsert(payload, { onConflict: 'id' })
@@ -31670,13 +31793,42 @@ function sbLoadInitialData(){
     // Mergear: los de Supabase pisan a los locales con el mismo id
     // v134: salvo los que el usuario borró/fusionó (tombstone), que si no
     // volverían a aparecer como duplicados en cada recarga.
-    var skipped=0;
+    var skipped=0, kept=0;
     rows.forEach(function(row){
       if(typeof profIsDeleted==='function' && profIsDeleted(row.id)){ skipped++; return; }
       var prof = Object.assign({}, row.data || {});
       prof.name = row.name;
+      if(prof._upd==null && row.updated_at){
+        var t=Date.parse(row.updated_at); if(!isNaN(t)) prof._upd=t;
+      }
+      // v146: si mi versión local es MÁS NUEVA, gana la mía y se resube.
+      var mine = PLAYER_PROFILES[row.id];
+      if(mine && Number(mine._upd||0) > Number(prof._upd||0)){
+        kept++;
+        if(typeof sbProfilesUpsert==='function'){ try{ sbProfilesUpsert(row.id, mine); }catch(e){} }
+        return;
+      }
       PLAYER_PROFILES[row.id] = prof;
     });
+    if(kept) console.log('[Supabase] '+kept+' perfil(es) locales más nuevos conservados.');
+    // v146: propagar los BORRADOS del compañero. Un perfil que existe acá pero
+    // no en la nube, y que este dispositivo no modificó (no está "dirty"), fue
+    // eliminado o fusionado por el otro: hay que sacarlo. Sin esto volvían a
+    // aparecer los duplicados ya unificados cuando el compañero entraba.
+    try{
+      var cloudIds={}; rows.forEach(function(r){ cloudIds[r.id]=true; });
+      var gone=[];
+      Object.keys(PLAYER_PROFILES).forEach(function(k){
+        if(cloudIds[k])return;
+        if(_profDirty[k])return;                       // lo modifiqué yo: se sube, no se borra
+        if(PLAYER_PROFILES[k] && PLAYER_PROFILES[k]._upd==null && !rows.length) return;
+        gone.push(k);
+      });
+      if(gone.length && rows.length){
+        gone.forEach(function(k){ delete PLAYER_PROFILES[k]; });
+        console.log('[Supabase] '+gone.length+' perfil(es) eliminados en otro dispositivo, quitados: '+gone.join(', '));
+      }
+    }catch(e){ console.warn('[Perfiles] propagar borrados:',e); }
     if(typeof profPurgeDeleted==='function') profPurgeDeleted();
     if(skipped) console.log('[Supabase] '+skipped+' perfil(es) borrados localmente, ignorados de la nube.');
     console.log('[Supabase] Cargados ' + (rows.length-skipped) + ' perfiles de jugadores.');
@@ -31739,22 +31891,30 @@ function sbScheduleProfileSync(){
   _sbProfileSyncTimer = setTimeout(function(){
     _sbProfileSyncTimer = null;
     if(typeof PLAYER_PROFILES === 'undefined') return;
-    var ids = Object.keys(PLAYER_PROFILES);
-    if(!ids.length) return;
-    console.log('[Supabase] Sync de perfiles ('+ids.length+')');
-    // Subir en batch (un upsert con array)
-    var payload = ids.map(function(id){
-      var p = PLAYER_PROFILES[id];
-      var data = Object.assign({}, p); delete data.name;
-      return { id: id, name: p.name || '(sin nombre)', data: data, categoria: SB_CATEGORIA, updated_at: new Date().toISOString() };
-    });
-    sbClient.from('player_profiles').upsert(payload, { onConflict: 'id' }).then(function(res){
-      if(res.error){
-        console.error('[Supabase] Sync error:', res.error);
-      } else {
-        console.log('[Supabase] Sync OK ('+ids.length+' perfiles)');
-      }
-    });
+    var allIds = Object.keys(PLAYER_PROFILES);
+    if(!allIds.length) return;
+    // v146: subir SÓLO los perfiles modificados en este dispositivo. Antes se
+    // subían todos con fecha nueva y el que sincronizaba último pisaba los
+    // cambios del otro aunque no hubiera tocado nada.
+    var ids = allIds.filter(function(id){ return _profDirty[id] || PLAYER_PROFILES[id]._upd==null; });
+    if(!ids.length){ console.log('[Supabase] Perfiles: sin cambios para subir.'); }
+    else {
+      console.log('[Supabase] Sync de perfiles ('+ids.length+' de '+allIds.length+')');
+      var payload = ids.map(function(id){
+        var p = PLAYER_PROFILES[id];
+        var data = Object.assign({}, p); delete data.name;
+        if(data._upd==null) data._upd=Date.now();
+        return { id: id, name: p.name || '(sin nombre)', data: data, categoria: SB_CATEGORIA, updated_at: new Date(data._upd).toISOString() };
+      });
+      sbClient.from('player_profiles').upsert(payload, { onConflict: 'id' }).then(function(res){
+        if(res.error){
+          console.error('[Supabase] Sync error:', res.error);
+        } else {
+          console.log('[Supabase] Sync OK ('+ids.length+' perfiles)');
+          profDirtyClear(ids);
+        }
+      });
+    }
     // v134: además del upsert, BORRAR de la nube los perfiles tombstoneados.
     // Sin esto, fusionar o eliminar un perfil no se persistía: la fila seguía
     // en Supabase y volvía en la próxima carga.
@@ -32311,12 +32471,16 @@ function _sbPlanWeekToPayload(p){
   // name + created van como columnas dedicadas (parte del UNIQUE)
   var data = Object.assign({}, p);
   delete data.name; delete data.created;
+  // v146: `_dirty` es una marca LOCAL ("tengo cambios sin subir"). Si viaja a
+  // la nube, el otro dispositivo la recibe como propia y nunca borra la semana
+  // cuando vos la eliminás. Se quita del payload.
+  delete data._dirty;
   return {
     name: p.name || '(sin nombre)',
     created: p.created || '',  // string ISO o vacío; es parte del UNIQUE
     data: data,
     categoria: SB_CATEGORIA,
-    updated_at: new Date().toISOString()
+    updated_at: new Date(Number(p._upd)||Date.now()).toISOString()
   };
 }
 function _sbPlanWeekFromRow(row){
@@ -32503,6 +32667,9 @@ function sbScheduleTanda1Sync(){
           if(res.error) console.error('[Supabase] Sync plan_weeks error:', res.error);
           else {
             console.log('[Supabase] Sync plan_weeks OK');
+            // v146: limpiar la marca de "pendiente de subir". Si no se limpia,
+            // el poller nunca puede detectar que el compañero borró una semana.
+            toUpload.forEach(function(w){ delete w._dirty; });
             try{ if(typeof saveData==='function') saveData(); }catch(e){}
             try{ if(typeof planRenderWeeksList==='function') planRenderWeeksList(); }catch(e){}
           }
@@ -38546,7 +38713,17 @@ function hoySetEstado(nameL, estado){
   } else {
     prof.estado=estado;
   }
-  if(typeof saveData==='function')saveData();
+  // v146: sellar y subir SOLO este perfil, para que el cambio de estado llegue
+  // al compañero y no lo pise su copia vieja.
+  var _k=null;
+  try{
+    Object.keys(PLAYER_PROFILES).forEach(function(kk){
+      var pp=PLAYER_PROFILES[kk];
+      if(pp&&hoyNorm(pp.name)===nameL) _k=kk;
+    });
+  }catch(e){}
+  if(_k && typeof profSaveOne==='function') profSaveOne(_k);
+  else if(typeof saveData==='function')saveData();
   if(typeof renderProfilesTable==='function'){ try{ renderProfilesTable(); }catch(e){} }
   hoyRender();
 }
