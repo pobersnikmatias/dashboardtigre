@@ -2628,6 +2628,15 @@ function addRow(){
     nr.diag=window._fPendingDiag;
   }
   computeRatios(nr);D.push(nr);
+  // v147: alta explícita → si ese id estaba tombstoneado (no debería, drillsNewId
+  // lo evita), levantar el borrado ANTES de subir. Es el único camino donde se
+  // permite desmarcar: el usuario está creando el ejercicio a propósito.
+  try{
+    if(typeof drillTombUnmark==='function') drillTombUnmark(Number(nr.id));
+    var _t=JSON.parse(localStorage.getItem('drills_deleted')||'[]');
+    var _fi=_t.indexOf(Number(nr.id));
+    if(_fi>-1){ _t.splice(_fi,1); localStorage.setItem('drills_deleted', JSON.stringify(_t)); }
+  }catch(e){}
   // v140: sellar → guardar → subir, para que el ejercicio nuevo nunca pueda
   // ser descartado por el merge con la nube.
   if(typeof drillSaveOne==='function') drillSaveOne(nr);
@@ -31624,6 +31633,9 @@ function sbOnLoginSuccess(){
     // v146: refresco automático global (planificación + perfiles), en toda la
     // app y no sólo dentro de la pestaña Planificación.
     try{ if(typeof planPollStart==='function') planPollStart(); }catch(e){}
+    // v147: guardián anti-zombies de la videoteca (refresca el registro de
+    // borrados compartido y purga lo que reaparezca, en memoria y en la nube).
+    try{ if(typeof drillGuardStart==='function'){ drillGuardStart(); drillGuardSweep(); } }catch(e){}
     // Refrescar también al volver a la pestaña del navegador
     try{
       if(!window._syncVisWired){
@@ -33146,20 +33158,34 @@ function sbUpsertOneDrill(d){
     return;
   }
   try{
-    // Si este id estaba marcado como borrado, quitarlo del tombstone (se recreó).
-    try{
-      var idN = Number(d && d.id);
-      if(!isNaN(idN)){
-        var tomb = JSON.parse(localStorage.getItem('drills_deleted')||'[]');
-        var fi = tomb.indexOf(idN);
-        if(fi>-1){ tomb.splice(fi,1); localStorage.setItem('drills_deleted', JSON.stringify(tomb)); }
-        // v125: desmarcar también del tombstone compartido en la nube
-        try{ if(typeof drillTombUnmark==='function') drillTombUnmark(idN); }catch(e){}
-        // Marcar como PENDIENTE de confirmación en la nube (se preserva si no sube)
+    var idN = Number(d && d.id);
+    // ── v147: BLOQUEO DE RESURRECCIÓN ──
+    // ESTE era el bug que hacía volver los ejercicios una y otra vez. Antes,
+    // CUALQUIER subida desmarcaba el tombstone automáticamente ("si lo estoy
+    // subiendo es porque se recreó"). Pero el sync masivo del compañero pasa
+    // por acá con ejercicios que él todavía tenía en memoria: desmarcaba el
+    // borrado y lo resubía. Por eso reaparecían "cada tanto".
+    // Ahora un ejercicio borrado NO se sube nunca, y el tombstone sólo se
+    // levanta cuando el usuario recrea el ejercicio a propósito
+    // (drillTombUnmark explícito desde el alta).
+    if(!isNaN(idN)){
+      var tombNow = (typeof _drillTombAllSet==='function') ? _drillTombAllSet() : {};
+      if(tombNow[idN]){
+        console.warn('[Anti-zombie] Subida bloqueada: el ejercicio id '+idN+' está borrado. No se resucita.');
+        // Y de paso sacarlo de memoria si volvió a colarse
+        try{
+          if(typeof D!=='undefined'&&Array.isArray(D)){
+            for(var z=D.length-1;z>=0;z--){ if(D[z]&&Number(D[z].id)===idN) D.splice(z,1); }
+          }
+        }catch(e){}
+        return;
+      }
+      // Marcar como PENDIENTE de confirmación en la nube (se preserva si no sube)
+      try{
         var pend = JSON.parse(localStorage.getItem('drills_pending')||'[]');
         if(pend.indexOf(idN)<0){ pend.push(idN); localStorage.setItem('drills_pending', JSON.stringify(pend)); }
-      }
-    }catch(e){}
+      }catch(e){}
+    }
     if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return;
     var payload = _sbDrillToPayload(d);
     if(!payload) return;
@@ -33235,11 +33261,13 @@ function sbDeleteOneDrill(id){
 window.sbDeleteOneDrill = sbDeleteOneDrill;
 
 function _sbTombRemove(idNum){
-  try{
-    var tomb=JSON.parse(localStorage.getItem('drills_deleted')||'[]');
-    var i=tomb.indexOf(idNum);
-    if(i>-1){ tomb.splice(i,1); localStorage.setItem('drills_deleted', JSON.stringify(tomb)); }
-  }catch(e){}
+  // v147: NO-OP a propósito. Antes esta función borraba el tombstone en cuanto
+  // Supabase confirmaba el delete ("cumplió su misión"). Ese era el agujero
+  // principal: a partir de ese momento no quedaba ninguna marca de que el
+  // ejercicio estaba borrado, así que si el dispositivo del compañero —que lo
+  // tenía en memoria— hacía un sync, lo resubía y volvía para siempre.
+  // El tombstone ahora es PERMANENTE (se poda solo por edad, a los 180 días).
+  return;
 }
 // Flush de tombstones: re-ejecuta en la nube los borrados que quedaron
 // pendientes (sesión caída, error de red, o zombies de versiones anteriores).
@@ -33259,12 +33287,11 @@ function _sbFlushDrillTombstones(){
     return;
   }
   _sbTombFlushRetries=0;
-  console.log('[Supabase] Purgando '+tomb.length+' ejercicio(s) borrados pendientes de la nube…');
+  console.log('[Supabase] Purgando '+tomb.length+' ejercicio(s) borrados de la nube…');
   tomb.slice().forEach(function(id){
     sbClient.from('drills_exercises').delete().eq('id', Number(id)).eq('categoria', SB_CATEGORIA)
       .then(function(res){
-        if(!res.error)_sbTombRemove(Number(id));
-        else console.warn('[Supabase] Purga id '+id+' falló:', res.error);
+        if(res.error) console.warn('[Supabase] Purga id '+id+' falló:', res.error);
       });
   });
 }
@@ -33377,6 +33404,111 @@ function _drillTombAllSet(){
 }
 window._drillTombAllSet=_drillTombAllSet;
 
+// ═══ GUARDIÁN ANTI-ZOMBIES (v147) ═══════════════════════════════════════
+// Por qué seguían volviendo: el registro compartido de borrados sólo se leía
+// en la carga inicial. Si tu compañero borraba algo después, o si su
+// dispositivo resubía un ejercicio que vos ya habías borrado, no había ningún
+// control posterior — el zombie entraba y se quedaba.
+// Ahora: (1) el registro se refresca periódicamente desde la nube, (2) cada
+// refresco purga de memoria y de la nube lo que esté borrado, y (3) antes de
+// CUALQUIER subida se verifica contra el registro fresco.
+var _drillGuardTimer=null, _drillGuardBusy=false;
+
+// Refresca el registro compartido y limpia todo lo que esté borrado.
+function drillGuardSweep(){
+  if(_drillGuardBusy) return Promise.resolve(0);
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser) return Promise.resolve(0);
+  if(typeof document!=='undefined'&&document.hidden) return Promise.resolve(0);
+  _drillGuardBusy=true;
+  try{ if(typeof drillIdHwmFetch==='function') drillIdHwmFetch(); }catch(e){}
+  return _drillTombCloudFetch().then(function(cloudTomb){
+    // Unir: nube ∪ local. Nadie puede "desborrar" lo que otro borró.
+    var merged=Object.assign({}, cloudTomb||{}, _drillTombCloudLocal());
+    _drillTombCloudLocalSave(merged);
+    window._drillTombCloudCache=merged;
+    var tombAll=_drillTombAllSet();
+    // 1) Sacar de memoria los zombies
+    var removed=[];
+    if(typeof D!=='undefined'&&Array.isArray(D)){
+      for(var i=D.length-1;i>=0;i--){
+        if(D[i]&&tombAll[Number(D[i].id)]){ removed.push(D[i].id); D.splice(i,1); }
+      }
+    }
+    if(removed.length){
+      console.warn('[Anti-zombie] '+removed.length+' ejercicio(s) borrados reaparecieron y fueron quitados: '+removed.join(', '));
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      try{
+        if(typeof rebuildCatBtns==='function')rebuildCatBtns();
+        if(typeof refresh==='function')refresh();
+      }catch(e){}
+    }
+    // 2) Verificar la nube: si alguna fila borrada sigue ahí, purgarla
+    var ids=Object.keys(tombAll).map(Number).filter(function(n){return !isNaN(n);});
+    if(!ids.length){ _drillGuardBusy=false; return removed.length; }
+    return sbClient.from('drills_exercises').select('id').eq('categoria',SB_CATEGORIA).in('id',ids)
+      .then(function(res){
+        _drillGuardBusy=false;
+        if(res.error||!res.data||!res.data.length) return removed.length;
+        var stillThere=res.data.map(function(r){return Number(r.id);});
+        console.warn('[Anti-zombie] '+stillThere.length+' ejercicio(s) borrados seguían en la nube. Purgando: '+stillThere.join(', '));
+        sbClient.from('drills_exercises').delete().eq('categoria',SB_CATEGORIA).in('id',stillThere)
+          .then(function(d){ if(d.error)console.warn('[Anti-zombie] purga:',d.error.message||d.error); });
+        return removed.length+stillThere.length;
+      }).catch(function(){ _drillGuardBusy=false; return removed.length; });
+  }).catch(function(){ _drillGuardBusy=false; return 0; });
+}
+window.drillGuardSweep=drillGuardSweep;
+
+function drillGuardStart(){
+  if(_drillGuardTimer)return;
+  _drillGuardTimer=setInterval(drillGuardSweep, 30000);
+  try{
+    if(!window._drillGuardVis){
+      window._drillGuardVis=true;
+      document.addEventListener('visibilitychange',function(){
+        if(!document.hidden) drillGuardSweep();
+      });
+    }
+  }catch(e){}
+}
+window.drillGuardStart=drillGuardStart;
+
+// ── DIAGNÓSTICO Y REPARACIÓN MANUAL (v147) ────────────────────────────────
+// Correr en la consola: zombies()  → muestra el estado del sistema de borrados
+//                       repararZombies() → fuerza una limpieza completa
+window.zombies=function(){
+  var out={};
+  try{
+    var tombAll=_drillTombAllSet();
+    out.idsBorrados=Object.keys(tombAll).length;
+    out.registroLocal=Object.keys(_drillTombCloudLocal()).length;
+    out.registroNubeCacheado=Object.keys(window._drillTombCloudCache||{}).length;
+    try{ out.colaLegacy=JSON.parse(localStorage.getItem('drills_deleted')||'[]').length; }catch(e){}
+    out.ejerciciosEnMemoria=(typeof D!=='undefined'&&Array.isArray(D))?D.length:0;
+    var zomb=[];
+    (typeof D!=='undefined'?D:[]).forEach(function(r){ if(r&&tombAll[Number(r.id)]) zomb.push(r.id+':'+r.n); });
+    out.zombiesEnMemoria=zomb.length?zomb.join(' · '):'ninguno ✓';
+    out.sesionActiva=(typeof sbCurrentUser!=='undefined'&&!!sbCurrentUser);
+    out.guardianActivo=!!_drillGuardTimer;
+    console.log('══════ ESTADO DE BORRADOS (VIDEOTECA) ══════');
+    Object.keys(out).forEach(function(k){ console.log('  '+k+': '+out[k]); });
+    if(zomb.length) console.warn('  ⚠ Hay zombies. Corré: repararZombies()');
+    console.log('════════════════════════════════════════════');
+  }catch(e){ console.warn('zombies():',e); }
+  return out;
+};
+
+// Fuerza una limpieza completa: refresca el registro, purga memoria y nube.
+window.repararZombies=function(){
+  console.log('[Anti-zombie] Reparación forzada…');
+  return drillGuardSweep().then(function(n){
+    console.log('[Anti-zombie] Listo. '+(n||0)+' elemento(s) limpiados.');
+    if(typeof _sbFlushDrillTombstones==='function') _sbFlushDrillTombstones();
+    if(typeof _drillTombPushNow==='function') _drillTombPushNow();
+    return n;
+  });
+};
+
 // ═══ GENERACIÓN DE IDs SIN REUTILIZACIÓN (v125) ═══
 // Antes: newId = max(D)+1. Si borrabas el ejercicio de id más alto, el
 // siguiente ejercicio nuevo REUTILIZABA ese id → el tombstone del borrado
@@ -33388,11 +33520,63 @@ function drillsNewId(){
   try{ (typeof D!=='undefined'?D:[]).forEach(function(r){ var n=Number(r.id); if(!isNaN(n)&&n>maxId)maxId=n; }); }catch(e){}
   try{ Object.keys(_drillTombAllSet()).forEach(function(k){ var n=Number(k); if(!isNaN(n)&&n>maxId)maxId=n; }); }catch(e){}
   try{ var hwm=Number(localStorage.getItem('drills_id_hwm')||0); if(!isNaN(hwm)&&hwm>maxId)maxId=hwm; }catch(e){}
+  // v147: sumar también la marca de agua COMPARTIDA. Sin esto, dos dispositivos
+  // trabajando en paralelo podían generar el MISMO id para ejercicios
+  // distintos: uno pisaba al otro, y si además ese id estaba en el registro de
+  // borrados, el ejercicio nuevo nacía condenado (se borraba solo).
+  try{
+    var shared=Number(window._drillIdHwmShared||0);
+    if(!isNaN(shared)&&shared>maxId)maxId=shared;
+  }catch(e){}
   var nid=maxId+1;
   try{ localStorage.setItem('drills_id_hwm', String(nid)); }catch(e){}
+  window._drillIdHwmShared=nid;
+  // Publicar la marca de agua para el otro dispositivo
+  try{ _drillIdHwmPush(nid); }catch(e){}
   return nid;
 }
 window.drillsNewId=drillsNewId;
+
+// Marca de agua de ids compartida (app_settings). Evita colisiones entre
+// dispositivos que crean ejercicios al mismo tiempo.
+var _DRILL_HWM_KEY='DRILLS_ID_HWM';
+var _drillHwmTimer=null;
+function _drillIdHwmPush(nid){
+  if(_drillHwmTimer)clearTimeout(_drillHwmTimer);
+  _drillHwmTimer=setTimeout(function(){
+    _drillHwmTimer=null;
+    if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return;
+    sbClient.from('app_settings').select('value')
+      .eq('key',_DRILL_HWM_KEY).eq('categoria',SB_CATEGORIA).maybeSingle()
+      .then(function(res){
+        var cur=0;
+        try{ cur=Number((res&&res.data&&res.data.value&&res.data.value.hwm)||0); }catch(e){}
+        var v=Math.max(cur, Number(nid)||0, Number(window._drillIdHwmShared)||0);
+        window._drillIdHwmShared=v;
+        try{ localStorage.setItem('drills_id_hwm', String(v)); }catch(e){}
+        sbClient.from('app_settings').upsert(
+          {key:_DRILL_HWM_KEY, value:{hwm:v}, categoria:SB_CATEGORIA, updated_at:new Date().toISOString()},
+          {onConflict:'key,categoria'}).then(function(){});
+      });
+  }, 800);
+}
+// Lee la marca de agua compartida (se llama en la carga y en cada barrido)
+function drillIdHwmFetch(){
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(0);
+  return sbClient.from('app_settings').select('value')
+    .eq('key',_DRILL_HWM_KEY).eq('categoria',SB_CATEGORIA).maybeSingle()
+    .then(function(res){
+      var v=0;
+      try{ v=Number((res&&res.data&&res.data.value&&res.data.value.hwm)||0); }catch(e){}
+      var local=0;
+      try{ local=Number(localStorage.getItem('drills_id_hwm')||0); }catch(e){}
+      var best=Math.max(v, local, Number(window._drillIdHwmShared)||0);
+      window._drillIdHwmShared=best;
+      try{ localStorage.setItem('drills_id_hwm', String(best)); }catch(e){}
+      return best;
+    }).catch(function(){ return 0; });
+}
+window.drillIdHwmFetch=drillIdHwmFetch;
 
 // Sube TODA la biblioteca de ejercicios a Supabase de inmediato (sin debounce).
 // Útil tras importar un CSV con varias filas nuevas/modificadas.
