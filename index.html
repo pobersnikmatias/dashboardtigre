@@ -25190,40 +25190,166 @@ window.cargaToggleDolor=cargaToggleDolor;
 // Devuelve la lista de microciclos disponibles (todos los `week` únicos en MICROCICLO),
 // y un slot adicional "Sin asignar" si el usuario prefiere asociar solo por fecha.
 function _cargaListMicrociclos(){
-  var weeks=[];
+  var weeks=[], seen={};
+  // 1) Semanas que ya tienen sesiones de GPS cargadas
   if(typeof MICROCICLO!=='undefined' && MICROCICLO.length){
-    var seen={};
     MICROCICLO.forEach(function(s){
       if(s.week && !seen[s.week]){seen[s.week]=true;weeks.push(s.week);}
     });
   }
+  // 2) v149: semanas creadas en PLANIFICACIÓN. Antes la lista salía SOLO del
+  // Excel de GPS, así que quien no tiene GPS (o se quedó sin servicio) no
+  // podía asignar wellness/PSE a ningún microciclo: el desplegable venía
+  // vacío. Ahora la planificación también alimenta la lista, y la app queda
+  // usable con GPS o sin GPS.
+  if(typeof PLAN_WEEKS!=='undefined' && Array.isArray(PLAN_WEEKS)){
+    PLAN_WEEKS.forEach(function(w){
+      if(w && w.name && !seen[w.name]){ seen[w.name]=true; weeks.push(w.name); }
+    });
+  }
+  // 3) Microciclos asignados a mano en el contexto por fecha
+  if(typeof CARGA_WEEK_CTX!=='undefined' && CARGA_WEEK_CTX){
+    Object.keys(CARGA_WEEK_CTX).forEach(function(d){
+      var c=CARGA_WEEK_CTX[d];
+      var wk=c&&c.week;
+      if(wk && !seen[wk]){ seen[wk]=true; weeks.push(wk); }
+    });
+  }
+  // 3b) Microciclos creados a mano desde los selectores de importación
+  try{
+    JSON.parse(localStorage.getItem('cargaCustomWeeks_v1')||'[]').forEach(function(w){
+      if(w && !seen[w]){ seen[w]=true; weeks.push(w); }
+    });
+  }catch(e){}
+  // 4) Semanas que ya se usaron en registros de wellness/PSE
+  [(typeof PSE_DATA!=='undefined'?PSE_DATA:null),
+   (typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:null)].forEach(function(arr){
+    if(!Array.isArray(arr))return;
+    arr.forEach(function(r){
+      if(r && r.week && !seen[r.week]){ seen[r.week]=true; weeks.push(r.week); }
+    });
+  });
   // Ordenar natural para que el desplegable salga "Microciclo 1, 2, ... 19"
   if(typeof _sortWeeksNatural==='function') weeks=_sortWeeksNatural(weeks);
   return weeks;
 }
 // Sugerencia de microciclo basada en la fecha: si la fecha matchea alguna sesión existente, usar esa week.
 function _cargaSuggestWeekDay(dateStr){
-  if(!dateStr || typeof MICROCICLO==='undefined')return {week:'', day:''};
+  if(!dateStr)return {week:'', day:''};
   var parsed=cargaParseDate(dateStr) || dateStr;
-  var match=MICROCICLO.find(function(s){
-    var sd=cargaParseDate(s.fecha||s.date||'') || (s.fecha||s.date||'');
-    return sd && sd===parsed;
-  });
-  if(match)return {week:match.week||'', day:match.day||''};
+  // 1) Coincidencia exacta con una sesión de GPS ya cargada
+  if(typeof MICROCICLO!=='undefined' && Array.isArray(MICROCICLO)){
+    var match=MICROCICLO.find(function(s){
+      var sd=cargaParseDate(s.fecha||s.date||'') || (s.fecha||s.date||'');
+      return sd && sd===parsed;
+    });
+    if(match)return {week:match.week||'', day:match.day||''};
+  }
+  // 2) v149: asignación manual guardada para esa fecha
+  try{
+    if(typeof CARGA_WEEK_CTX!=='undefined' && CARGA_WEEK_CTX && CARGA_WEEK_CTX[parsed]){
+      var c=CARGA_WEEK_CTX[parsed];
+      if(c && c.week) return {week:c.week, day:c.day||''};
+    }
+  }catch(e){}
+  // 3) v149: semana de PLANIFICACIÓN cuyo rango contiene la fecha. Esto es lo
+  // que permite trabajar sin GPS: alcanza con haber creado el microciclo en
+  // Planificación con su fecha de inicio.
+  try{
+    if(typeof planWeeksWithDates==='function'){
+      var pw=planWeeksWithDates().find(function(x){ return parsed>=x.start && parsed<=x.end; });
+      if(pw){
+        var day='';
+        // Rótulo MD-N según la posición del día dentro de la semana planificada
+        try{
+          var w=(typeof PLAN_WEEKS!=='undefined'?PLAN_WEEKS:[]).find(function(x){return x&&x.name===pw.week&&x.startDate;});
+          if(w&&Array.isArray(w.days)&&typeof planShiftISO==='function'){
+            for(var i=0;i<w.days.length;i++){
+              if(planShiftISO(pw.start,i)===parsed){ day=(w.days[i]&&w.days[i].mdLabel)||''; break; }
+            }
+          }
+        }catch(e){}
+        return {week:pw.week, day:day};
+      }
+    }
+  }catch(e){}
+  // 4) v149: continuación automática del microciclo (misma lógica del tablero)
+  try{
+    if(typeof cargaMicroWeeksByDate==='function' && typeof cargaProjectWeek==='function'){
+      var wks=cargaMicroWeeksByDate();
+      if(wks.length){
+        var inRange=wks.find(function(w){
+          var s=w.startExt||w.start, e=w.endExt||w.end;
+          return parsed>=s && parsed<=e;
+        });
+        if(inRange) return {week:inRange.week, day:(inRange.dateToDay&&inRange.dateToDay[parsed])||''};
+        var proj=cargaProjectWeek(parsed,wks);
+        if(proj) return {week:proj.week, day:''};
+      }
+    }
+  }catch(e){}
   return {week:'', day:''};
 }
 // Construye selector HTML
 function _cargaWeekSelector(id, current, includeNew){
   var weeks=_cargaListMicrociclos();
   var opts='<option value="">— Sin asignar (matchear por fecha) —</option>';
+  var found=false;
   weeks.forEach(function(w){
+    if(w===current)found=true;
     opts+='<option value="'+_extraEsc(w)+'"'+(w===current?' selected':'')+'>'+_extraEsc(w)+'</option>';
   });
-  if(includeNew){
-    opts+='<option value="__new__">+ Crear nuevo microciclo…</option>';
+  // Si la semana sugerida todavía no está en la lista (proyectada), agregarla
+  if(current && !found){
+    opts+='<option value="'+_extraEsc(current)+'" selected>'+_extraEsc(current)+'</option>';
   }
-  return '<select id="'+id+'" style="font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:5px;background:#fff">'+opts+'</select>';
+  // v149: crear un microciclo al vuelo, sin depender del Excel de GPS
+  opts+='<option value="__new__">+ Crear nuevo microciclo…</option>';
+  return '<select id="'+id+'" onchange="cargaWeekSelChange(this)" style="font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:5px;background:#fff">'+opts+'</select>';
 }
+// v149: al elegir "+ Crear nuevo microciclo…", pedir el nombre y agregarlo a
+// TODOS los selectores de microciclo abiertos en pantalla.
+function cargaWeekSelChange(sel){
+  if(!sel || sel.value!=='__new__') return;
+  var sug='';
+  try{
+    // Proponer el siguiente al último conocido
+    var list=_cargaListMicrociclos();
+    if(list.length && typeof planWeekNextName==='function'){
+      sug=planWeekNextName(list[list.length-1])||'';
+    }
+  }catch(e){}
+  var name=prompt('Nombre del microciclo nuevo:', sug||'Microciclo 1');
+  if(!name || !name.trim()){ sel.value=''; return; }
+  name=name.trim();
+  // Agregarlo a todos los <select> de microciclo de la pantalla
+  try{
+    var sels=document.querySelectorAll('select[onchange*="cargaWeekSelChange"]');
+    Array.prototype.forEach.call(sels, function(sl){
+      var exists=false;
+      Array.prototype.forEach.call(sl.options, function(o){ if(o.value===name)exists=true; });
+      if(!exists){
+        var opt=document.createElement('option');
+        opt.value=name; opt.textContent=name;
+        // insertarlo antes de "+ Crear nuevo…"
+        var last=sl.options[sl.options.length-1];
+        if(last && last.value==='__new__') sl.insertBefore(opt,last);
+        else sl.appendChild(opt);
+      }
+    });
+  }catch(e){}
+  sel.value=name;
+  if(typeof cargaWeekRemember==='function') cargaWeekRemember(name);
+}
+window.cargaWeekSelChange=cargaWeekSelChange;
+// Recuerda un microciclo creado a mano para que siga apareciendo después
+function cargaWeekRemember(name){
+  try{
+    var arr=JSON.parse(localStorage.getItem('cargaCustomWeeks_v1')||'[]');
+    if(arr.indexOf(name)<0){ arr.push(name); localStorage.setItem('cargaCustomWeeks_v1', JSON.stringify(arr)); }
+  }catch(e){}
+}
+window.cargaWeekRemember=cargaWeekRemember;
 function _cargaDaySelector(id, current){
   var opts='<option value="">— Sin día —</option>';
   DAY_ORDER.forEach(function(d){
