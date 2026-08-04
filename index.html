@@ -18135,8 +18135,8 @@ document.addEventListener('DOMContentLoaded',function(){
   <input type="hidden" id="carga-tab-mode" value="wellpse">
 
   <div style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto">
-    <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:var(--club-c2,#3B4D88);color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid var(--club-c2,#3B4D88)">💚 Wellness &amp; PSE</button>
-    <button id="carga-view-dia" onclick="cargaSetView('dia')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">🌅 Wellness y PSE del día</button>
+    <button id="carga-view-wellpse" onclick="cargaSetView('wellpse')" style="padding:5px 14px;border:none;background:var(--club-c2,#3B4D88);color:#fff;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid var(--club-c2,#3B4D88)">💚 Monitoreo</button>
+    <button id="carga-view-ua" onclick="cargaSetView('ua')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">📈 Carga semanal</button>
     <button id="carga-view-cuadrante" onclick="cargaSetView('cuadrante')" style="padding:5px 14px;border:none;background:none;color:#aaa;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent">📊 Cuadrante</button>
   </div>
 </div>
@@ -25711,7 +25711,7 @@ window.cargaWeekChange=cargaWeekChange;
 // ── View switcher ──
 function cargaSetView(view){
   document.getElementById('carga-tab-mode').value=view;
-  ['cuadrante','wellpse','dia'].forEach(function(t){
+  ['cuadrante','wellpse','ua'].forEach(function(t){
     var btn=document.getElementById('carga-view-'+t);
     if(btn){btn.style.background=t===view?'#3B4D88':'none';btn.style.color=t===view?'#fff':'#aaa';btn.style.borderBottom=t===view?'2px solid var(--club-c2,#3B4D88)':'2px solid transparent';}
   });
@@ -25724,10 +25724,12 @@ function cargaRender(){
   cargaUpdateDataIndicator();
   var tab=document.getElementById('carga-tab-mode')?document.getElementById('carga-tab-mode').value:'cuadrante';
   // Compatibilidad con tabs viejas: 'pse', 'wellness', 'tendencia', 'dolores' redirigen a 'wellpse'
-  if(tab==='pse'||tab==='wellness'||tab==='tendencia'||tab==='dolores') tab='wellpse';
+  // v150: 'dia' se fusionó dentro de 'wellpse' (Monitoreo). Las tabs viejas
+  // redirigen para no romper estados guardados.
+  if(tab==='pse'||tab==='wellness'||tab==='tendencia'||tab==='dolores'||tab==='dia') tab='wellpse';
   if(tab==='cuadrante')cargaRenderCuadrante();
-  else if(tab==='dia')cargaRenderWellnessDia();
-  else if(tab==='wellpse')cargaRenderWellPse();
+  else if(tab==='ua')cargaRenderCargaSemanal();
+  else if(tab==='wellpse')cargaRenderMonitor();
 }
 window.cargaRender=cargaRender;
 
@@ -25824,7 +25826,7 @@ function cargaRenderWellnessDia(){
   html+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #ffffff22">'+
     '<span style="font-size:11px;color:#9fb3c8;font-weight:600">⏱️ Tiempo de trabajo grupal:</span>'+
     '<input type="number" id="carga-dia-groupmin" min="0" step="1" placeholder="min" style="width:70px;padding:5px 7px;border:none;border-radius:5px;font-size:12px;text-align:center">'+
-    '<button onclick="cargaDiaApplyGroupMin()" style="padding:5px 12px;border:none;border-radius:5px;background:#9C59D1;color:#fff;font-size:11px;font-weight:700;cursor:pointer">Aplicar a todos</button>'+
+    '<button onclick="cargaDiaApplyGroupMin()" style="padding:5px 12px;border:none;border-radius:5px;background:#3B4D88;color:#fff;font-size:11px;font-weight:700;cursor:pointer">Aplicar a todos</button>'+
     '<span style="font-size:10px;color:#7fd4a8;font-weight:600" id="carga-dia-min-msg"></span>'+
     '<span style="font-size:9px;color:#7088a0">UA = PSE × minutos</span>'+
   '</div>';
@@ -25849,7 +25851,7 @@ function cargaRenderWellnessDia(){
   html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#C62828;white-space:nowrap">Dolor</th>';
   html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#D85A30;white-space:nowrap">PSE</th>';
   html+='<th style="padding:8px 8px;text-align:center;font-weight:700;color:#555;white-space:nowrap">Min</th>';
-  html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#9C59D1;white-space:nowrap">UA</th>';
+  html+='<th style="padding:8px 10px;text-align:center;font-weight:700;color:#3B4D88;white-space:nowrap" title="Carga interna = PSE x minutos">Carga (UA)</th>';
   html+='</tr></thead><tbody>';
 
   rows.forEach(function(r){
@@ -25894,7 +25896,7 @@ function cargaRenderWellnessDia(){
     // Columna UA = PSE × Min
     var uaVal=(pv!=null && pr && pr.min>0)?Math.round(pv*pr.min):null;
     if(uaVal!=null){
-      html+='<td style="padding:7px 10px;text-align:center;font-weight:800;color:#9C59D1">'+uaVal.toLocaleString('es-AR')+'</td>';
+      html+='<td style="padding:7px 10px;text-align:center;font-weight:800;color:#3B4D88">'+uaVal.toLocaleString('es-AR')+'</td>';
     } else {
       html+='<td style="padding:7px 10px;text-align:center;color:#ddd">–</td>';
     }
@@ -25921,7 +25923,7 @@ function cargaRenderWellnessDia(){
     // UA promedio
     var uavals=Object.keys(pseByName).map(function(n){var p=pseByName[n];return (p.pse!=null&&p.min>0)?p.pse*p.min:null;}).filter(function(v){return v!=null;});
     var uaavg=uavals.length?uavals.reduce(function(a,b){return a+b;},0)/uavals.length:null;
-    html+='<td style="padding:8px 10px;text-align:center;font-weight:800;color:#9C59D1">'+(uaavg!=null?Math.round(uaavg).toLocaleString('es-AR'):'–')+'</td>';
+    html+='<td style="padding:8px 10px;text-align:center;font-weight:800;color:#3B4D88">'+(uaavg!=null?Math.round(uaavg).toLocaleString('es-AR'):'–')+'</td>';
   })();
   html+='</tr>';
 
@@ -26121,6 +26123,491 @@ function cargaRenderWellPse(){
   out.innerHTML = switchHtml + cargaRenderEquipoBoard();
 }
 window.cargaRenderWellPse = cargaRenderWellPse;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CARGA INTERNA — MONITOREO (v150)
+// Rediseño: "Wellness & PSE" y "Wellness y PSE del día" eran dos subpestañas
+// que mostraban lo mismo con distinto recorte. Ahora son UNA sola:
+//   · Microciclo en desplegable (no todos a la vista)
+//   · Los días de ESE microciclo sí a la vista, como botones
+//   · Parado en un día  → vista diaria detallada (métrica por métrica)
+//   · "Semana completa" → matriz jugadores × días con semáforo y alertas
+// Las unidades arbitrarias (UA) salen de acá: van a su propia subpestaña,
+// pensada para el PF, con comparativa entre semanas como en carga externa.
+// ═══════════════════════════════════════════════════════════════════════════
+var _cargaMonDay = '';   // '' = semana completa · ISO = día puntual
+
+function cargaMonSetWeek(w){
+  _cargaEqWeek = w;
+  _cargaMonDay = '';     // al cambiar de microciclo, volver a la vista semanal
+  cargaRender();
+}
+window.cargaMonSetWeek = cargaMonSetWeek;
+
+function cargaMonSetDay(d){
+  _cargaMonDay = d || '';
+  cargaRender();
+}
+window.cargaMonSetDay = cargaMonSetDay;
+
+// Formatos cortos
+function _monFmtDay(iso){
+  if(!iso) return '';
+  var dt=new Date(iso+'T12:00:00');
+  var dows=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  return dows[(dt.getDay()+6)%7]+' '+iso.slice(8,10)+'/'+iso.slice(5,7);
+}
+function _monFmtDayLong(iso){
+  if(!iso) return '';
+  var dt=new Date(iso+'T12:00:00');
+  var dows=['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
+  var M=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  return dows[(dt.getDay()+6)%7]+' '+parseInt(iso.slice(8,10),10)+' de '+M[parseInt(iso.slice(5,7),10)-1];
+}
+
+// ── BARRA DE CONTEXTO: microciclo (desplegable) + días (botones) ──
+function cargaMonContextBar(periods, per){
+  var esc=function(s){ return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;'); };
+  var html='<div style="background:#0D1B2A;padding:12px 16px;border-radius:10px 10px 0 0">';
+
+  // Fila 1: título + selector de microciclo
+  html+='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:11px">';
+  html+='<div style="color:#fff;font-size:14px;font-weight:800">🫀 Monitoreo del plantel</div>';
+  html+='<div style="display:flex;align-items:center;gap:7px">';
+  html+='<span style="font-size:11px;color:#9fb3c8;font-weight:600">Microciclo:</span>';
+  html+='<select onchange="cargaMonSetWeek(this.value)" style="padding:5px 11px;border:none;border-radius:6px;font-size:12px;font-weight:700;color:#0D1B2A;min-width:170px;cursor:pointer">';
+  periods.forEach(function(p){
+    html+='<option value="'+esc(p.week)+'"'+(p.week===_cargaEqWeek?' selected':'')+'>'+p.week+' · '+p.dates.length+' día'+(p.dates.length===1?'':'s')+'</option>';
+  });
+  html+='</select>';
+  html+='</div></div>';
+
+  // Fila 2: días del microciclo + "Semana completa"
+  html+='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;align-items:center">';
+  var selWeek=(_cargaMonDay==='');
+  html+='<button onclick="cargaMonSetDay(\'\')" style="padding:6px 13px;border:1px solid '+(selWeek?'#1D9E75':'#ffffff33')+';background:'+(selWeek?'#1D9E75':'none')+';color:'+(selWeek?'#fff':'#9fb3c8')+';border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">📅 Semana completa</button>';
+  html+='<span style="width:1px;height:20px;background:#ffffff22;flex-shrink:0;margin:0 2px"></span>';
+  per.dates.forEach(function(d){
+    var sel=(d===_cargaMonDay);
+    var md=(per.dateToDay&&per.dateToDay[d])||'';
+    html+='<button onclick="cargaMonSetDay(\''+d+'\')" style="padding:5px 11px;border:1px solid '+(sel?'#fff':'#ffffff33')+';background:'+(sel?'#fff':'none')+';color:'+(sel?'#0D1B2A':'#9fb3c8')+';border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;line-height:1.35">'+
+      '<span style="display:block">'+_monFmtDay(d)+'</span>'+
+      (md?'<span style="display:block;font-size:9px;opacity:.75;font-weight:800">'+md+'</span>':'')+
+    '</button>';
+  });
+  html+='</div>';
+  html+='</div>';
+  return html;
+}
+
+// ═══ VISTA SEMANAL: matriz jugadores × días (wellness, con alertas) ═══
+function cargaMonRenderWeek(per, periods, pi){
+  var layout=WELLNESS_LAYOUT||cargaDefaultWellnessLayout();
+  var maxTotal=layout.fields.reduce(function(a,f){return a+(f.max||5);},0);
+  var idx=_cargaEqIndex(per);
+  var names=idx.names;
+  var esc=function(s){ return String(s).replace(/'/g,"\\'"); };
+
+  // Estadísticas por jugador
+  var stats={};
+  names.forEach(function(n){
+    var wv=per.dates.map(function(d){var r=idx.well[n]&&idx.well[n][d];return r?(r.readiness||0):null;}).filter(function(v){return v!=null&&v>0;});
+    var dol=per.dates.map(function(d){var r=idx.well[n]&&idx.well[n][d];return (r&&r.dolor==='Si')?r:null;}).filter(Boolean);
+    stats[n]={
+      avg: wv.length?wv.reduce(function(a,b){return a+b;},0)/wv.length:null,
+      min: wv.length?Math.min.apply(null,wv):null,
+      n: wv.length,
+      dolores: dol
+    };
+  });
+
+  // Baseline individual (hasta 4 microciclos previos) para detectar caídas
+  var prev=periods.slice(Math.max(0,pi-4),pi).map(function(p){ return {per:p, idx:_cargaEqIndex(p)}; });
+  var base={};
+  names.forEach(function(n){
+    var avgs=[];
+    prev.forEach(function(pp){
+      var v=pp.per.dates.map(function(d){var r=pp.idx.well[n]&&pp.idx.well[n][d];return r?(r.readiness||0):null;}).filter(function(x){return x!=null&&x>0;});
+      if(v.length)avgs.push(v.reduce(function(a,b){return a+b;},0)/v.length);
+    });
+    base[n]={avg: avgs.length?avgs.reduce(function(a,b){return a+b;},0)/avgs.length:null, n:avgs.length};
+  });
+
+  // ── ALERTAS ──
+  var alerts=[];
+  names.forEach(function(n){
+    var s=stats[n], b=base[n];
+    if(s.dolores.length){
+      var last=s.dolores[s.dolores.length-1];
+      var zona=last.dolorZona||'sin zona';
+      var tiempo=last.dolorTiempo||(last.fields&&last.fields._dolorTiempo)||'';
+      alerts.push({sev:2, name:n, txt:'🩹 <strong>'+n+'</strong> — dolor en <strong>'+zona+'</strong>'+(tiempo?' ('+tiempo+')':'')+(s.dolores.length>1?' · '+s.dolores.length+' días':'')});
+    }
+    if(s.avg!=null && b.avg!=null && b.n>=1){
+      var drop=(b.avg-s.avg)/b.avg;
+      if(drop>=0.15) alerts.push({sev:drop>=0.25?2:1, name:n,
+        txt:'📉 <strong>'+n+'</strong> — wellness '+Math.round(drop*100)+'% por debajo de su promedio ('+s.avg.toFixed(0)+' vs '+b.avg.toFixed(0)+')'});
+    }
+    // Día puntual muy bajo (<50% del máximo)
+    if(s.min!=null && maxTotal>0 && (s.min/maxTotal)<0.5 && !s.dolores.length){
+      alerts.push({sev:1, name:n, txt:'⚠️ <strong>'+n+'</strong> — tuvo un día en <strong>'+Math.round(s.min)+'/'+maxTotal+'</strong>'});
+    }
+  });
+  alerts.sort(function(a,b){ return b.sev-a.sev || a.name.localeCompare(b.name,'es'); });
+
+  // ── KPIs ──
+  var all=names.map(function(n){return stats[n].avg;}).filter(function(v){return v!=null;});
+  var grpAvg=all.length?all.reduce(function(a,b){return a+b;},0)/all.length:null;
+  var prevGrp=null;
+  if(pi>0){
+    var g=_cargaEqGroupStats(periods[pi-1]);
+    prevGrp=g.wAvg;
+  }
+  var nDolor=names.filter(function(n){return stats[n].dolores.length;}).length;
+  var respuestas=0;
+  names.forEach(function(n){ per.dates.forEach(function(d){ if(idx.well[n]&&idx.well[n][d])respuestas++; }); });
+  var posibles=names.length*per.dates.length;
+  var tasa=posibles?Math.round(respuestas*100/posibles):0;
+
+  var colTotal=function(v){var p=maxTotal>0?v/maxTotal:0;return p>=0.8?'#1D9E75':p>=0.6?'#EF9F27':'#E24B4A';};
+  var delta=function(cur,pr){
+    if(cur==null||pr==null||pr===0)return '';
+    var d=(cur-pr)/pr*100;
+    if(Math.abs(d)<3)return '<span style="font-size:9px;color:#aaa;font-weight:600"> ≈</span>';
+    return '<span style="font-size:9px;color:'+(d>0?'#1D9E75':'#E24B4A')+';font-weight:800"> '+(d>0?'▲':'▼')+Math.abs(Math.round(d))+'%</span>';
+  };
+
+  var html='<div style="display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;background:#f8faff;border-bottom:1px solid #eef2f8">';
+  var kpi=function(l,v,c,sub){
+    return '<div style="flex:1;min-width:108px;background:#fff;border:1px solid #e8e8e8;border-radius:8px;padding:8px 11px;text-align:center">'+
+      '<div style="font-size:9px;color:#aaa;font-weight:700;text-transform:uppercase;letter-spacing:.3px">'+l+'</div>'+
+      '<div style="font-size:18px;font-weight:800;color:'+c+';line-height:1.25">'+v+'</div>'+
+      (sub?'<div style="font-size:9px;color:#a3a9b6">'+sub+'</div>':'')+'</div>';
+  };
+  html+=kpi('Wellness grupo', grpAvg!=null?(Math.round(grpAvg)+'<span style="font-size:11px;color:#aaa">/'+maxTotal+'</span>'+delta(grpAvg,prevGrp)):'–', grpAvg!=null?colTotal(grpAvg):'#bbb', 'promedio del microciclo');
+  html+=kpi('Con dolor', nDolor, nDolor>0?'#E24B4A':'#1D9E75', nDolor>0?'requieren seguimiento':'sin reportes');
+  html+=kpi('Alertas', alerts.length, alerts.length?'#EF9F27':'#1D9E75', alerts.length?'revisar abajo':'todo en orden');
+  html+=kpi('Respuestas', tasa+'%', tasa>=80?'#1D9E75':tasa>=60?'#EF9F27':'#E24B4A', respuestas+' de '+posibles);
+  html+='</div>';
+
+  // ── ALERTAS ──
+  if(alerts.length){
+    html+='<div style="padding:10px 16px;background:#fffaf3;border-bottom:1px solid #f5e6cc">';
+    html+='<div style="font-size:10px;font-weight:800;color:#B26A00;text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px">⚠️ Requieren atención</div>';
+    alerts.forEach(function(a){
+      html+='<div onclick="cargaEqOpenPlayer(\''+esc(a.name)+'\')" style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#333;padding:4px 0;cursor:pointer" title="Ver ficha individual">'+
+        '<span style="width:7px;height:7px;border-radius:50%;background:'+(a.sev===2?'#E24B4A':'#EF9F27')+';flex-shrink:0"></span>'+
+        '<span>'+a.txt+'</span></div>';
+    });
+    html+='</div>';
+  } else {
+    html+='<div style="padding:9px 16px;background:#f2fbf6;border-bottom:1px solid #d9f0e3;font-size:11.5px;color:#1D9E75;font-weight:700">✓ Sin alertas — el grupo está dentro de sus parámetros normales.</div>';
+  }
+
+  // ── MATRIZ jugadores × días ──
+  var sevOf={}; alerts.forEach(function(a){ sevOf[a.name]=Math.max(sevOf[a.name]||0,a.sev); });
+  var sorted=names.slice().sort(function(a,b){ return (sevOf[b]||0)-(sevOf[a]||0) || a.localeCompare(b,'es'); });
+
+  html+='<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:11px;min-width:520px">';
+  html+='<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">';
+  html+='<th style="padding:9px 12px;text-align:left;font-weight:700;color:#555;white-space:nowrap;position:sticky;left:0;background:#f5f7fa;z-index:1">Jugador</th>';
+  per.dates.forEach(function(d){
+    var md=(per.dateToDay&&per.dateToDay[d])||'';
+    html+='<th style="padding:7px 6px;text-align:center;font-weight:700;color:#555;white-space:nowrap;cursor:pointer" onclick="cargaMonSetDay(\''+d+'\')" title="Ver el detalle de este día">'+
+      '<div>'+_monFmtDay(d)+'</div>'+(md?'<div style="font-size:9px;color:#3B4D88;font-weight:800">'+md+'</div>':'')+'</th>';
+  });
+  html+='<th style="padding:9px 11px;text-align:center;font-weight:800;color:#0D1B2A;white-space:nowrap;border-left:2px solid #e0e0e0">Prom.</th>';
+  html+='</tr></thead><tbody>';
+
+  sorted.forEach(function(n){
+    var s=stats[n];
+    var mark=sevOf[n]===2?'#E24B4A':sevOf[n]===1?'#EF9F27':'transparent';
+    html+='<tr style="border-bottom:0.5px solid #eee">';
+    html+='<td onclick="cargaEqOpenPlayer(\''+esc(n)+'\')" style="padding:7px 12px 7px 9px;font-weight:600;color:#0D1B2A;white-space:nowrap;position:sticky;left:0;background:#fff;cursor:pointer;border-left:3px solid '+mark+'" title="Ver ficha individual">'+n+'</td>';
+    per.dates.forEach(function(d){
+      var wr=idx.well[n]&&idx.well[n][d];
+      var v=wr?(wr.readiness||0):0;
+      if(!v){ html+='<td style="padding:6px;text-align:center;color:#ddd">–</td>'; return; }
+      var p=maxTotal>0?v/maxTotal:0;
+      var bg=p>=0.8?'#e8f8f0':p>=0.6?'#f1f8e9':p>=0.4?'#fff8e1':'#fdeaea';
+      var fg=p>=0.8?'#1D9E75':p>=0.6?'#8BC34A':p>=0.4?'#EF9F27':'#E24B4A';
+      var dot=(wr.dolor==='Si')?'<span title="'+(wr.dolorZona||'dolor')+'" style="position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;background:#E24B4A;border:1.5px solid #fff"></span>':'';
+      html+='<td style="padding:6px;text-align:center"><span style="position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:25px;border-radius:6px;background:'+bg+';color:'+fg+';font-weight:800;padding:0 5px">'+Math.round(v)+dot+'</span></td>';
+    });
+    html+='<td style="padding:6px 11px;text-align:center;font-weight:800;border-left:2px solid #e0e0e0;color:'+(s.avg!=null?colTotal(s.avg):'#ddd')+'">'+(s.avg!=null?Math.round(s.avg):'–')+'</td>';
+    html+='</tr>';
+  });
+  html+='</tbody></table></div>';
+  html+='<div style="padding:9px 16px;font-size:10px;color:#a3a9b6;border-top:1px solid #f0f2f6">Tocá un jugador para su evolución individual, o el encabezado de un día para ver el detalle de esa jornada. El punto rojo marca dolor reportado.</div>';
+  return html;
+}
+
+// ═══ VISTA DIARIA: reutiliza la vista detallada que ya existía ═══
+function cargaMonRenderDay(iso){
+  // La función original escribe en #carga-main-content; la capturamos.
+  var out=document.getElementById('carga-main-content');
+  var ghost=document.createElement('div');
+  ghost.style.display='none';
+  var prevId=out?out.id:null;
+  if(out) out.id='carga-main-content-tmp';
+  ghost.id='carga-main-content';
+  document.body.appendChild(ghost);
+  var captured='';
+  var prevDate=_cargaDiaDate;
+  try{
+    _cargaDiaDate=iso;
+    cargaRenderWellnessDia();
+    captured=ghost.innerHTML;
+  }catch(e){ console.warn('[Monitoreo] día:',e); }
+  finally{
+    ghost.remove();
+    if(out) out.id=prevId||'carga-main-content';
+    _cargaDiaDate=prevDate;
+  }
+  // Quitar el header propio de la vista diaria (ya tenemos la barra de contexto)
+  captured=captured.replace(/<div style="background:#0D1B2A;padding:12px 16px">[\s\S]*?<\/div>\s*(?=<div style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#f8faff)/,'');
+  return captured;
+}
+
+// ═══ DISPATCHER de la subpestaña Monitoreo ═══
+function cargaRenderMonitor(){
+  var out=document.getElementById('carga-main-content'); if(!out)return;
+  var nWell=(WELLNESS_DATA||[]).length, nPse=(PSE_DATA||[]).length;
+  if(!nWell && !nPse){
+    out.innerHTML='<div style="padding:34px;text-align:center;color:#aaa;background:#fff;border:1px solid #e4e6ec;border-radius:10px">'+
+      '<div style="font-size:30px;margin-bottom:8px">💚</div>'+
+      '<div style="font-size:13px;font-weight:600;color:#555">Todavía no hay datos de wellness ni PSE</div>'+
+      '<div style="font-size:11px;color:#aaa;margin-top:5px">Usá el check-in de los jugadores, la carga manual o importá una planilla.</div></div>';
+    return;
+  }
+
+  // Switch equipo / individual
+  var players=_cargaWPCollectPlayers();
+  if(_cargaWPMode==='individual' && (!_cargaWPPlayer || players.indexOf(_cargaWPPlayer)<0)){
+    _cargaWPPlayer=players[0]||'';
+  }
+  var esc=function(s){ return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;'); };
+  var switchHtml='<div style="display:flex;align-items:center;gap:10px;margin-bottom:11px;flex-wrap:wrap">'+
+    '<div style="display:flex;border:1px solid #dde;border-radius:7px;overflow:hidden">'+
+      '<button onclick="cargaWPSetMode(\'team\')" style="padding:6px 15px;border:none;background:'+(_cargaWPMode==='team'?'#3B4D88':'#fff')+';color:'+(_cargaWPMode==='team'?'#fff':'#666')+';font-size:11px;font-weight:700;cursor:pointer">👥 Equipo</button>'+
+      '<button onclick="cargaWPSetMode(\'individual\')" style="padding:6px 15px;border:none;background:'+(_cargaWPMode==='individual'?'#3B4D88':'#fff')+';color:'+(_cargaWPMode==='individual'?'#fff':'#666')+';font-size:11px;font-weight:700;cursor:pointer">👤 Individual</button>'+
+    '</div>';
+  if(_cargaWPMode==='individual'){
+    switchHtml+='<select onchange="cargaWPSetPlayer(this.value)" style="padding:6px 12px;border:1px solid #ccc;border-radius:6px;font-size:12px;font-weight:700;min-width:190px">'+
+      players.map(function(n){return '<option'+(n===_cargaWPPlayer?' selected':'')+'>'+n+'</option>';}).join('')+'</select>';
+  }
+  switchHtml+='</div>';
+
+  if(_cargaWPMode==='individual'){
+    out.innerHTML=switchHtml+(typeof cargaRenderWellPseIndividual==='function'?cargaRenderWellPseIndividual(_cargaWPPlayer):'');
+    return;
+  }
+
+  // ── Vista de equipo ──
+  var periods=_cargaEqPeriods();
+  if(!periods.length){
+    // Sin microciclos: mostrar directamente el día más reciente
+    var ds=_cargaWellDiaDates();
+    out.innerHTML=switchHtml+(ds.length?cargaMonRenderDay(ds[0]):'');
+    return;
+  }
+  if(!_cargaEqWeek || !periods.some(function(p){return p.week===_cargaEqWeek;})){
+    _cargaEqWeek=periods[periods.length-1].week;
+  }
+  var pi=periods.findIndex(function(p){return p.week===_cargaEqWeek;});
+  var per=periods[pi];
+  // Si el día seleccionado no pertenece a este microciclo, volver a la semana
+  if(_cargaMonDay && per.dates.indexOf(_cargaMonDay)<0) _cargaMonDay='';
+
+  var html='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">';
+  html+=cargaMonContextBar(periods, per);
+  if(_cargaMonDay){
+    html+='<div style="padding:10px 16px;background:#f8faff;border-bottom:1px solid #eef2f8;font-size:12px;color:#0D1B2A;font-weight:700">'+
+      '🌅 '+_monFmtDayLong(_cargaMonDay)+
+      ((per.dateToDay&&per.dateToDay[_cargaMonDay])?' <span style="color:#3B4D88">· '+per.dateToDay[_cargaMonDay]+'</span>':'')+
+      '</div>';
+    html+=cargaMonRenderDay(_cargaMonDay);
+  } else {
+    html+=cargaMonRenderWeek(per, periods, pi);
+  }
+  html+='</div>';
+  out.innerHTML=switchHtml+html;
+}
+window.cargaRenderMonitor=cargaRenderMonitor;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CARGA SEMANAL (PF) — sRPE / unidades arbitrarias
+// Separado del monitoreo: es análisis de carga del preparador físico, con
+// comparativa entre microciclos como en carga externa.
+// ═══════════════════════════════════════════════════════════════════════════
+var _cargaUaWeek = null;
+
+function cargaUaSetWeek(w){ _cargaUaWeek=w; cargaRender(); }
+window.cargaUaSetWeek=cargaUaSetWeek;
+
+function cargaRenderCargaSemanal(){
+  var out=document.getElementById('carga-main-content'); if(!out)return;
+  var periods=_cargaEqPeriods();
+  if(!periods.length){
+    out.innerHTML='<div style="padding:34px;text-align:center;color:#aaa;background:#fff;border:1px solid #e4e6ec;border-radius:10px">'+
+      '<div style="font-size:30px;margin-bottom:8px">📈</div>'+
+      '<div style="font-size:13px;font-weight:600;color:#555">Sin datos de PSE cargados</div>'+
+      '<div style="font-size:11px;color:#aaa;margin-top:5px">La carga interna se calcula como PSE × minutos (método de Foster).</div></div>';
+    return;
+  }
+  if(!_cargaUaWeek || !periods.some(function(p){return p.week===_cargaUaWeek;})){
+    _cargaUaWeek=periods[periods.length-1].week;
+  }
+  var pi=periods.findIndex(function(p){return p.week===_cargaUaWeek;});
+  var per=periods[pi];
+  var idx=_cargaEqIndex(per);
+  var names=idx.names;
+  var esc=function(s){ return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;'); };
+
+  // Totales por jugador
+  var stats={};
+  names.forEach(function(n){
+    var byDay={}, tot=0, nd=0, vals=[];
+    per.dates.forEach(function(d){
+      var u=_cargaEqUa(idx.pse[n]&&idx.pse[n][d]);
+      byDay[d]=u;
+      if(u!=null){ tot+=u; nd++; vals.push(u); }
+    });
+    // Monotonía y strain (Foster): media / desvío
+    var mean=vals.length?tot/vals.length:0;
+    var sd=vals.length>1?Math.sqrt(vals.map(function(v){return (v-mean)*(v-mean);}).reduce(function(a,b){return a+b;},0)/vals.length):0;
+    var mono=(sd>0)?mean/sd:null;
+    stats[n]={byDay:byDay, total:nd?tot:null, dias:nd, mono:mono, strain:(mono!=null?tot*mono:null)};
+  });
+
+  var totals=names.map(function(n){return stats[n].total;}).filter(function(v){return v!=null;});
+  var grpTot=totals.length?totals.reduce(function(a,b){return a+b;},0):0;
+  var grpAvg=totals.length?grpTot/totals.length:null;
+  var prevAvg=null;
+  if(pi>0){ var g=_cargaEqGroupStats(periods[pi-1]); prevAvg=g.uaAvg; }
+
+  // Carga diaria del grupo
+  var dayTot={};
+  per.dates.forEach(function(d){
+    var vs=names.map(function(n){return stats[n].byDay[d];}).filter(function(v){return v!=null;});
+    dayTot[d]=vs.length?vs.reduce(function(a,b){return a+b;},0)/vs.length:null;
+  });
+  var maxDay=Math.max.apply(null,Object.keys(dayTot).map(function(d){return dayTot[d]||0;}).concat([1]));
+
+  var delta=function(cur,pr,invert){
+    if(cur==null||pr==null||pr===0)return '';
+    var d=(cur-pr)/pr*100;
+    if(Math.abs(d)<3)return '<span style="font-size:9px;color:#aaa;font-weight:600"> ≈</span>';
+    var col=invert?(d>0?'#E24B4A':'#1D9E75'):'#3B4D88';
+    return '<span style="font-size:9px;color:'+col+';font-weight:800"> '+(d>0?'▲':'▼')+Math.abs(Math.round(d))+'%</span>';
+  };
+
+  var html='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">';
+  // Header
+  html+='<div style="background:#0D1B2A;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">';
+  html+='<div><div style="color:#fff;font-size:14px;font-weight:800">📈 Carga interna semanal</div>'+
+    '<div style="color:#9fb3c8;font-size:10.5px;margin-top:2px">sRPE (Foster): PSE × minutos = unidades arbitrarias</div></div>';
+  html+='<div style="display:flex;align-items:center;gap:7px">'+
+    '<span style="font-size:11px;color:#9fb3c8;font-weight:600">Microciclo:</span>'+
+    '<select onchange="cargaUaSetWeek(this.value)" style="padding:5px 11px;border:none;border-radius:6px;font-size:12px;font-weight:700;color:#0D1B2A;min-width:170px;cursor:pointer">'+
+    periods.map(function(p){return '<option value="'+esc(p.week)+'"'+(p.week===_cargaUaWeek?' selected':'')+'>'+p.week+'</option>';}).join('')+
+    '</select></div>';
+  html+='</div>';
+
+  // KPIs
+  var kpi=function(l,v,c,sub){
+    return '<div style="flex:1;min-width:112px;background:#fff;border:1px solid #e8e8e8;border-radius:8px;padding:8px 11px;text-align:center">'+
+      '<div style="font-size:9px;color:#aaa;font-weight:700;text-transform:uppercase;letter-spacing:.3px">'+l+'</div>'+
+      '<div style="font-size:18px;font-weight:800;color:'+c+';line-height:1.25">'+v+'</div>'+
+      (sub?'<div style="font-size:9px;color:#a3a9b6">'+sub+'</div>':'')+'</div>';
+  };
+  var monos=names.map(function(n){return stats[n].mono;}).filter(function(v){return v!=null;});
+  var monoAvg=monos.length?monos.reduce(function(a,b){return a+b;},0)/monos.length:null;
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;background:#f8faff;border-bottom:1px solid #eef2f8">';
+  html+=kpi('Carga media', grpAvg!=null?Math.round(grpAvg).toLocaleString('es-AR'):'–', '#0D1B2A', 'UA por jugador'+ (prevAvg!=null?'':''));
+  html+=kpi('vs microciclo previo', prevAvg!=null&&grpAvg!=null?((grpAvg>=prevAvg?'+':'')+Math.round((grpAvg-prevAvg)/prevAvg*100)+'%'):'–', prevAvg!=null&&grpAvg!=null?(Math.abs((grpAvg-prevAvg)/prevAvg)<0.15?'#1D9E75':'#EF9F27'):'#bbb', prevAvg!=null?Math.round(prevAvg).toLocaleString('es-AR')+' UA':'sin referencia');
+  html+=kpi('Monotonía', monoAvg!=null?monoAvg.toFixed(2):'–', monoAvg!=null?(monoAvg>2?'#E24B4A':monoAvg>1.5?'#EF9F27':'#1D9E75'):'#bbb', monoAvg!=null?(monoAvg>2?'alta — poca variación':'variación adecuada'):'');
+  html+=kpi('Con registro', names.filter(function(n){return stats[n].total!=null;}).length+'/'+names.length, '#3B4D88', 'jugadores');
+  html+='</div>';
+
+  // Distribución diaria del grupo
+  html+='<div style="padding:13px 16px;border-bottom:1px solid #eef2f8">';
+  html+='<div style="font-size:10px;font-weight:800;color:#aaa;text-transform:uppercase;letter-spacing:.3px;margin-bottom:9px">Distribución de la carga en el microciclo</div>';
+  html+='<div style="display:flex;align-items:flex-end;gap:9px;height:96px">';
+  per.dates.forEach(function(d){
+    var v=dayTot[d];
+    var h=v!=null?Math.max(6,Math.round(v/maxDay*70)):0;
+    var md=(per.dateToDay&&per.dateToDay[d])||'';
+    html+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">'+
+      '<div style="font-size:9.5px;font-weight:800;color:#3B4D88;height:12px">'+(v!=null?Math.round(v):'')+'</div>'+
+      '<div style="width:100%;max-width:46px;height:'+h+'px;background:linear-gradient(180deg,#3B4D88,#5B6DA8);border-radius:4px 4px 0 0"></div>'+
+      '<div style="font-size:9px;color:#888;font-weight:600;white-space:nowrap">'+_monFmtDay(d).slice(0,6)+'</div>'+
+      (md?'<div style="font-size:8.5px;color:#3B4D88;font-weight:800">'+md+'</div>':'')+
+    '</div>';
+  });
+  html+='</div></div>';
+
+  // Tabla por jugador
+  html+='<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:11px;min-width:560px">';
+  html+='<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">';
+  html+='<th style="padding:9px 12px;text-align:left;font-weight:700;color:#555;white-space:nowrap;position:sticky;left:0;background:#f5f7fa;z-index:1">Jugador</th>';
+  per.dates.forEach(function(d){
+    var md=(per.dateToDay&&per.dateToDay[d])||'';
+    html+='<th style="padding:7px 6px;text-align:center;font-weight:700;color:#555;white-space:nowrap"><div>'+_monFmtDay(d).slice(0,6)+'</div>'+(md?'<div style="font-size:9px;color:#3B4D88;font-weight:800">'+md+'</div>':'')+'</th>';
+  });
+  html+='<th style="padding:9px 11px;text-align:center;font-weight:800;color:#0D1B2A;border-left:2px solid #e0e0e0;white-space:nowrap">Total UA</th>';
+  html+='<th style="padding:9px 9px;text-align:center;font-weight:700;color:#555;white-space:nowrap" title="Media ÷ desvío estándar. Valores altos = microciclo poco variado">Monot.</th>';
+  html+='</tr></thead><tbody>';
+
+  var sorted=names.slice().sort(function(a,b){ return (stats[b].total||0)-(stats[a].total||0); });
+  var maxCell=0;
+  names.forEach(function(n){ per.dates.forEach(function(d){ var v=stats[n].byDay[d]; if(v!=null&&v>maxCell)maxCell=v; }); });
+
+  sorted.forEach(function(n){
+    var s=stats[n];
+    html+='<tr style="border-bottom:0.5px solid #eee">';
+    html+='<td onclick="cargaEqOpenPlayer(\''+esc(n)+'\')" style="padding:7px 12px;font-weight:600;color:#0D1B2A;white-space:nowrap;position:sticky;left:0;background:#fff;cursor:pointer">'+n+'</td>';
+    per.dates.forEach(function(d){
+      var v=s.byDay[d];
+      if(v==null){ html+='<td style="padding:6px;text-align:center;color:#ddd">–</td>'; return; }
+      var alpha=maxCell>0?Math.max(0.10,v/maxCell):0.10;
+      html+='<td style="padding:6px;text-align:center"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:38px;height:24px;border-radius:6px;background:rgba(59,77,136,'+alpha.toFixed(2)+');color:'+(alpha>0.55?'#fff':'#2C3E6B')+';font-weight:800;padding:0 5px">'+Math.round(v)+'</span></td>';
+    });
+    html+='<td style="padding:6px 11px;text-align:center;font-weight:800;color:#0D1B2A;border-left:2px solid #e0e0e0">'+(s.total!=null?Math.round(s.total).toLocaleString('es-AR'):'–')+'</td>';
+    var mc=s.mono==null?'#ddd':(s.mono>2?'#E24B4A':s.mono>1.5?'#EF9F27':'#1D9E75');
+    html+='<td style="padding:6px 9px;text-align:center;font-weight:700;color:'+mc+'">'+(s.mono!=null?s.mono.toFixed(2):'–')+'</td>';
+    html+='</tr>';
+  });
+  html+='</tbody></table></div>';
+
+  // Comparativa entre microciclos
+  var trend=periods.slice(-8).map(function(p){
+    var g=_cargaEqGroupStats(p);
+    return {week:p.week, ua:g.uaAvg};
+  });
+  if(trend.length>1){
+    var maxT=Math.max.apply(null,trend.map(function(t){return t.ua||0;}).concat([1]));
+    html+='<div style="padding:13px 16px;border-top:1px solid #eef2f8;background:#fbfcff">';
+    html+='<div style="font-size:10px;font-weight:800;color:#aaa;text-transform:uppercase;letter-spacing:.3px;margin-bottom:9px">Comparativa entre microciclos — UA promedio por jugador</div>';
+    html+='<div style="display:flex;align-items:flex-end;gap:10px;height:104px">';
+    trend.forEach(function(t){
+      var sel=t.week===_cargaUaWeek;
+      var h=t.ua!=null?Math.max(6,Math.round(t.ua/maxT*72)):0;
+      html+='<div onclick="cargaUaSetWeek(\''+esc(t.week)+'\')" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;'+(sel?'':'opacity:.55')+'" title="'+t.week+'">'+
+        '<div style="font-size:9.5px;font-weight:800;color:#3B4D88;height:12px">'+(t.ua!=null?Math.round(t.ua):'')+'</div>'+
+        '<div style="width:100%;max-width:44px;height:'+h+'px;background:'+(sel?'linear-gradient(180deg,#3B4D88,#5B6DA8)':'#c3cbe0')+';border-radius:4px 4px 0 0"></div>'+
+        '<span style="font-size:8.5px;color:'+(sel?'#0D1B2A':'#aaa')+';font-weight:'+(sel?'800':'600')+';white-space:nowrap;max-width:74px;overflow:hidden;text-overflow:ellipsis">'+t.week+'</span>'+
+      '</div>';
+    });
+    html+='</div></div>';
+  }
+
+  html+='<div style="padding:9px 16px;font-size:10px;color:#a3a9b6;border-top:1px solid #f0f2f6">La monotonía es la media de la carga dividida por su desvío. Por encima de 2 indica un microciclo poco variado, asociado a mayor riesgo según Foster.</div>';
+  html+='</div>';
+  out.innerHTML=html;
+}
+window.cargaRenderCargaSemanal=cargaRenderCargaSemanal;
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TABLERO SEMANAL DEL PLANTEL (v128) — Carga interna, vista de equipo
