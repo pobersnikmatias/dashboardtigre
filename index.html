@@ -1438,6 +1438,9 @@ function mkRaw(mts,hsr,h2,h25,acc,dcc,rhie,pl){return{mts,hsr,h2,h25,acc,dcc,rhi
 function drillTouch(row){
   if(!row||typeof row!=='object')return row;
   row._upd=Date.now();
+  // v151: sello de creación, para distinguir un ejercicio NUEVO de uno viejo
+  // que compartía el mismo id y fue borrado.
+  if(row._created==null) row._created=row._upd;
   return row;
 }
 window.drillTouch=drillTouch;
@@ -13471,7 +13474,20 @@ function planResolveEx(item){
       _fromCsv: true
     };
   }
-  if(item.exId!=null) return D.find(function(r){return r.id===item.exId;});
+  if(item.exId!=null){
+    var found=D.find(function(r){return r.id===item.exId;});
+    if(found) return found;
+    // v151: si el ejercicio todavía no llegó desde la nube (lo acaba de crear
+    // el compañero), mostrar el nombre guardado en la tarea en vez de un
+    // "(eliminado)" that no dice nada. Se marca como pendiente para que la
+    // interfaz lo distinga de un borrado real.
+    if(item.exName){
+      return {id:item.exId, n:item.exName, cat:item.exCat||'Otros',
+              min:item.mins||1, raw:null, vmax:0, spr:0,
+              jug:item.customJug||null, L:item.customL||null, A:item.customA||null,
+              _pending:true};
+    }
+  }
   return null;
 }
 window.planResolveEx=planResolveEx;
@@ -14230,6 +14246,45 @@ window.planPollStop=planPollStop;
 // v148: trae del servidor los check-ins nuevos (wellness y PSE). Sin esto,
 // aunque el celular del jugador los subiera, los demás dispositivos no los
 // veían hasta recargar la página entera.
+// v151: trae de la nube los ejercicios nuevos o modificados de la biblioteca.
+var _drPollBusy=false;
+function drillsPollOnce(){
+  if(_drPollBusy)return Promise.resolve(false);
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(false);
+  if(typeof D==='undefined'||!Array.isArray(D))return Promise.resolve(false);
+  if(!window._sbDrillsSynced)return Promise.resolve(false);  // esperar la carga inicial
+  _drPollBusy=true;
+  return sbClient.from('drills_exercises').select('*').eq('categoria',SB_CATEGORIA).then(function(r){
+    _drPollBusy=false;
+    if(!r||r.error||!r.data)return false;
+    var added=0, updated=0;
+    r.data.forEach(function(row){
+      var d=(typeof _sbDrillFromRow==='function')?_sbDrillFromRow(row):null;
+      if(!d||d.id==null)return;
+      if(typeof drillIsDeletedRow==='function'&&drillIsDeletedRow(d))return;   // borrado: no revive
+      var idx=D.findIndex(function(x){return Number(x.id)===Number(d.id);});
+      if(idx<0){ D.push(d); added++; return; }
+      // Gana el más nuevo
+      if(Number(d._upd||0) > Number(D[idx]._upd||0)){ D[idx]=d; updated++; }
+    });
+    if(added||updated){
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      try{ if(typeof rebuildCatBtns==='function')rebuildCatBtns(); }catch(e){}
+      try{ if(typeof refresh==='function')refresh(); }catch(e){}
+      // Refrescar la planificación: puede haber tareas esperando este ejercicio
+      try{
+        if(typeof mainView!=='undefined'&&mainView==='plan'){
+          if(typeof planRenderDays==='function')planRenderDays();
+          if(typeof planRenderWeekSummary==='function')planRenderWeekSummary();
+        }
+      }catch(e){}
+      console.log('[Sync] Biblioteca: '+added+' ejercicio(s) nuevo(s), '+updated+' actualizado(s).');
+    }
+    return (added+updated)>0;
+  }).catch(function(){ _drPollBusy=false; return false; });
+}
+window.drillsPollOnce=drillsPollOnce;
+
 var _wpPollBusy=false;
 function wellPsePollOnce(){
   if(_wpPollBusy)return Promise.resolve(false);
@@ -14328,6 +14383,10 @@ function planPollOnce(){
   profPollOnce();
   // v148: y los check-ins que cargan los jugadores desde el celular
   wellPsePollOnce();
+  // v151: y los ejercicios nuevos de la biblioteca. Sin esto, un ejercicio que
+  // creaba el compañero no llegaba hasta recargar la página, y la planificación
+  // que lo usaba mostraba "(eliminado)".
+  drillsPollOnce();
   sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
     _planPollBusy=false;
     if(!r||r.error||!r.data)return;
@@ -14610,7 +14669,10 @@ function planRenderDays(){
       var isParallel=!!block.parallel;
       var exRows=block.exercises.map(function(item,ei){
         var ex=planResolveEx(item);
-        var exName=ex?ex.n:'(eliminado)';
+        // v151: distinguir "todavía no me llegó" de "borrado de verdad".
+        var exName=ex?ex.n:(item.exName||'(eliminado)');
+        var exPending=!!(ex&&ex._pending);
+        if(exPending) exName=ex.n+' <span style="font-size:9px;color:#EF9F27;font-weight:700">· sincronizando…</span>';
         var catCol=ex?(BC[ex.cat]||'#888'):'#ccc';
         var v=ex?planCalcExVol(ex,item.mins):{mts:0};
 
@@ -15854,7 +15916,11 @@ function planModalConfirm(){
   var block=_planEditData.days[_planModalDayIdx].blocks[_planModalBlockIdx];
   var isParallel=block&&block.parallel;
   var countVol=isParallel?(block.exercises.length===0):true;
-  var item={exId:_planModalSelected.id, mins:mins, countVolume:countVol, group:(document.getElementById('plan-modal-group')?.value||'Todos')};
+  var item={exId:_planModalSelected.id, mins:mins, countVolume:countVol, group:(document.getElementById('plan-modal-group')?.value||'Todos'),
+            // v151: guardar nombre y categoría como respaldo. Si el otro
+            // dispositivo todavía no recibió el ejercicio, la tarea muestra su
+            // nombre en vez de "(eliminado)".
+            exName:_planModalSelected.n, exCat:_planModalSelected.cat};
   // If series were defined, store total time
   var mnEl2 = document.getElementById('plan-modal-mins');
   var totalSecStored = mnEl2 && mnEl2.dataset.totalSec ? parseFloat(mnEl2.dataset.totalSec) : null;
@@ -16614,7 +16680,11 @@ window.planModalConfirm=function(){
   var isParallel=block&&block.parallel;
   var countVol=isParallel?(block.exercises.length===0):true;
 
-  var item={exId:_planModalSelected.id, mins:mins, countVolume:countVol, group:(document.getElementById('plan-modal-group')?.value||'Todos')};
+  var item={exId:_planModalSelected.id, mins:mins, countVolume:countVol, group:(document.getElementById('plan-modal-group')?.value||'Todos'),
+            // v151: guardar nombre y categoría como respaldo. Si el otro
+            // dispositivo todavía no recibió el ejercicio, la tarea muestra su
+            // nombre en vez de "(eliminado)".
+            exName:_planModalSelected.n, exCat:_planModalSelected.cat};
   if(jugV!==null)item.customJug=jugV;
   if(largoV!==null)item.customL=largoV;
   if(anchoV!==null)item.customA=anchoV;
@@ -33930,8 +34000,9 @@ function sbUpsertOneDrill(d){
     // levanta cuando el usuario recrea el ejercicio a propósito
     // (drillTombUnmark explícito desde el alta).
     if(!isNaN(idN)){
-      var tombNow = (typeof _drillTombAllSet==='function') ? _drillTombAllSet() : {};
-      if(tombNow[idN]){
+      // v151: comparar por fecha. Un ejercicio NUEVO con id reciclado sube
+      // normalmente; sólo se bloquea el que es anterior al borrado.
+      if(typeof drillIsDeletedRow==='function' && drillIsDeletedRow(d)){
         console.warn('[Anti-zombie] Subida bloqueada: el ejercicio id '+idN+' está borrado. No se resucita.');
         // Y de paso sacarlo de memoria si volvió a colarse
         try{
@@ -34155,6 +34226,60 @@ function _drillTombPushNow(){
   });
 }
 window._drillTombPushNow=_drillTombPushNow;
+// ═══ TOMBSTONES CON FECHA (v151) ═══════════════════════════════════════
+// CAUSA RAÍZ del bug "mi compañero crea un ejercicio y a mí me aparece como
+// (eliminado)": los tombstones se guardaban SÓLO por id numérico. Los ids se
+// generan por dispositivo, así que su ejercicio nuevo podía recibir un id que
+// yo había borrado hace tiempo. Mi dispositivo lo veía en la lista de
+// borrados y no sólo lo ocultaba: además lo BORRABA DE LA NUBE. Resultado:
+// su ejercicio desaparecía para los dos y la planificación mostraba
+// "(eliminado)".
+// SOLUCIÓN: el tombstone guarda CUÁNDO se borró. Un ejercicio sólo se
+// considera borrado si su sello de creación/modificación es ANTERIOR a esa
+// fecha. Un ejercicio recién creado (sello = ahora) siempre gana.
+// Devuelve la fecha de borrado (ms) de un id, o null si no está borrado.
+function _drillTombTs(id){
+  var n=Number(id); if(isNaN(n))return null;
+  var best=null;
+  var take=function(v){
+    var t=(typeof v==='string')?Date.parse(v):Number(v);
+    if(!isNaN(t)&&t!=null&&(best===null||t>best))best=t;
+  };
+  try{ var c=window._drillTombCloudCache||{}; if(c[n]!==undefined)take(c[n]); }catch(e){}
+  try{ var l=_drillTombCloudLocal(); if(l[n]!==undefined)take(l[n]); }catch(e){}
+  try{
+    // Lista legacy sin fecha: se migra con la fecha de migración
+    var leg=JSON.parse(localStorage.getItem('drills_deleted')||'[]');
+    if(leg.indexOf(n)>-1||leg.indexOf(String(n))>-1){
+      var mig=Number(localStorage.getItem('drills_deleted_migrated_at')||0);
+      if(!mig){ mig=Date.now(); try{ localStorage.setItem('drills_deleted_migrated_at',String(mig)); }catch(e){} }
+      take(mig);
+    }
+  }catch(e){}
+  return best;
+}
+window._drillTombTs=_drillTombTs;
+
+// Sello del ejercicio: cuándo se creó o se modificó por última vez.
+function _drillStamp(row){
+  if(!row)return 0;
+  var s=Number(row._created||0);
+  var u=Number(row._upd||0);
+  return Math.max(s,u);
+}
+// ¿Este ejercicio concreto está borrado? Compara contra la FECHA del borrado.
+function drillIsDeletedRow(row){
+  if(!row)return false;
+  var ts=_drillTombTs(row.id);
+  if(ts===null)return false;
+  var st=_drillStamp(row);
+  // Si el ejercicio es más nuevo que el borrado, es OTRO ejercicio (id reciclado
+  // o recreado a propósito): NO se borra.
+  if(st && st>ts) return false;
+  return true;
+}
+window.drillIsDeletedRow=drillIsDeletedRow;
+
 // Conjunto total de ids borrados conocidos (nube cacheada + locales).
 function _drillTombAllSet(){
   var set={};
@@ -34188,11 +34313,12 @@ function drillGuardSweep(){
     _drillTombCloudLocalSave(merged);
     window._drillTombCloudCache=merged;
     var tombAll=_drillTombAllSet();
-    // 1) Sacar de memoria los zombies
+    // 1) Sacar de memoria los zombies. v151: comparando FECHAS, para no matar
+    // un ejercicio nuevo del compañero que haya recibido un id reciclado.
     var removed=[];
     if(typeof D!=='undefined'&&Array.isArray(D)){
       for(var i=D.length-1;i>=0;i--){
-        if(D[i]&&tombAll[Number(D[i].id)]){ removed.push(D[i].id); D.splice(i,1); }
+        if(D[i]&&drillIsDeletedRow(D[i])){ removed.push(D[i].id); D.splice(i,1); }
       }
     }
     if(removed.length){
@@ -34206,11 +34332,20 @@ function drillGuardSweep(){
     // 2) Verificar la nube: si alguna fila borrada sigue ahí, purgarla
     var ids=Object.keys(tombAll).map(Number).filter(function(n){return !isNaN(n);});
     if(!ids.length){ _drillGuardBusy=false; return removed.length; }
-    return sbClient.from('drills_exercises').select('id').eq('categoria',SB_CATEGORIA).in('id',ids)
+    // v151: traer la fila COMPLETA para poder comparar su sello con la fecha
+    // del borrado. Antes se borraba por id a ciegas y eso eliminaba de la nube
+    // los ejercicios nuevos del compañero que reciclaban un id.
+    return sbClient.from('drills_exercises').select('*').eq('categoria',SB_CATEGORIA).in('id',ids)
       .then(function(res){
         _drillGuardBusy=false;
         if(res.error||!res.data||!res.data.length) return removed.length;
-        var stillThere=res.data.map(function(r){return Number(r.id);});
+        var stillThere=[];
+        res.data.forEach(function(row){
+          var d=(typeof _sbDrillFromRow==='function')?_sbDrillFromRow(row):Object.assign({id:row.id,n:row.n},row.data||{});
+          if(drillIsDeletedRow(d)) stillThere.push(Number(row.id));
+          else console.log('[Anti-zombie] id '+row.id+' reutilizado por un ejercicio MÁS NUEVO ("'+(d.n||'')+'"): se respeta.');
+        });
+        if(!stillThere.length) return removed.length;
         console.warn('[Anti-zombie] '+stillThere.length+' ejercicio(s) borrados seguían en la nube. Purgando: '+stillThere.join(', '));
         sbClient.from('drills_exercises').delete().eq('categoria',SB_CATEGORIA).in('id',stillThere)
           .then(function(d){ if(d.error)console.warn('[Anti-zombie] purga:',d.error.message||d.error); });
@@ -34346,7 +34481,11 @@ function sbSyncAllDrillsNow(){
     if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return;
     if(typeof D==='undefined' || !Array.isArray(D) || !D.length) return;
     var tombAll = _drillTombAllSet(); // v125: nunca resubir ids borrados
-    var payload = D.map(_sbDrillToPayload).filter(function(p){return p && p.id!=null && !tombAll[Number(p.id)];});
+    var payload = D.map(_sbDrillToPayload).filter(function(p){
+      if(!p||p.id==null)return false;
+      var row=D.find(function(x){return Number(x.id)===Number(p.id);});
+      return !(typeof drillIsDeletedRow==='function' && drillIsDeletedRow(row));
+    });
     if(!payload.length) return;
     sbClient.from('drills_exercises').upsert(payload, { onConflict: 'id' }).then(function(res){
       if(res.error) console.error('[Supabase] Sync inmediato drills error:', res.error);
@@ -34439,26 +34578,30 @@ function sbScheduleTanda2bSync(){
             if(typeof refresh==='function') refresh();
           }catch(e){}
         }
-        var dPayload = D.map(_sbDrillToPayload).filter(function(p){return p && p.id!=null && !tombAll[Number(p.id)];});
+        var dPayload = D.map(_sbDrillToPayload).filter(function(p){
+          if(!p||p.id==null)return false;
+          var row=D.find(function(x){return Number(x.id)===Number(p.id);});
+          return !(typeof drillIsDeletedRow==='function' && drillIsDeletedRow(row));
+        });
         var localIds = {};
         dPayload.forEach(function(p){ localIds[Number(p.id)] = true; });
         // 1) Traer los ids que hay en la nube para esta categoría
         sbClient.from('drills_exercises').select('id').eq('categoria', SB_CATEGORIA).then(function(res){
           var cloudIds = (res && res.data) ? res.data.map(function(r){return Number(r.id);}) : [];
-          // 2) Borrar de la nube los que ya no existen localmente o están tombstoneados
-          var toDelete = cloudIds.filter(function(id){ return !localIds[id] || tombAll[id]; });
-          // Los tombstoneados se borran SIEMPRE (son borrados confirmados por un
-          // usuario). La salvaguarda de cantidad aplica solo a los no-tombstoneados,
-          // que podrían ser producto de una carga local incompleta.
-          var tombDeletes = toDelete.filter(function(id){ return tombAll[id]; });
-          var softDeletes = toDelete.filter(function(id){ return !tombAll[id]; });
-          var safeSoft = (dPayload.length > 0) && (softDeletes.length <= Math.max(10, Math.ceil(cloudIds.length*0.25)));
-          var finalDeletes = tombDeletes.concat(safeSoft ? softDeletes : []);
-          if(softDeletes.length && !safeSoft){
-            console.warn('[Supabase] Reconciliación drills: '+softDeletes.length+' borrados no confirmados OMITIDOS por seguridad (local='+dPayload.length+', nube='+cloudIds.length+').');
+          // 2) v151: BORRAR SÓLO lo que tiene un tombstone explícito.
+          // ANTES esto borraba de la nube todo id que no estuviera en MI copia
+          // local. Trabajando de a dos eso es destructivo: si mi compañero
+          // acababa de crear un ejercicio y yo todavía no lo había recibido,
+          // mi sync se lo borraba. Era la segunda causa de "no me aparece el
+          // ejercicio que él creó".
+          var tombDeletes = cloudIds.filter(function(id){ return !!tombAll[id]; });
+          var notMine = cloudIds.filter(function(id){ return !localIds[id] && !tombAll[id]; });
+          if(notMine.length){
+            console.log('[Supabase] '+notMine.length+' ejercicio(s) en la nube que no tengo local: se CONSERVAN (probablemente los creó el compañero).');
           }
+          var finalDeletes = tombDeletes;
           if(finalDeletes.length){
-            console.log('[Supabase] Reconciliación drills: borrando ' + finalDeletes.length + ' de la nube ('+finalDeletes.join(',')+')');
+            console.log('[Supabase] Reconciliación drills: borrando ' + finalDeletes.length + ' borrados confirmados ('+finalDeletes.join(',')+')');
             sbClient.from('drills_exercises').delete().eq('categoria', SB_CATEGORIA).in('id', finalDeletes).then(function(dres){
               if(dres.error) console.error('[Supabase] Error borrando drills obsoletos:', dres.error);
             });
@@ -34541,13 +34684,18 @@ sbLoadInitialData = function(){
       pend.forEach(function(t){ pendSet[Number(t)]=true; });
       var cloud = {};
       (rows||[]).forEach(function(row){
-        if(tombSet[Number(row.id)]){
+        var d = _sbDrillFromRow(row);
+        // v151: comparar por FECHA, no sólo por id. Si el ejercicio de la nube
+        // es MÁS NUEVO que el borrado que tengo registrado, es otro ejercicio
+        // (mi compañero lo acaba de crear con un id reciclado): se respeta.
+        // Antes se borraba de la nube a ciegas y su trabajo desaparecía.
+        if(drillIsDeletedRow(d)){
           if(typeof sbClient!=='undefined' && sbClient && sbCurrentUser){
             sbClient.from('drills_exercises').delete().eq('id', Number(row.id)).eq('categoria', SB_CATEGORIA).then(function(){});
           }
           return;
         }
-        cloud[Number(row.id)] = _sbDrillFromRow(row);
+        cloud[Number(row.id)] = d;
       });
       var merged = {};
       Object.keys(cloud).forEach(function(id){ merged[id] = cloud[id]; });
@@ -34557,7 +34705,7 @@ sbLoadInitialData = function(){
       D.forEach(function(d){
         var id = Number(d.id);
         if(isNaN(id)) return;
-        if(tombSet[id]) return;                 // borrado: no revive
+        if(drillIsDeletedRow(d)) return;        // borrado (por fecha): no revive
         var c = merged[id];
         if(!c){                                  // sólo existe local
           merged[id] = d; nLocalOnly++;
