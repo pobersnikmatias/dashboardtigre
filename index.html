@@ -14227,6 +14227,64 @@ window.planPollStart=planPollStart;
 window.planPollStop=planPollStop;
 
 // Trae perfiles de la nube y aplica el mismo criterio: gana el más nuevo.
+// v148: trae del servidor los check-ins nuevos (wellness y PSE). Sin esto,
+// aunque el celular del jugador los subiera, los demás dispositivos no los
+// veían hasta recargar la página entera.
+var _wpPollBusy=false;
+function wellPsePollOnce(){
+  if(_wpPollBusy)return Promise.resolve(false);
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(false);
+  _wpPollBusy=true;
+  // Sólo los últimos 21 días: alcanza para el día a día y no pesa
+  var since=new Date(); since.setDate(since.getDate()-21);
+  var sinceISO=since.toISOString().slice(0,10);
+  var tasks=[
+    sbClient.from('wellness_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO),
+    sbClient.from('pse_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO)
+  ];
+  return Promise.all(tasks).then(function(res){
+    _wpPollBusy=false;
+    var changed=0;
+    // Wellness
+    try{
+      var wRows=(res[0]&&res[0].data)||[];
+      wRows.forEach(function(row){
+        var rec=(typeof _sbWellnessFromRow==='function')?_sbWellnessFromRow(row):Object.assign({name:row.name,date:row.date},row.data||{});
+        if(!rec||!rec.name||!rec.date)return;
+        var k=(typeof cargaNormName==='function'?cargaNormName(rec.name):rec.name)+'__'+((typeof cargaParseDate==='function'&&cargaParseDate(rec.date))||rec.date);
+        var idx=WELLNESS_DATA.findIndex(function(x){
+          return (typeof cargaNormName==='function'?cargaNormName(x.name):x.name)+'__'+((typeof cargaParseDate==='function'&&cargaParseDate(x.date))||x.date)===k;
+        });
+        if(idx<0){ WELLNESS_DATA.push(rec); changed++; }
+        else if(JSON.stringify(WELLNESS_DATA[idx])!==JSON.stringify(rec)){ WELLNESS_DATA[idx]=rec; changed++; }
+      });
+    }catch(e){}
+    // PSE
+    try{
+      var pRows=(res[1]&&res[1].data)||[];
+      pRows.forEach(function(row){
+        var rec=(typeof _sbPseFromRow==='function')?_sbPseFromRow(row):Object.assign({name:row.name,date:row.date},row.data||{});
+        if(!rec||!rec.name||!rec.date)return;
+        var k=(typeof cargaNormName==='function'?cargaNormName(rec.name):rec.name)+'__'+rec.date+'__'+(rec.week||'')+'__'+(rec.day||'');
+        var idx=PSE_DATA.findIndex(function(x){
+          return (typeof cargaNormName==='function'?cargaNormName(x.name):x.name)+'__'+x.date+'__'+(x.week||'')+'__'+(x.day||'')===k;
+        });
+        if(idx<0){ PSE_DATA.push(rec); changed++; }
+        else if(JSON.stringify(PSE_DATA[idx])!==JSON.stringify(rec)){ PSE_DATA[idx]=rec; changed++; }
+      });
+    }catch(e){}
+    if(changed){
+      try{ if(typeof nameApplyAliases==='function') nameApplyAliases(); }catch(e){}
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      try{ if(typeof mainView!=='undefined'&&mainView==='hoy'&&typeof hoyRender==='function')hoyRender(); }catch(e){}
+      try{ if(typeof mainView!=='undefined'&&mainView==='carga'&&typeof cargaRender==='function')cargaRender(); }catch(e){}
+      console.log('[Sync] '+changed+' check-in(s) nuevos recibidos.');
+    }
+    return changed>0;
+  }).catch(function(){ _wpPollBusy=false; return false; });
+}
+window.wellPsePollOnce=wellPsePollOnce;
+
 function profPollOnce(){
   if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(false);
   return sbClient.from('player_profiles').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
@@ -14268,6 +14326,8 @@ function planPollOnce(){
   _planPollBusy=true;
   // Perfiles siempre (el estado de un jugador afecta a todas las vistas)
   profPollOnce();
+  // v148: y los check-ins que cargan los jugadores desde el celular
+  wellPsePollOnce();
   sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
     _planPollBusy=false;
     if(!r||r.error||!r.data)return;
@@ -24447,6 +24507,8 @@ function cargaManualSave(type){
     }
   });
   saveData();
+  // v148: subir a la nube para que lo vean los demás dispositivos
+  if(added>0 && typeof sbScheduleWellPseSync==='function'){ try{ sbScheduleWellPseSync(); }catch(e){} }
   var m=document.getElementById('carga-manual-msg');
   if(m){m.style.color=added>0?'#1D9E75':'#E24B4A';m.textContent=added>0?('✓ '+added+' registro(s) guardado(s)'):'Marcá jugadores y completá valores.';}
   if(added>0){
@@ -24651,7 +24713,13 @@ function cargaSelfSubmitWellness(){
   var exIdx=WELLNESS_DATA.findIndex(function(r){return r.name+'__'+(cargaParseDate(r.date)||r.date)===key;});
   if(exIdx>=0) WELLNESS_DATA[exIdx]=Object.assign({},WELLNESS_DATA[exIdx],rec); // pisar → queda el último
   else WELLNESS_DATA.push(rec);
-  saveData();
+  // v148: SUBIR A LA NUBE. Éste era el bug: el check-in guardaba sólo en el
+  // dispositivo donde lo cargaba el jugador (el celular/tablet) y nunca
+  // disparaba el sync, así que no llegaba a los demás. El gimnasio sí lo hacía
+  // (sbScheduleTanda1Sync) y por eso ése se veía en todos lados.
+  // Además se encola, por si el celular no tiene señal en ese momento.
+  if(typeof wellPseSaveAndSync==='function') wellPseSaveAndSync('wellness', rec);
+  else { saveData(); if(typeof sbScheduleWellPseSync==='function'){ try{ sbScheduleWellPseSync(); }catch(e){} } }
   cargaSelfShowDone('wellness');
 }
 window.cargaSelfSubmitWellness=cargaSelfSubmitWellness;
@@ -24715,7 +24783,8 @@ function cargaSelfSubmitPse(){
   var pIdx=PSE_DATA.findIndex(function(r){return r.name+'__'+r.date===key;});
   if(pIdx>=0) PSE_DATA[pIdx]=Object.assign({},PSE_DATA[pIdx],rec); // pisar → queda el último
   else PSE_DATA.push(rec);
-  saveData();
+  if(typeof wellPseSaveAndSync==='function') wellPseSaveAndSync('pse', rec);
+  else { saveData(); if(typeof sbScheduleWellPseSync==='function'){ try{ sbScheduleWellPseSync(); }catch(e){} } }
   cargaSelfShowDone('pse');
 }
 window.cargaSelfSubmitPse=cargaSelfSubmitPse;
@@ -25371,6 +25440,7 @@ function cargaConfirmImportPSE(){
     }
   });
   saveData();
+  if(typeof sbScheduleWellPseSync==='function'){ try{ sbScheduleWellPseSync(); }catch(e){} }  // v148
   var msg=document.getElementById('carga-pse-msg');
   if(msg){
     var m='✓ '+added+' nuevos';
@@ -25419,6 +25489,7 @@ function cargaConfirmImport(){
     }
   });
   saveData();
+  if(typeof sbScheduleWellPseSync==='function'){ try{ sbScheduleWellPseSync(); }catch(e){} }  // v148
   var msg=document.getElementById('carga-wellness-msg');
   if(msg){msg.textContent='✓ '+added+' registros guardados (total: '+WELLNESS_DATA.length+').';msg.style.color='#1D9E75';setTimeout(function(){msg.textContent='';},4000);}
   // Limpiar UI
@@ -31636,6 +31707,8 @@ function sbOnLoginSuccess(){
     // v147: guardián anti-zombies de la videoteca (refresca el registro de
     // borrados compartido y purga lo que reaparezca, en memoria y en la nube).
     try{ if(typeof drillGuardStart==='function'){ drillGuardStart(); drillGuardSweep(); } }catch(e){}
+    // v148: reintentar los check-ins que quedaron sin subir (celular sin señal)
+    try{ if(typeof wellPseQueueStart==='function'){ wellPseQueueStart(); wellPseQueueFlush(); } }catch(e){}
     // Refrescar también al volver a la pestaña del navegador
     try{
       if(!window._syncVisWired){
@@ -32333,6 +32406,81 @@ function _sbPseFromRow(row){
 // Antes el `return` silencioso dejaba los check-ins varados en la tablet.
 var _sbWellPseSyncTimer = null;
 var _sbWellPseRetries = 0;
+// ── COLA DE CHECK-INS PENDIENTES (v148) ───────────────────────────────────
+// El kiosko lo usan los jugadores desde el celular, muchas veces con mala
+// señal o cerrando la app enseguida. Si el envío a Supabase no llega a salir,
+// el registro quedaba sólo en ESE celular y no lo veía nadie.
+// Ahora todo check-in se encola en localStorage y se reintenta: al volver la
+// conexión, al iniciar sesión y en cada arranque de la app.
+function wellPseQueueAdd(kind, rec){
+  try{
+    var q=JSON.parse(localStorage.getItem('wellPsePending_v1')||'[]');
+    var key=kind+'|'+rec.name+'|'+rec.date;
+    q=q.filter(function(x){ return (x.kind+'|'+x.rec.name+'|'+x.rec.date)!==key; });
+    q.push({kind:kind, rec:rec, ts:Date.now()});
+    if(q.length>300) q=q.slice(-300);
+    localStorage.setItem('wellPsePending_v1', JSON.stringify(q));
+  }catch(e){}
+}
+window.wellPseQueueAdd=wellPseQueueAdd;
+
+function wellPseQueueFlush(){
+  var q=[];
+  try{ q=JSON.parse(localStorage.getItem('wellPsePending_v1')||'[]'); }catch(e){}
+  if(!q.length) return Promise.resolve(0);
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser) return Promise.resolve(0);
+  var wells=q.filter(function(x){return x.kind==='wellness';}).map(function(x){return x.rec;});
+  var pses =q.filter(function(x){return x.kind==='pse';}).map(function(x){return x.rec;});
+  var tasks=[];
+  if(wells.length && typeof _sbWellnessToPayload==='function'){
+    var wp=wells.map(_sbWellnessToPayload).filter(function(p){return p&&p.date;});
+    if(wp.length) tasks.push(
+      sbClient.from('wellness_data').upsert(wp,{onConflict:'name,date,categoria'})
+    );
+  }
+  if(pses.length && typeof _sbPseToPayload==='function'){
+    var pp=pses.map(_sbPseToPayload).filter(function(p){return p&&p.date;});
+    if(pp.length) tasks.push(
+      sbClient.from('pse_data').upsert(pp,{onConflict:'name,date,week,day,categoria'})
+    );
+  }
+  if(!tasks.length){ try{ localStorage.setItem('wellPsePending_v1','[]'); }catch(e){} return Promise.resolve(0); }
+  return Promise.all(tasks).then(function(res){
+    var err=res.find(function(r){ return r&&r.error; });
+    if(err){
+      console.warn('[Check-in] No se pudo subir la cola, se reintenta:', err.error.message||err.error);
+      return 0;
+    }
+    console.log('[Check-in] '+q.length+' registro(s) pendientes subidos a la nube.');
+    try{ localStorage.setItem('wellPsePending_v1','[]'); }catch(e){}
+    return q.length;
+  }).catch(function(){ return 0; });
+}
+window.wellPseQueueFlush=wellPseQueueFlush;
+
+// Guarda + encola + intenta subir. Punto único para los check-ins.
+function wellPseSaveAndSync(kind, rec){
+  try{ if(typeof saveData==='function') saveData(); }catch(e){}
+  wellPseQueueAdd(kind, rec);
+  try{ if(typeof sbScheduleWellPseSync==='function') sbScheduleWellPseSync(); }catch(e){}
+  // Intento inmediato además del debounce, por si el jugador cierra enseguida
+  setTimeout(wellPseQueueFlush, 300);
+}
+window.wellPseSaveAndSync=wellPseSaveAndSync;
+
+// Reintentos automáticos
+function wellPseQueueStart(){
+  if(window._wellPseQueueTimer) return;
+  window._wellPseQueueTimer=setInterval(wellPseQueueFlush, 25000);
+  try{
+    window.addEventListener('online', wellPseQueueFlush);
+    document.addEventListener('visibilitychange', function(){
+      if(!document.hidden) wellPseQueueFlush();
+    });
+  }catch(e){}
+}
+window.wellPseQueueStart=wellPseQueueStart;
+
 function sbScheduleWellPseSync(){
   if(!sbReady){
     if(_sbWellPseRetries<30){
