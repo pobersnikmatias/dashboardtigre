@@ -26025,8 +26025,17 @@ function cargaSetPseMin(name, dateIso, mins){
     if(m>0) rec.fields._min = m; else delete rec.fields._min;
   }
   saveData();
+  // v152: subir a la nube también los minutos individuales
+  if(typeof sbScheduleWellPseSync==='function'){ try{ sbScheduleWellPseSync(); }catch(e){} }
 }
 window.cargaSetPseMin = cargaSetPseMin;
+
+// v152: editar minutos de un jugador DESDE la vista semanal y refrescar
+function cargaMonSetMin(name, dateIso, val){
+  cargaSetPseMin(name, dateIso, val);
+  if(typeof cargaRender==='function') cargaRender();
+}
+window.cargaMonSetMin=cargaMonSetMin;
 
 // Aplica los mismos minutos a TODOS los que tienen PSE en esa fecha (carga grupal).
 function cargaSetPseMinGroup(dateIso, mins){
@@ -26043,10 +26052,38 @@ function cargaSetPseMinGroup(dateIso, mins){
     }
   });
   saveData();
-  if(typeof cargaRenderWellnessDia==='function') cargaRenderWellnessDia();
+  // v152: subir a la nube (si no, los minutos quedaban sólo en este dispositivo)
+  if(typeof sbScheduleWellPseSync==='function'){ try{ sbScheduleWellPseSync(); }catch(e){} }
+  // Re-renderizar la vista activa, sea la diaria o la semanal
+  if(typeof cargaRender==='function') cargaRender();
+  else if(typeof cargaRenderWellnessDia==='function') cargaRenderWellnessDia();
   return n;
 }
 window.cargaSetPseMinGroup = cargaSetPseMinGroup;
+
+// v152: aplicar minutos a todos los jugadores de un día DESDE la vista semanal
+function cargaMonApplyDayMin(dateIso, val){
+  var m=parseFloat(val);
+  if(isNaN(m)||m<0) return;
+  var n=cargaSetPseMinGroup(dateIso, m);
+  if(typeof planShowSyncToast==='function' && n) planShowSyncToast(n+' jugador(es) con '+m+' min');
+}
+window.cargaMonApplyDayMin=cargaMonApplyDayMin;
+
+// v152: ajustar los minutos de UN jugador en UN día, desde la vista semanal.
+function cargaMonEditMin(name, dateIso){
+  var rec=(PSE_DATA||[]).find(function(r){
+    var iso=(cargaParseDate(r.date)||r.date);
+    return r.name===name && iso===dateIso;
+  });
+  var actual=(rec&&rec.min>0)?rec.min:'';
+  var v=prompt('Minutos de '+name+'\n'+dateIso.slice(8,10)+'/'+dateIso.slice(5,7)+
+    (rec&&rec.pse!=null?('  ·  PSE '+rec.pse):'')+'\n\nDejar vacío para quitar los minutos:', actual);
+  if(v===null) return;              // canceló
+  cargaSetPseMin(name, dateIso, v===''?0:v);
+  if(typeof cargaRender==='function') cargaRender();
+}
+window.cargaMonEditMin=cargaMonEditMin;
 
 function cargaDiaApplyGroupMin(){
   var inp=document.getElementById('carga-dia-groupmin');
@@ -26387,7 +26424,37 @@ function cargaMonRenderWeek(per, periods, pi){
       '<div>'+_monFmtDay(d)+'</div>'+(md?'<div style="font-size:9px;color:#3B4D88;font-weight:800">'+md+'</div>':'')+'</th>';
   });
   html+='<th style="padding:9px 11px;text-align:center;font-weight:800;color:#0D1B2A;white-space:nowrap;border-left:2px solid #e0e0e0">Prom.</th>';
-  html+='</tr></thead><tbody>';
+  html+='</tr>';
+  // v152: fila de MINUTOS por día. Se carga una vez para todo el grupo y
+  // después se ajusta por jugador en la fila que corresponda.
+  html+='<tr style="background:#f8faff;border-bottom:1px solid #e8ecf4">';
+  html+='<td style="padding:6px 12px;font-size:10px;font-weight:700;color:#3B4D88;white-space:nowrap;position:sticky;left:0;background:#f8faff;z-index:1">⏱️ Minutos <span style="font-weight:500;color:#9aa5b5">(a todos)</span></td>';
+  per.dates.forEach(function(d){
+    // Minutos ya cargados ese día: si todos coinciden, mostrarlo
+    var mins=[];
+    names.forEach(function(n){
+      var pr=idx.pse[n]&&idx.pse[n][d];
+      if(pr&&pr.pse!=null&&pr.min>0) mins.push(pr.min);
+    });
+    var uniq={}; mins.forEach(function(m){ uniq[m]=true; });
+    var keys=Object.keys(uniq);
+    var val=(keys.length===1)?keys[0]:'';
+    var mixed=(keys.length>1);
+    var conPse=names.filter(function(n){ var pr=idx.pse[n]&&idx.pse[n][d]; return pr&&pr.pse!=null; }).length;
+    html+='<td style="padding:5px 4px;text-align:center">';
+    if(conPse){
+      html+='<input type="number" min="0" step="1" value="'+val+'" placeholder="'+(mixed?'varios':'min')+'" '+
+        'onchange="cargaMonApplyDayMin(\''+d+'\',this.value)" '+
+        'title="'+(mixed?'Hay minutos distintos entre jugadores. Escribí un valor para igualarlos a todos.':'Aplicar estos minutos a los '+conPse+' jugadores con PSE de este día')+'" '+
+        'style="width:52px;padding:4px 3px;border:1px solid '+(mixed?'#EF9F27':'#cdd6e6')+';border-radius:5px;font-size:11px;text-align:center;background:#fff;font-weight:700;color:#3B4D88">';
+    } else {
+      html+='<span style="font-size:10px;color:#ddd">–</span>';
+    }
+    html+='</td>';
+  });
+  html+='<td style="border-left:2px solid #e0e0e0;background:#f8faff"></td>';
+  html+='</tr>';
+  html+='</thead><tbody>';
 
   sorted.forEach(function(n){
     var s=stats[n];
@@ -26396,19 +26463,47 @@ function cargaMonRenderWeek(per, periods, pi){
     html+='<td onclick="cargaEqOpenPlayer(\''+esc(n)+'\')" style="padding:7px 12px 7px 9px;font-weight:600;color:#0D1B2A;white-space:nowrap;position:sticky;left:0;background:#fff;cursor:pointer;border-left:3px solid '+mark+'" title="Ver ficha individual">'+n+'</td>';
     per.dates.forEach(function(d){
       var wr=idx.well[n]&&idx.well[n][d];
+      var pr=idx.pse[n]&&idx.pse[n][d];
       var v=wr?(wr.readiness||0):0;
-      if(!v){ html+='<td style="padding:6px;text-align:center;color:#ddd">–</td>'; return; }
-      var p=maxTotal>0?v/maxTotal:0;
-      var bg=p>=0.8?'#e8f8f0':p>=0.6?'#f1f8e9':p>=0.4?'#fff8e1':'#fdeaea';
-      var fg=p>=0.8?'#1D9E75':p>=0.6?'#8BC34A':p>=0.4?'#EF9F27':'#E24B4A';
-      var dot=(wr.dolor==='Si')?'<span title="'+(wr.dolorZona||'dolor')+'" style="position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;background:#E24B4A;border:1.5px solid #fff"></span>':'';
-      html+='<td style="padding:6px;text-align:center"><span style="position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:25px;border-radius:6px;background:'+bg+';color:'+fg+';font-weight:800;padding:0 5px">'+Math.round(v)+dot+'</span></td>';
+      var pv=(pr&&pr.pse!=null)?pr.pse:null;
+      if(!v && pv==null){ html+='<td style="padding:6px;text-align:center;color:#ddd">–</td>'; return; }
+      // v152: wellness y PSE juntos, para ver de un vistazo quién respondió qué
+      var cell='<td style="padding:5px 4px;text-align:center;white-space:nowrap">';
+      if(v){
+        var p=maxTotal>0?v/maxTotal:0;
+        var bg=p>=0.8?'#e8f8f0':p>=0.6?'#f1f8e9':p>=0.4?'#fff8e1':'#fdeaea';
+        var fg=p>=0.8?'#1D9E75':p>=0.6?'#8BC34A':p>=0.4?'#EF9F27':'#E24B4A';
+        var dot=(wr.dolor==='Si')?'<span title="'+(wr.dolorZona||'dolor')+'" style="position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;background:#E24B4A;border:1.5px solid #fff"></span>':'';
+        cell+='<span title="Wellness" style="position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:24px;border-radius:6px;background:'+bg+';color:'+fg+';font-weight:800;padding:0 4px;font-size:11px">'+Math.round(v)+dot+'</span>';
+      } else {
+        cell+='<span title="Sin wellness" style="display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:24px;color:#ddd;font-size:11px">–</span>';
+      }
+      if(pv!=null){
+        var pc=pv<=3?'#1D9E75':pv<=6?'#EF9F27':pv<=8?'#E8772E':'#E24B4A';
+        // v152: el chip de PSE muestra los minutos de ese jugador y permite
+        // corregirlos individualmente sin salir de la vista semanal.
+        var mn=(pr.min>0)?pr.min:null;
+        var ua=(mn!=null)?Math.round(pv*mn):null;
+        var tip='PSE '+pv+(mn!=null?(' · '+mn+' min · '+ua+' UA'):' · sin minutos')+' — clic para ajustar los minutos';
+        cell+='<span onclick="cargaMonEditMin(\''+esc(n)+'\',\''+d+'\')" title="'+tip+'" '+
+          'style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:24px;border-radius:6px;background:'+pc+';color:#fff;font-weight:800;padding:0 4px;font-size:10.5px;margin-left:3px;cursor:pointer;'+
+          (mn==null?'box-shadow:0 0 0 1.5px #EF9F27 inset':'')+'">'+pv+'</span>';
+      } else {
+        cell+='<span title="Sin PSE" style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:24px;color:#e4e4e4;font-size:10px;margin-left:3px">·</span>';
+      }
+      cell+='</td>';
+      html+=cell;
     });
     html+='<td style="padding:6px 11px;text-align:center;font-weight:800;border-left:2px solid #e0e0e0;color:'+(s.avg!=null?colTotal(s.avg):'#ddd')+'">'+(s.avg!=null?Math.round(s.avg):'–')+'</td>';
     html+='</tr>';
   });
   html+='</tbody></table></div>';
-  html+='<div style="padding:9px 16px;font-size:10px;color:#a3a9b6;border-top:1px solid #f0f2f6">Tocá un jugador para su evolución individual, o el encabezado de un día para ver el detalle de esa jornada. El punto rojo marca dolor reportado.</div>';
+  html+='<div style="padding:9px 16px;border-top:1px solid #f0f2f6;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:10px;color:#a3a9b6">'+
+    '<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:18px;border-radius:4px;background:#e8f8f0;color:#1D9E75;font-weight:800;font-size:9.5px">17</span> wellness</span>'+
+    '<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;border-radius:4px;background:#EF9F27;color:#fff;font-weight:800;font-size:9.5px">6</span> PSE</span>'+
+    '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:50%;background:#E24B4A;display:inline-block"></span> dolor reportado</span>'+
+    '<span style="flex:1;min-width:180px;text-align:right">Tocá un jugador para su evolución, o el encabezado de un día para el detalle.</span>'+
+  '</div>';
   return html;
 }
 
