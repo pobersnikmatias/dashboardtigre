@@ -25808,6 +25808,7 @@ window.cargaRender=cargaRender;
 // con sistema de colores (igual que la revisión al importar CSV grupal).
 // ═══════════════════════════════════════════════════════════════
 var _cargaDiaDate = null;  // fecha seleccionada (ISO)
+var _cargaDiaEmbedded = false;  // v153: true cuando la vista diaria va dentro de Monitoreo
 
 function _cargaWellDiaDates(){
   // Fechas únicas con datos de wellness O de PSE, normalizadas a ISO, ordenadas desc
@@ -25884,23 +25885,45 @@ function cargaRenderWellnessDia(){
   var avgTotal=wellRows.length?wellRows.reduce(function(a,r){return a+(r.readiness||0);},0)/wellRows.length:0;
   var nDolor=wellRows.filter(function(r){return r.dolor==='Si';}).length;
 
-  var html='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">';
-  // Header con selector
-  html+='<div style="background:#0D1B2A;padding:12px 16px">';
-  html+='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">';
-  html+='<div style="color:#fff;font-size:14px;font-weight:800">🌅 ¿Cómo amaneció el grupo? <span style="font-size:11px;font-weight:500;color:#9fb3c8">— Wellness y PSE</span></div>';
-  html+='<label style="font-size:11px;color:#9fb3c8;display:flex;align-items:center;gap:6px">Otra fecha: <input type="date" value="'+_cargaDiaDate+'" onchange="cargaDiaSetDate(this.value)" style="font-size:11px;padding:4px 7px;border:none;border-radius:5px"></label>';
-  html+='</div>';
-  html+='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">'+dateBtns+'</div>';
-  // Carga grupal de tiempo de trabajo (para UA sin GPS)
-  html+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #ffffff22">'+
-    '<span style="font-size:11px;color:#9fb3c8;font-weight:600">⏱️ Tiempo de trabajo grupal:</span>'+
-    '<input type="number" id="carga-dia-groupmin" min="0" step="1" placeholder="min" style="width:70px;padding:5px 7px;border:none;border-radius:5px;font-size:12px;text-align:center">'+
-    '<button onclick="cargaDiaApplyGroupMin()" style="padding:5px 12px;border:none;border-radius:5px;background:#3B4D88;color:#fff;font-size:11px;font-weight:700;cursor:pointer">Aplicar a todos</button>'+
-    '<span style="font-size:10px;color:#7fd4a8;font-weight:600" id="carga-dia-min-msg"></span>'+
-    '<span style="font-size:9px;color:#7088a0">UA = PSE × minutos</span>'+
+  // v153: cuando la vista diaria va embebida dentro de Monitoreo, se omite su
+  // propio header (ya está la barra de contexto) pero la carga de minutos se
+  // conserva SIEMPRE, como bloque propio. Antes se quitaba con una expresión
+  // regular sobre el HTML y eso se llevaba puesta la barra de minutos.
+  var embedded = (typeof _cargaDiaEmbedded!=='undefined' && _cargaDiaEmbedded);
+  var html='';
+  if(!embedded) html+='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">';
+  if(!embedded){
+    html+='<div style="background:#0D1B2A;padding:12px 16px">';
+    html+='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">';
+    html+='<div style="color:#fff;font-size:14px;font-weight:800">🌅 ¿Cómo amaneció el grupo? <span style="font-size:11px;font-weight:500;color:#9fb3c8">— Wellness y PSE</span></div>';
+    html+='<label style="font-size:11px;color:#9fb3c8;display:flex;align-items:center;gap:6px">Otra fecha: <input type="date" value="'+_cargaDiaDate+'" onchange="cargaDiaSetDate(this.value)" style="font-size:11px;padding:4px 7px;border:none;border-radius:5px"></label>';
+    html+='</div>';
+    html+='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">'+dateBtns+'</div>';
+    html+='</div>';
+  }
+  // ── Carga grupal del tiempo de trabajo (siempre visible) ──
+  var _minsHoy=[];
+  (PSE_DATA||[]).forEach(function(r){
+    var iso=(cargaParseDate(r.date)||r.date);
+    if(iso===_cargaDiaDate && r.pse!=null && r.min>0) _minsHoy.push(r.min);
+  });
+  var _u={}; _minsHoy.forEach(function(m){_u[m]=true;});
+  var _uk=Object.keys(_u);
+  var _valMin=(_uk.length===1)?_uk[0]:'';
+  var _conPse=(PSE_DATA||[]).filter(function(r){
+    var iso=(cargaParseDate(r.date)||r.date);
+    return iso===_cargaDiaDate && r.pse!=null;
+  }).length;
+  html+='<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:11px 16px;background:#eef3fb;border-bottom:1px solid #dde5f2">'+
+    '<span style="font-size:11.5px;color:#0D1B2A;font-weight:700">⏱️ Minutos de trabajo</span>'+
+    '<input type="number" id="carga-dia-groupmin" min="0" step="1" value="'+_valMin+'" placeholder="min" style="width:74px;padding:5px 8px;border:1px solid #c6d2e6;border-radius:5px;font-size:12px;text-align:center;font-weight:700;color:#0D1B2A">'+
+    '<button onclick="cargaDiaApplyGroupMin()" style="padding:5px 13px;border:none;border-radius:5px;background:#3B4D88;color:#fff;font-size:11px;font-weight:700;cursor:pointer">Aplicar a todos</button>'+
+    '<span style="font-size:10.5px;color:#6b7a90">'+
+      (_conPse?('Se aplica a los <b>'+_conPse+'</b> jugadores con PSE de este día. Después ajustá el que trabajó distinto en su fila.')
+              :'Nadie cargó PSE todavía en este día.')+
+    '</span>'+
+    '<span style="font-size:10px;color:#1D9E75;font-weight:700" id="carga-dia-min-msg"></span>'+
   '</div>';
-  html+='</div>';
 
   // Resumen
   html+='<div style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#f8faff;border-bottom:1px solid #eef2f8">';
@@ -26005,7 +26028,7 @@ function cargaRenderWellnessDia(){
   html+='<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#EF9F27;vertical-align:middle"></span> Alerta (≥40%)</span>';
   html+='<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#E24B4A;vertical-align:middle"></span> Bajo (&lt;40%)</span>';
   html+='</div>';
-  html+='</div>';
+  if(!embedded) html+='</div>';   // v153: el contenedor sólo se abre si no va embebida
   out.innerHTML=html;
 }
 window.cargaRenderWellnessDia=cargaRenderWellnessDia;
@@ -26088,10 +26111,18 @@ window.cargaMonEditMin=cargaMonEditMin;
 function cargaDiaApplyGroupMin(){
   var inp=document.getElementById('carga-dia-groupmin');
   if(!inp) return;
-  var n=cargaSetPseMinGroup(_cargaDiaDate, inp.value);
+  // v153: el día activo es el del monitor; _cargaDiaDate es sólo el respaldo.
+  var iso=(typeof _cargaMonDay!=='undefined' && _cargaMonDay) ? _cargaMonDay : _cargaDiaDate;
+  if(!iso){ alert('Elegí primero un día del microciclo.'); return; }
+  var val=inp.value;
+  var n=cargaSetPseMinGroup(iso, val);
+  if(n===0){
+    alert('Ningún jugador tiene PSE cargada en este día, así que no hay a quién aplicarle los minutos.');
+    return;
+  }
   if(n!=null){
     var msg=document.getElementById('carga-dia-min-msg');
-    if(msg){ msg.textContent='✓ '+inp.value+' min aplicados a '+n+' jugador(es).'; setTimeout(function(){msg.textContent='';},3500); }
+    if(msg){ msg.textContent='✓ '+val+' min aplicados a '+n+' jugador(es).'; setTimeout(function(){msg.textContent='';},3500); }
   }
 }
 window.cargaDiaApplyGroupMin = cargaDiaApplyGroupMin;
@@ -26425,35 +26456,8 @@ function cargaMonRenderWeek(per, periods, pi){
   });
   html+='<th style="padding:9px 11px;text-align:center;font-weight:800;color:#0D1B2A;white-space:nowrap;border-left:2px solid #e0e0e0">Prom.</th>';
   html+='</tr>';
-  // v152: fila de MINUTOS por día. Se carga una vez para todo el grupo y
-  // después se ajusta por jugador en la fila que corresponda.
-  html+='<tr style="background:#f8faff;border-bottom:1px solid #e8ecf4">';
-  html+='<td style="padding:6px 12px;font-size:10px;font-weight:700;color:#3B4D88;white-space:nowrap;position:sticky;left:0;background:#f8faff;z-index:1">⏱️ Minutos <span style="font-weight:500;color:#9aa5b5">(a todos)</span></td>';
-  per.dates.forEach(function(d){
-    // Minutos ya cargados ese día: si todos coinciden, mostrarlo
-    var mins=[];
-    names.forEach(function(n){
-      var pr=idx.pse[n]&&idx.pse[n][d];
-      if(pr&&pr.pse!=null&&pr.min>0) mins.push(pr.min);
-    });
-    var uniq={}; mins.forEach(function(m){ uniq[m]=true; });
-    var keys=Object.keys(uniq);
-    var val=(keys.length===1)?keys[0]:'';
-    var mixed=(keys.length>1);
-    var conPse=names.filter(function(n){ var pr=idx.pse[n]&&idx.pse[n][d]; return pr&&pr.pse!=null; }).length;
-    html+='<td style="padding:5px 4px;text-align:center">';
-    if(conPse){
-      html+='<input type="number" min="0" step="1" value="'+val+'" placeholder="'+(mixed?'varios':'min')+'" '+
-        'onchange="cargaMonApplyDayMin(\''+d+'\',this.value)" '+
-        'title="'+(mixed?'Hay minutos distintos entre jugadores. Escribí un valor para igualarlos a todos.':'Aplicar estos minutos a los '+conPse+' jugadores con PSE de este día')+'" '+
-        'style="width:52px;padding:4px 3px;border:1px solid '+(mixed?'#EF9F27':'#cdd6e6')+';border-radius:5px;font-size:11px;text-align:center;background:#fff;font-weight:700;color:#3B4D88">';
-    } else {
-      html+='<span style="font-size:10px;color:#ddd">–</span>';
-    }
-    html+='</td>';
-  });
-  html+='<td style="border-left:2px solid #e0e0e0;background:#f8faff"></td>';
-  html+='</tr>';
+  // v153: la carga de minutos vive en la vista DIARIA (es donde se hace el
+  // trabajo fino). Acá sólo se muestran, para no duplicar la operación.
   html+='</thead><tbody>';
 
   sorted.forEach(function(n){
@@ -26484,8 +26488,10 @@ function cargaMonRenderWeek(per, periods, pi){
         // corregirlos individualmente sin salir de la vista semanal.
         var mn=(pr.min>0)?pr.min:null;
         var ua=(mn!=null)?Math.round(pv*mn):null;
-        var tip='PSE '+pv+(mn!=null?(' · '+mn+' min · '+ua+' UA'):' · sin minutos')+' — clic para ajustar los minutos';
-        cell+='<span onclick="cargaMonEditMin(\''+esc(n)+'\',\''+d+'\')" title="'+tip+'" '+
+        var tip='PSE '+pv+(mn!=null?(' · '+mn+' min · '+ua+' UA'):' · sin minutos')+' — clic para abrir el detalle del día';
+        // v153: el chip lleva al detalle del día, que es donde se cargan los
+        // minutos (a todos de una vez y después ajuste fino por jugador).
+        cell+='<span onclick="cargaMonSetDay(\''+d+'\')" title="'+tip+'" '+
           'style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:24px;border-radius:6px;background:'+pc+';color:#fff;font-weight:800;padding:0 4px;font-size:10.5px;margin-left:3px;cursor:pointer;'+
           (mn==null?'box-shadow:0 0 0 1.5px #EF9F27 inset':'')+'">'+pv+'</span>';
       } else {
@@ -26518,8 +26524,13 @@ function cargaMonRenderDay(iso){
   ghost.id='carga-main-content';
   document.body.appendChild(ghost);
   var captured='';
-  var prevDate=_cargaDiaDate;
+  window._cargaDiaEmbedded=true;
   try{
+    // v153: dejar _cargaDiaDate apuntando al día que se está mostrando.
+    // ANTES se restauraba al valor previo (normalmente null) apenas terminaba
+    // el render. Entonces "Aplicar a todos" ejecutaba sobre una fecha vacía,
+    // no encontraba ningún registro y los minutos NO se guardaban: se cargaban
+    // y al rato no se veían. Éste era el bug.
     _cargaDiaDate=iso;
     cargaRenderWellnessDia();
     captured=ghost.innerHTML;
@@ -26527,10 +26538,8 @@ function cargaMonRenderDay(iso){
   finally{
     ghost.remove();
     if(out) out.id=prevId||'carga-main-content';
-    _cargaDiaDate=prevDate;
+    window._cargaDiaEmbedded=false;
   }
-  // Quitar el header propio de la vista diaria (ya tenemos la barra de contexto)
-  captured=captured.replace(/<div style="background:#0D1B2A;padding:12px 16px">[\s\S]*?<\/div>\s*(?=<div style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#f8faff)/,'');
   return captured;
 }
 
