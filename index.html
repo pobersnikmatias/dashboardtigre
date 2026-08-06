@@ -32494,6 +32494,12 @@ function sbOnLoginSuccess(){
     // v147: guardián anti-zombies de la videoteca (refresca el registro de
     // borrados compartido y purga lo que reaparezca, en memoria y en la nube).
     try{ if(typeof drillGuardStart==='function'){ drillGuardStart(); drillGuardSweep(); } }catch(e){}
+    // v154: recuperar tests desde la copia dedicada y arrancar su sincronización
+    try{
+      if(typeof tstRecoverOnBoot==='function') tstRecoverOnBoot();
+      if(typeof tstCloudPull==='function') tstCloudPull();
+      if(typeof tstSyncStart==='function') tstSyncStart();
+    }catch(e){}
     // v148: reintentar los check-ins que quedaron sin subir (celular sin señal)
     try{ if(typeof wellPseQueueStart==='function'){ wellPseQueueStart(); wellPseQueueFlush(); } }catch(e){}
     // Refrescar también al volver a la pestaña del navegador
@@ -35031,6 +35037,23 @@ function _sbSettingsToPayloads(){
 function _sbApplySettingRow(row){
   if(!row || !row.key) return;
   if(SB_SETTINGS_KEYS.indexOf(row.key) < 0) return;  // key no reconocida, ignorar
+  // v154: TST_DATA NUNCA se reemplaza por este camino. Acá se hacía
+  // `array.length=0` y se copiaba lo de la nube, borrando lo local antes de
+  // mezclar. Y la protección que lo arreglaba se instalaba en DOMContentLoaded,
+  // así que si la carga llegaba antes, la pérdida ocurría igual. Ahora se
+  // desvía siempre a la unión, que no puede perder registros.
+  if(row.key==='TST_DATA'){
+    try{
+      var incoming=Array.isArray(row.value)?row.value:[];
+      if(typeof tstMergeRecords==='function' && typeof TST_DATA!=='undefined'){
+        var merged=tstMergeRecords(TST_DATA, incoming);
+        TST_DATA.length=0;
+        merged.forEach(function(r){ TST_DATA.push(r); });
+        if(typeof tstStoreSave==='function') tstStoreSave();
+      }
+    }catch(e){ console.warn('[Tests] merge settings:',e); }
+    return;
+  }
   var current = _sbReadGlobal(row.key);
   var incoming = row.value;
   // Si la variable no existía o era null, intentar asignar directo (funciona con var, no con let)
@@ -35370,6 +35393,278 @@ function tstPurgeDeleted(){
   return n;
 }
 window.tstPurgeDeleted=tstPurgeDeleted;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSISTENCIA DE TESTS (v154) — a prueba de pérdidas
+// PROBLEMAS QUE ESTO ARREGLA (por qué se perdió la carga de saltos):
+//  1. TST_DATA viajaba como UN SOLO bloque JSON por app_settings, con
+//     "último que escribe gana" sobre TODO el array. Si el dispositivo del
+//     compañero tenía una versión vieja y sincronizaba, truncaba la nube.
+//  2. Al recibir del servidor se hacía `array.length=0` y se copiaba lo de la
+//     nube: se BORRABA lo local antes de mezclar.
+//  3. La protección de mezcla se instalaba en DOMContentLoaded. Si la carga
+//     de la nube llegaba antes, el borrado ocurría sin ninguna red de
+//     contención.
+//  4. Los registros no tenían fecha de modificación, así que era imposible
+//     saber cuál versión era la buena.
+//  5. Todo vivía dentro del payload gigante: si ese guardado fallaba por
+//     cuota, los tests se iban con él.
+// SOLUCIÓN: sello por registro, copia dedicada en el dispositivo, mezcla por
+// unión (nunca se vacía) y subida que primero lee la nube y fusiona.
+// ═══════════════════════════════════════════════════════════════════════════
+
+var TST_STORE_KEY='tstData_v1';   // copia dedicada, fuera del payload grande
+
+// Sello de modificación por registro
+function tstTouch(rec){
+  if(!rec||typeof rec!=='object')return rec;
+  rec._upd=Date.now();
+  if(rec.id==null) rec.id=Date.now()+Math.floor(Math.random()*10000);
+  return rec;
+}
+window.tstTouch=tstTouch;
+
+// ── Copia dedicada en el dispositivo ──
+// Es independiente del payload principal. Si aquel falla por cuota, los tests
+// siguen estando acá.
+function tstStoreSave(){
+  try{
+    localStorage.setItem(TST_STORE_KEY, JSON.stringify({
+      ts:Date.now(),
+      data:(typeof TST_DATA!=='undefined'&&Array.isArray(TST_DATA))?TST_DATA:[]
+    }));
+    return true;
+  }catch(e){
+    console.warn('[Tests] No se pudo guardar la copia local:', e.message||e);
+    return false;
+  }
+}
+window.tstStoreSave=tstStoreSave;
+
+function tstStoreLoad(){
+  try{
+    var raw=localStorage.getItem(TST_STORE_KEY);
+    if(!raw)return null;
+    var p=JSON.parse(raw);
+    return (p&&Array.isArray(p.data))?p.data:null;
+  }catch(e){ return null; }
+}
+window.tstStoreLoad=tstStoreLoad;
+
+// Clave de identidad de un registro. El id puede diferir entre dispositivos
+// (se genera con Date.now), así que la identidad REAL es test+jugador+fecha.
+function tstRecKey(r){
+  if(!r)return '';
+  var nm=(typeof tstNorm==='function')?tstNorm(r.name||''):String(r.name||'').toLowerCase().trim();
+  return (r.testId||'')+'||'+nm+'||'+(r.date||'');
+}
+window.tstRecKey=tstRecKey;
+
+// ── UNIÓN de dos conjuntos de registros ──
+// Nunca vacía nada. Ante el mismo registro (mismo test+jugador+fecha) gana el
+// que tenga el sello más nuevo. Respeta los borrados.
+function tstMergeRecords(base, incoming){
+  var out={}, order=[];
+  var put=function(r){
+    if(!r)return;
+    if(typeof tstIsDeleted==='function' && tstIsDeleted(r.id))return;
+    var k=tstRecKey(r);
+    if(!k||k==='||||')return;
+    var cur=out[k];
+    if(!cur){ out[k]=r; order.push(k); return; }
+    // Gana el más nuevo. Si ninguno tiene sello, gana el que tiene más datos.
+    var a=Number(cur._upd||0), b=Number(r._upd||0);
+    if(b>a){ out[k]=r; return; }
+    if(b===a){
+      var score=function(x){
+        var n=0;
+        ['val','valI','valD','reps','vals','note'].forEach(function(f){ if(x&&x[f]!=null)n++; });
+        return n;
+      };
+      if(score(r)>score(cur)) out[k]=r;
+    }
+  };
+  (base||[]).forEach(put);
+  (incoming||[]).forEach(put);
+  return order.map(function(k){return out[k];}).filter(Boolean);
+}
+window.tstMergeRecords=tstMergeRecords;
+
+// ── GUARDADO PRINCIPAL ──
+// Se llama en cada edición (autoguardado) y desde el botón Guardar.
+var _tstSaveState={last:0, pending:false, lastError:null};
+function tstSaveAll(opts){
+  opts=opts||{};
+  var okLocal=true;
+  // 1) Copia dedicada primero: es la que sobrevive a un fallo de cuota
+  okLocal=tstStoreSave();
+  // 2) Payload principal
+  try{ if(typeof saveData==='function') saveData(); }catch(e){ okLocal=false; }
+  // 3) Nube: fusionando, nunca pisando
+  if(opts.force) tstCloudPush(true);
+  else tstCloudSchedule();
+  _tstSaveState.last=Date.now();
+  _tstSaveState.lastError=okLocal?null:'local';
+  tstSaveIndicator(okLocal?'saved':'error');
+  return okLocal;
+}
+window.tstSaveAll=tstSaveAll;
+
+// ── SUBIDA A LA NUBE con fusión previa ──
+// Lee lo que hay en la nube, lo une con lo local y recién ahí escribe. Sin
+// esto, un dispositivo con datos viejos truncaba el array de todos.
+var _tstPushTimer=null, _tstPushBusy=false;
+function tstCloudSchedule(){
+  if(_tstPushTimer)clearTimeout(_tstPushTimer);
+  _tstPushTimer=setTimeout(function(){ _tstPushTimer=null; tstCloudPush(false); }, 1200);
+}
+window.tstCloudSchedule=tstCloudSchedule;
+
+function tstCloudPush(force){
+  if(_tstPushBusy){ tstCloudSchedule(); return Promise.resolve(false); }
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser){
+    // Sin sesión: queda la copia local y se reintenta al conectar
+    tstSaveIndicator('offline');
+    return Promise.resolve(false);
+  }
+  _tstPushBusy=true;
+  tstSaveIndicator('saving');
+  return sbClient.from('app_settings').select('value')
+    .eq('key','TST_DATA').eq('categoria',SB_CATEGORIA).maybeSingle()
+    .then(function(res){
+      var cloud=[];
+      try{ if(res&&res.data&&Array.isArray(res.data.value)) cloud=res.data.value; }catch(e){}
+      // Unión: nada se pierde, ni lo mío ni lo del compañero
+      var merged=tstMergeRecords(cloud, TST_DATA);
+      // Reflejar la fusión en memoria
+      TST_DATA.length=0;
+      merged.forEach(function(r){ TST_DATA.push(r); });
+      tstStoreSave();
+      return sbClient.from('app_settings').upsert(
+        {key:'TST_DATA', value:merged, categoria:SB_CATEGORIA, updated_at:new Date().toISOString()},
+        {onConflict:'key,categoria'}
+      ).then(function(r2){
+        _tstPushBusy=false;
+        if(r2.error){
+          console.error('[Tests] No se pudo subir:', r2.error.message||r2.error);
+          tstSaveIndicator('error');
+          setTimeout(tstCloudSchedule, 6000);   // reintentar
+          return false;
+        }
+        console.log('[Tests] Guardado en la nube ('+merged.length+' registros).');
+        tstSaveIndicator('saved');
+        try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests'&&typeof tstRender==='function')tstRender(); }catch(e){}
+        return true;
+      });
+    }).catch(function(e){
+      _tstPushBusy=false;
+      console.warn('[Tests] Error al sincronizar:', e&&(e.message||e));
+      tstSaveIndicator('error');
+      setTimeout(tstCloudSchedule, 6000);
+      return false;
+    });
+}
+window.tstCloudPush=tstCloudPush;
+
+// ── BAJADA desde la nube (unión, nunca reemplazo) ──
+var _tstPullBusy=false;
+function tstCloudPull(){
+  if(_tstPullBusy)return Promise.resolve(0);
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(0);
+  _tstPullBusy=true;
+  return sbClient.from('app_settings').select('value')
+    .eq('key','TST_DATA').eq('categoria',SB_CATEGORIA).maybeSingle()
+    .then(function(res){
+      _tstPullBusy=false;
+      var cloud=[];
+      try{ if(res&&res.data&&Array.isArray(res.data.value)) cloud=res.data.value; }catch(e){}
+      if(!cloud.length)return 0;
+      var before=TST_DATA.length;
+      var merged=tstMergeRecords(TST_DATA, cloud);
+      var changed=(merged.length!==before)||JSON.stringify(merged)!==JSON.stringify(TST_DATA);
+      if(!changed)return 0;
+      TST_DATA.length=0;
+      merged.forEach(function(r){ TST_DATA.push(r); });
+      tstStoreSave();
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests'&&typeof tstRender==='function')tstRender(); }catch(e){}
+      console.log('[Tests] Sincronizado desde la nube ('+merged.length+' registros).');
+      return merged.length-before;
+    }).catch(function(){ _tstPullBusy=false; return 0; });
+}
+window.tstCloudPull=tstCloudPull;
+
+// ── RECUPERACIÓN AL ARRANCAR ──
+// Une lo que haya en el payload principal con la copia dedicada. Si una de las
+// dos se perdió (cuota, sincronización desafortunada), la otra la repone.
+function tstRecoverOnBoot(){
+  try{
+    var store=tstStoreLoad();
+    if(!store||!store.length)return 0;
+    var before=(typeof TST_DATA!=='undefined'&&Array.isArray(TST_DATA))?TST_DATA.length:0;
+    var merged=tstMergeRecords(TST_DATA, store);
+    if(merged.length>before){
+      TST_DATA.length=0;
+      merged.forEach(function(r){ TST_DATA.push(r); });
+      console.warn('[Tests] Se recuperaron '+(merged.length-before)+' registro(s) de la copia local.');
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      return merged.length-before;
+    }
+    // Si el payload tenía MÁS, actualizar la copia dedicada
+    if(before>store.length) tstStoreSave();
+    return 0;
+  }catch(e){ return 0; }
+}
+window.tstRecoverOnBoot=tstRecoverOnBoot;
+
+// ── INDICADOR DE GUARDADO ──
+function tstSaveIndicator(state){
+  var el=document.getElementById('tst-save-ind');
+  if(!el)return;
+  var M={
+    saving:{t:'Guardando…', c:'#6b7a90'},
+    saved:{t:'✓ Guardado', c:'#1D9E75'},
+    offline:{t:'✓ Guardado en este dispositivo', c:'#EF9F27'},
+    error:{t:'⚠ Error al guardar — tocá Guardar', c:'#E24B4A'}
+  };
+  var m=M[state]||M.saved;
+  el.textContent=m.t;
+  el.style.color=m.c;
+  el.style.opacity='1';
+  if(el._t)clearTimeout(el._t);
+  if(state==='saved'||state==='offline'){
+    el._t=setTimeout(function(){ el.style.opacity='0'; }, 2600);
+  }
+}
+window.tstSaveIndicator=tstSaveIndicator;
+
+// ── BOTÓN GUARDAR (manual, fuerza subida inmediata) ──
+function tstSaveNow(){
+  var ok=tstSaveAll({force:true});
+  var n=(typeof TST_DATA!=='undefined')?TST_DATA.length:0;
+  if(!ok){
+    alert('No se pudo guardar en este dispositivo (probablemente falta espacio).\n\n'+
+          'Los datos siguen en memoria. Cerrá otras pestañas y volvé a tocar Guardar.');
+  }
+  return n;
+}
+window.tstSaveNow=tstSaveNow;
+
+// Refresco periódico + al volver a la pestaña
+function tstSyncStart(){
+  if(window._tstSyncTimer)return;
+  window._tstSyncTimer=setInterval(tstCloudPull, 30000);
+  try{
+    document.addEventListener('visibilitychange',function(){
+      if(!document.hidden) tstCloudPull();
+    });
+    window.addEventListener('online', function(){ tstCloudPush(true); });
+    // Último intento antes de cerrar la pestaña
+    window.addEventListener('beforeunload', function(){ try{ tstStoreSave(); }catch(e){} });
+  }catch(e){}
+}
+window.tstSyncStart=tstSyncStart;
+
 // ─────────────────────────────────────────────────────────────────────────
 // FIX v115: recuperación de registros de tests al boot.
 // TST_DATA se declara en este bloque, DESPUÉS de que loadData() ya corrió en
@@ -35390,6 +35685,10 @@ window.tstPurgeDeleted=tstPurgeDeleted;
   var gotLS=0;
   try{ gotLS=applyTst(JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')); }catch(e){}
   if(gotLS)console.log('[TST] '+gotLS+' registros de tests recuperados del payload local.');
+  // v154: unir además con la copia DEDICADA. Es la red de contención: si el
+  // payload grande se perdió (cuota) o la nube truncó el array, acá está lo
+  // que este dispositivo cargó.
+  try{ if(typeof tstRecoverOnBoot==='function') tstRecoverOnBoot(); }catch(e){}
   // Fallback: si el espejo localStorage no tenía el payload (p. ej. cuota
   // llena — el hogar real es IndexedDB), leerlo async de IndexedDB.
   if(!gotLS && typeof dstoreGet==='function'){
@@ -35449,11 +35748,17 @@ function tstAsym(rec){
 
 function tstRender(){
   var out=document.getElementById('tst-container'); if(!out)return;
-  var tabs='<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">'+
+  var tabs='<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center">'+
     [['load','📋 Cargar jornada'],['indiv','📈 Individual'],['team','👥 Plantel'],['jor','🗂 Jornadas'],['cat','⚙ Tests']].map(function(t){
       var on=_tstView===t[0];
       return '<button onclick="tstSetView(\''+t[0]+'\')" style="padding:7px 15px;border:1px solid '+(on?'#3B4D88':'#ddd')+';background:'+(on?'#3B4D88':'#fff')+';color:'+(on?'#fff':'#555')+';border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'+t[1]+'</button>';
-    }).join('')+'</div>';
+    }).join('')+
+    // v154: botón de guardado explícito + indicador de estado
+    '<span style="margin-left:auto;display:flex;align-items:center;gap:9px">'+
+      '<span id="tst-save-ind" style="font-size:11px;font-weight:700;opacity:0;transition:opacity .3s;white-space:nowrap"></span>'+
+      '<button onclick="tstSaveNow()" title="Guarda en este dispositivo y sube a la nube ahora mismo" style="padding:7px 15px;border:none;background:#1D9E75;color:#fff;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💾 Guardar</button>'+
+    '</span>'+
+    '</div>';
   var body='';
   if(_tstView==='load')body=tstRenderLoad();
   else if(_tstView==='indiv')body=tstRenderIndiv();
@@ -35567,11 +35872,17 @@ function tstSaveCell(testId,nameL,nameEnc,side,rawVal){
     else { rec.val=nums[0]; rec.reps=1; }
   }
   var empty=(rec.val==null&&rec.valI==null&&rec.valD==null);
-  if(idx>=0){ if(empty)TST_DATA.splice(idx,1); else TST_DATA[idx]=rec; }
+  // v154: sellar el registro con la hora, para que el merge sepa cuál es la
+  // versión buena cuando dos dispositivos tocan lo mismo.
+  if(typeof tstTouch==='function') tstTouch(rec);
+  if(idx>=0){
+    if(empty){ if(typeof tstTombAdd==='function')tstTombAdd(rec.id); TST_DATA.splice(idx,1); }
+    else TST_DATA[idx]=rec;
+  }
   else if(!empty){ TST_DATA.push(rec); }
-  saveData();
-  // v115: subir también los registros a la nube (viajan por app_settings)
-  if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} }
+  // v154: guardado robusto — copia dedicada + payload + nube con fusión.
+  if(typeof tstSaveAll==='function') tstSaveAll();
+  else { saveData(); if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} } }
   if(t.lat==='uni')tstRender();
 }
 window.tstSaveCell=tstSaveCell;
