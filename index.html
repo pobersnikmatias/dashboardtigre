@@ -35044,6 +35044,20 @@ function _sbApplySettingRow(row){
   // v156: el CATÁLOGO tampoco se reemplaza. Antes se hacía `array.length=0` y
   // se copiaba lo de la nube: eso deshacía la reorganización por categorías y
   // borraba los tests que este dispositivo había creado o agregado.
+  // v157: los tests de RESISTENCIA tampoco se reemplazan. Antes se vaciaba el
+  // array local y se copiaba el de la nube; si la nube no tenía los últimos
+  // (porque el envío se había rendido por falta de sesión), desaparecían.
+  if(row.key==='RESI_TESTS'){
+    try{
+      if(typeof resiMergeTests==='function'){
+        resiMergeTests(Array.isArray(row.value)?row.value:[]);
+        if(typeof resiRender==='function' && typeof _tstView!=='undefined' && _tstView==='resi'){
+          try{ resiRender(); }catch(e){}
+        }
+      }
+    }catch(e){ console.warn('[Resistencia] merge:',e); }
+    return;
+  }
   if(row.key==='TST_CATALOG'){
     try{
       var cat=Array.isArray(row.value)?row.value:[];
@@ -36027,19 +36041,53 @@ function tstRenderLoad(){
   if(!roster.length)return head+'<div style="padding:20px;text-align:center;color:#999;font-size:12px">No hay jugadores en el plantel. Cargá perfiles primero.</div>';
   var existing={};
   TST_DATA.forEach(function(r){ if(r.date===_tstDate)existing[r.testId+'|'+tstNorm(r.name)]=r; });
+  // v157: ordenar los tests por categoría y marcar dónde empieza cada una,
+  // para que la grilla no se lea como un bloque continuo.
+  var ordenGrupo={}; TST_CAT_GROUPS.forEach(function(g,i){ ordenGrupo[g.k]=i; });
+  active=active.slice().sort(function(a,b){
+    var ga=ordenGrupo[a.group]!=null?ordenGrupo[a.group]:99;
+    var gb=ordenGrupo[b.group]!=null?ordenGrupo[b.group]:99;
+    return ga-gb || a.name.localeCompare(b.name,'es');
+  });
+  // Primera columna de cada categoría → separador vertical con su color
+  var sep={};   // índice → color del borde izquierdo
+  var prevG=null;
+  active.forEach(function(t,i){
+    var g=t.group||'otro';
+    if(i>0 && g!==prevG) sep[i]=tstGroupBy(g).col||'#3B4D88';
+    prevG=g;
+  });
+  var bordeDe=function(i){ return sep[i]?('border-left:3px solid '+sep[i]+';'):''; };
+
+  // Fila superior con el nombre de cada categoría, abarcando sus columnas
+  var grupoRow='<tr><th style="position:sticky;left:0;background:#0D1B2A;z-index:3;border-bottom:1px solid #2a3a63"></th>';
+  var runIni=0;
+  active.forEach(function(t,i){
+    var esUltimo=(i===active.length-1);
+    var cambia=esUltimo || (active[i+1].group!==t.group);
+    if(cambia){
+      var g=tstGroupBy(t.group||'otro');
+      var span=i-runIni+1;
+      grupoRow+='<th colspan="'+span+'" style="background:'+(g.col||'#3B4D88')+';color:#fff;padding:5px 8px;font-size:10px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;'+bordeDe(runIni)+'border-bottom:1px solid rgba(255,255,255,.25)">'+(g.ico||'')+' '+tstEsc(g.lbl)+'</th>';
+      runIni=i+1;
+    }
+  });
+  grupoRow+='</tr>';
+
   var th='<th style="position:sticky;left:0;background:#0D1B2A;color:#fff;padding:8px 10px;text-align:left;font-size:11px;min-width:130px;z-index:2">Jugador</th>'+
-    active.map(function(t){
+    active.map(function(t,i){
       var sub=t.unit+(t.lat==='uni'?' · I/D':'')+(t.mode==='multi'?' · xn':'');
-      return '<th style="background:#1E2A52;color:#fff;padding:7px 8px;font-size:11px;min-width:'+(t.lat==='uni'?'150':'90')+'px">'+tstEsc(t.name)+'<br><span style="font-size:8.5px;color:#9FB0D0;font-weight:400">'+sub+'</span></th>';
+      return '<th style="background:#1E2A52;color:#fff;padding:7px 8px;font-size:11px;min-width:'+(t.lat==='uni'?'150':'90')+'px;'+bordeDe(i)+'">'+tstEsc(t.name)+'<br><span style="font-size:8.5px;color:#9FB0D0;font-weight:400">'+sub+'</span></th>';
     }).join('');
-  var rows=roster.map(function(name){
-    var cells=active.map(function(t){
+  var rows=roster.map(function(name,ri){
+    var zebra=(ri%2===1)?'background:#fafbfd;':'';
+    var cells=active.map(function(t,i){
       var rec=existing[t.id+'|'+tstNorm(name)];
-      return '<td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;text-align:center">'+tstCellInput(t,name,rec)+'</td>';
+      return '<td style="padding:4px 6px;border-bottom:1px solid #eef0f4;text-align:center;'+bordeDe(i)+zebra+'">'+tstCellInput(t,name,rec)+'</td>';
     }).join('');
-    return '<tr><td style="position:sticky;left:0;background:#fff;padding:6px 10px;font-size:11.5px;font-weight:600;border-bottom:1px solid #f0f0f0;border-right:1px solid #eee;z-index:1">'+tstEsc(name)+'</td>'+cells+'</tr>';
+    return '<tr><td style="position:sticky;left:0;background:'+(ri%2===1?'#fafbfd':'#fff')+';padding:6px 10px;font-size:11.5px;font-weight:600;border-bottom:1px solid #eef0f4;border-right:2px solid #e4e6ec;z-index:1">'+tstEsc(name)+'</td>'+cells+'</tr>';
   }).join('');
-  return head+'<div style="overflow-x:auto;background:#fff;border:1px solid #e4e6ec;border-radius:10px"><table style="border-collapse:collapse;width:100%"><thead><tr>'+th+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+  return head+'<div style="overflow-x:auto;background:#fff;border:1px solid #e4e6ec;border-radius:10px"><table style="border-collapse:collapse;width:100%"><thead>'+grupoRow+'<tr>'+th+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div style="font-size:10px;color:#aaa;margin-top:8px">Escribí el valor y salí de la celda para guardar. En tests unilaterales cargás Izq/Der y la asimetría se calcula sola. En modo múltiple cargás varios intentos separados por espacio o coma y se promedia.</div>';
 }
 function tstCellInput(t,name,rec){
@@ -37034,12 +37082,62 @@ var RESI_TYPES = {
 function resiSave(){
   // Mantener window.RESI_TESTS apuntando al array actual
   window.RESI_TESTS = RESI_TESTS;
+  // v157: sellar cada test con la hora. Sin esto era imposible saber cuál
+  // versión era la buena y la copia de la nube pisaba la local.
+  try{
+    RESI_TESTS.forEach(function(t){ if(t && t._upd==null) t._upd=Date.now(); });
+  }catch(e){}
   try{ localStorage.setItem('RESI_TESTS', JSON.stringify(RESI_TESTS)); }catch(e){}
-  // Sincronizar con Supabase (igual que el fixture) para que se vea en otros dispositivos
-  if(typeof sbForceSyncSettings === 'function'){
-    try{ sbForceSyncSettings(); }catch(e){ console.warn('resiSave sync:', e); }
+  // Sincronizar con Supabase para que se vea en los otros dispositivos.
+  // v157: si la sesión todavía no está lista, sbForceSyncSettings se rendía en
+  // silencio y el test NUNCA subía — después la nube (sin él) borraba el local.
+  // Ahora se encadena con el sync con reintentos.
+  var subio=false;
+  if(typeof sbReady!=='undefined' && sbReady && typeof sbForceSyncSettings==='function'){
+    try{ sbForceSyncSettings(); subio=true; }catch(e){ console.warn('resiSave sync:', e); }
+  }
+  if(!subio && typeof sbScheduleTanda3Sync==='function'){
+    try{ sbScheduleTanda3Sync(); }catch(e){}   // reintenta hasta 2 minutos
   }
 }
+
+// v157: marca un test como modificado ahora (para el merge)
+function resiTouch(t){
+  if(t && typeof t==='object') t._upd=Date.now();
+  return t;
+}
+window.resiTouch=resiTouch;
+
+// v157: UNIÓN de los tests de resistencia locales con los de la nube.
+// Nunca vacía nada: ante el mismo test gana el que tenga el sello más nuevo.
+function resiMergeTests(cloud){
+  var by={}, order=[];
+  var del={};
+  try{ del=JSON.parse(localStorage.getItem('resiDeleted_v1')||'{}'); }catch(e){}
+  var put=function(t){
+    if(!t)return;
+    if(t.id!=null && del[String(t.id)]!==undefined) return;   // borrado: no revive
+    var k=t.id!=null?('id:'+t.id):('k:'+(t.type||'')+'|'+(t.date||'')+'|'+(t.name||''));
+    var cur=by[k];
+    if(!cur){ by[k]=t; order.push(k); return; }
+    var a=Number(cur._upd||0), b=Number(t._upd||0);
+    if(b>a){ by[k]=t; return; }
+    if(b===a){
+      // Sin sellos: gana el que tenga más jugadores cargados
+      var np=function(x){ return (x&&Array.isArray(x.players))?x.players.length:0; };
+      if(np(t)>np(cur)) by[k]=t;
+    }
+  };
+  (Array.isArray(RESI_TESTS)?RESI_TESTS:[]).forEach(put);
+  (Array.isArray(cloud)?cloud:[]).forEach(put);
+  var out=order.map(function(k){return by[k];}).filter(Boolean);
+  RESI_TESTS.length=0;
+  out.forEach(function(t){ RESI_TESTS.push(t); });
+  window.RESI_TESTS=RESI_TESTS;
+  try{ localStorage.setItem('RESI_TESTS', JSON.stringify(RESI_TESTS)); }catch(e){}
+  return RESI_TESTS.length;
+}
+window.resiMergeTests=resiMergeTests;
 
 // Estado: qué test está siendo editado (mostrar formulario) — null = mostrar lista
 var _resiEditingId = null;
@@ -37136,7 +37234,15 @@ function resiDeleteTest(id){
   var t = RESI_TESTS.find(function(x){return x.id===id;});
   if(!t) return;
   if(!confirm('¿Eliminar el test "'+(t.name||'sin nombre')+'"?')) return;
-  RESI_TESTS = RESI_TESTS.filter(function(x){return x.id!==id;});
+  // v157: splice en vez de reasignar (mantiene la referencia del array) y
+  // tombstone, para que el merge con la nube no lo resucite.
+  var _ri=RESI_TESTS.findIndex(function(x){return x.id===id;});
+  if(_ri>=0) RESI_TESTS.splice(_ri,1);
+  try{
+    var _rd=JSON.parse(localStorage.getItem('resiDeleted_v1')||'{}');
+    _rd[String(id)]=new Date().toISOString();
+    localStorage.setItem('resiDeleted_v1', JSON.stringify(_rd));
+  }catch(e){}
   resiSave();
   if(_resiViewingId===id) _resiViewingId = null;
   if(_resiEditingId===id) _resiEditingId = null;
