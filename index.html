@@ -35041,6 +35041,16 @@ function _sbApplySettingRow(row){
   // mezclar. Y la protección que lo arreglaba se instalaba en DOMContentLoaded,
   // así que si la carga llegaba antes, la pérdida ocurría igual. Ahora se
   // desvía siempre a la unión, que no puede perder registros.
+  // v156: el CATÁLOGO tampoco se reemplaza. Antes se hacía `array.length=0` y
+  // se copiaba lo de la nube: eso deshacía la reorganización por categorías y
+  // borraba los tests que este dispositivo había creado o agregado.
+  if(row.key==='TST_CATALOG'){
+    try{
+      var cat=Array.isArray(row.value)?row.value:[];
+      if(typeof tstMergeCatalog==='function'){ tstMergeCatalog(cat); }
+    }catch(e){ console.warn('[Tests] merge catálogo:',e); }
+    return;
+  }
   if(row.key==='TST_DATA'){
     try{
       var incoming=Array.isArray(row.value)?row.value:[];
@@ -35379,20 +35389,44 @@ var TST_GROUP_MIGRATION={
   aerob:'resistencia',
   fuerza:'fuerza', otro:'otro'
 };
-function tstMigrateGroups(){
-  var done=false;
-  try{ done=localStorage.getItem('tstGroupsMigrated_v1')==='1'; }catch(e){}
-  if(done)return 0;
+// v156: normalización SIN bandera de "ya migré". Tiene que poder correr
+// siempre, porque el catálogo también llega desde la nube y esa copia puede
+// traer las categorías viejas. Es idempotente: si ya está normalizado, no
+// cambia nada.
+function tstNormalizeCatalog(){
   var n=0;
   (TST_CATALOG||[]).forEach(function(t){
     if(!t)return;
     var nk=TST_GROUP_MIGRATION[t.group];
     if(nk && nk!==t.group){ t.group=nk; n++; }
-    // Los tests isométricos van a su propia categoría
-    if(/\biso\b|isom|imtp/i.test(t.id+' '+t.name) && t.group==='fuerza'){ t.group='fuerza_iso'; n++; }
-    if(!TST_CAT_GROUPS.some(function(g){return g.k===t.group;})) t.group='otro';
+    if(/\biso\b|isom|imtp/i.test(String(t.id)+' '+String(t.name)) && t.group==='fuerza'){ t.group='fuerza_iso'; n++; }
+    if(!TST_CAT_GROUPS.some(function(g){return g.k===t.group;})){ t.group='otro'; n++; }
   });
-  try{ localStorage.setItem('tstGroupsMigrated_v1','1'); }catch(e){}
+  return n;
+}
+window.tstNormalizeCatalog=tstNormalizeCatalog;
+
+// Une el catálogo de la nube con el local sin perder ninguno de los dos lados.
+function tstMergeCatalog(cloud){
+  var by={}, order=[];
+  var put=function(t){
+    if(!t||!t.id)return;
+    if(!by[t.id]){ by[t.id]=Object.assign({},t); order.push(t.id); }
+    else { by[t.id]=Object.assign({}, by[t.id], t); }
+  };
+  (TST_CATALOG||[]).forEach(put);
+  (cloud||[]).forEach(put);
+  TST_CATALOG.length=0;
+  order.forEach(function(id){ TST_CATALOG.push(by[id]); });
+  tstNormalizeCatalog();
+  tstSeedStrength();
+  try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+  return TST_CATALOG.length;
+}
+window.tstMergeCatalog=tstMergeCatalog;
+
+function tstMigrateGroups(){
+  var n=tstNormalizeCatalog();
   if(n){
     try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
     console.log('[Tests] '+n+' test(s) reasignados a las categorías nuevas.');
@@ -36698,7 +36732,13 @@ document.addEventListener('DOMContentLoaded',function(){
           }catch(e){}
         }
         if(row&&row.key==='TST_CATALOG'){
+          // v156: normalizar SIEMPRE. La copia de la nube puede venir con las
+          // categorías viejas y, al aplicarse, deshacía la reorganización y
+          // borraba los tests de fuerza recién agregados.
+          try{ if(typeof tstNormalizeCatalog==='function') tstNormalizeCatalog(); }catch(e){}
+          try{ if(typeof tstSeedStrength==='function') tstSeedStrength(); }catch(e){}
           try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+          try{ if(typeof sbScheduleTanda3Sync==='function') sbScheduleTanda3Sync(); }catch(e){}
           try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests')tstRender(); }catch(e){}
         }
         if(row&&row.key==='TST_CAT_GROUPS'){
