@@ -17435,7 +17435,6 @@ document.addEventListener('DOMContentLoaded',function(){
 <!-- TABS Preparación física: Gimnasio | Resistencia -->
 <div class="subtabs-bar" style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid #ddd;padding-bottom:0">
   <button id="pf-tab-gym-btn" onclick="pfSetTab('gym')" style="padding:7px 18px;border:none;border-bottom:3px solid #0D1B2A;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#0D1B2A;cursor:pointer">🏋️ Gimnasio</button>
-  <button id="pf-tab-resistencia-btn" onclick="pfSetTab('resistencia')" style="padding:7px 18px;border:none;border-bottom:3px solid transparent;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#666;cursor:pointer">🏃 Resistencia</button>
   <button id="pf-tab-tests-btn" onclick="pfSetTab('tests')" style="padding:7px 18px;border:none;border-bottom:3px solid transparent;margin-bottom:-1px;background:none;font-size:12px;font-weight:700;color:#666;cursor:pointer">🧪 Tests</button>
 </div>
 
@@ -35339,33 +35338,192 @@ setTimeout(function(){
 //  · TST_DATA = registros [{id,testId,name,date,val,valI,valD,reps,note}].
 //    Vive en el payload principal (sin techo desde IndexedDB v92).
 // ════════════════════════════════════════════════════════════════════
-var TST_CAT_GROUPS=[
-  {k:'salto_v', lbl:'Salto vertical'},
-  {k:'salto_h', lbl:'Salto horizontal'},
-  {k:'fuerza',  lbl:'Fuerza'},
-  {k:'sprint',  lbl:'Velocidad / Sprint'},
-  {k:'agil',    lbl:'Agilidad / COD'},
-  {k:'aerob',   lbl:'Aeróbico'},
-  {k:'otro',    lbl:'Otro'}
+// ═══════════════════════════════════════════════════════════════════════════
+// CATEGORÍAS DE TESTS (v155)
+// Reorganización: los tests se agrupan en Salto, Velocidad, Fuerza y Fuerza
+// isométrica, se pueden crear categorías nuevas, y Resistencia pasa a ser una
+// vista más dentro de Tests en vez de una subpestaña aparte.
+// Las categorías se guardan y sincronizan, igual que el catálogo.
+// ═══════════════════════════════════════════════════════════════════════════
+var TST_GROUPS_SEED=[
+  {k:'salto',      lbl:'Salto',              ico:'🦵', col:'#3B4D88'},
+  {k:'velocidad',  lbl:'Velocidad',          ico:'⚡', col:'#E8772E'},
+  {k:'fuerza',     lbl:'Fuerza',             ico:'🏋️', col:'#9C59D1'},
+  {k:'fuerza_iso', lbl:'Fuerza isométrica',  ico:'💪', col:'#1D9E75'},
+  {k:'resistencia',lbl:'Resistencia',        ico:'🫁', col:'#2E9BB5'},
+  {k:'otro',       lbl:'Otro',               ico:'📋', col:'#8a93a5'}
 ];
+var TST_CAT_GROUPS=[];
+try{
+  var _tg=JSON.parse(localStorage.getItem('tstGroups_v1')||'null');
+  TST_CAT_GROUPS=(Array.isArray(_tg)&&_tg.length)?_tg:TST_GROUPS_SEED.map(function(g){return Object.assign({},g);});
+}catch(e){ TST_CAT_GROUPS=TST_GROUPS_SEED.map(function(g){return Object.assign({},g);}); }
+
+function tstGroupsSave(){
+  try{ localStorage.setItem('tstGroups_v1', JSON.stringify(TST_CAT_GROUPS)); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function') sbScheduleTanda3Sync(); }catch(e){}
+}
+window.tstGroupsSave=tstGroupsSave;
+
+function tstGroupBy(k){
+  return TST_CAT_GROUPS.find(function(g){return g.k===k;}) ||
+         {k:k||'otro', lbl:'Otro', ico:'📋', col:'#8a93a5'};
+}
+window.tstGroupBy=tstGroupBy;
+
+// Migración de las categorías viejas a las nuevas. Se aplica una sola vez y
+// no pierde nada: todo test conserva su identidad, sólo cambia de grupo.
+var TST_GROUP_MIGRATION={
+  salto_v:'salto', salto_h:'salto',
+  sprint:'velocidad', agil:'velocidad',
+  aerob:'resistencia',
+  fuerza:'fuerza', otro:'otro'
+};
+function tstMigrateGroups(){
+  var done=false;
+  try{ done=localStorage.getItem('tstGroupsMigrated_v1')==='1'; }catch(e){}
+  if(done)return 0;
+  var n=0;
+  (TST_CATALOG||[]).forEach(function(t){
+    if(!t)return;
+    var nk=TST_GROUP_MIGRATION[t.group];
+    if(nk && nk!==t.group){ t.group=nk; n++; }
+    // Los tests isométricos van a su propia categoría
+    if(/\biso\b|isom|imtp/i.test(t.id+' '+t.name) && t.group==='fuerza'){ t.group='fuerza_iso'; n++; }
+    if(!TST_CAT_GROUPS.some(function(g){return g.k===t.group;})) t.group='otro';
+  });
+  try{ localStorage.setItem('tstGroupsMigrated_v1','1'); }catch(e){}
+  if(n){
+    try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+    console.log('[Tests] '+n+' test(s) reasignados a las categorías nuevas.');
+  }
+  return n;
+}
+window.tstMigrateGroups=tstMigrateGroups;
+
+// Tests de fuerza que faltaban (press banca, sentadilla y compañía)
+var TST_STRENGTH_SEED=[
+  {id:'rm_banca',    name:'Press banca (1RM)',      group:'fuerza', unit:'kg', better:'up', lat:'bi', mode:'single'},
+  {id:'rm_sentadilla',name:'Sentadilla (1RM)',      group:'fuerza', unit:'kg', better:'up', lat:'bi', mode:'single'},
+  {id:'rm_peso_muerto',name:'Peso muerto (1RM)',    group:'fuerza', unit:'kg', better:'up', lat:'bi', mode:'single'},
+  {id:'rm_hip_thrust',name:'Hip thrust (1RM)',      group:'fuerza', unit:'kg', better:'up', lat:'bi', mode:'single'},
+  {id:'rm_press_mil',name:'Press militar (1RM)',    group:'fuerza', unit:'kg', better:'up', lat:'bi', mode:'single'},
+  {id:'rm_dominadas',name:'Dominadas (máx. reps)',  group:'fuerza', unit:'reps',better:'up',lat:'bi', mode:'single'}
+];
+// Agrega los tests de fuerza si no existen. No pisa nada de lo que ya haya.
+function tstSeedStrength(){
+  var added=0;
+  TST_STRENGTH_SEED.forEach(function(t){
+    if(!TST_CATALOG.some(function(x){return x.id===t.id;})){
+      TST_CATALOG.push(Object.assign({},t)); added++;
+    }
+  });
+  if(added){
+    try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+    console.log('[Tests] '+added+' test(s) de fuerza agregados al catálogo.');
+  }
+  return added;
+}
+window.tstSeedStrength=tstSeedStrength;
+
+// Devuelve el catálogo agrupado por categoría, en el orden de TST_CAT_GROUPS
+function tstCatalogByGroup(){
+  var by={};
+  (TST_CATALOG||[]).forEach(function(t){
+    if(!t)return;
+    var k=t.group||'otro';
+    if(!TST_CAT_GROUPS.some(function(g){return g.k===k;})) k='otro';
+    (by[k]=by[k]||[]).push(t);
+  });
+  return TST_CAT_GROUPS.filter(function(g){return by[g.k]&&by[g.k].length;})
+    .map(function(g){ return {group:g, tests:by[g.k]}; });
+}
+window.tstCatalogByGroup=tstCatalogByGroup;
+
+// ── ABM de categorías ──
+function tstGroupAdd(){
+  var lbl=prompt('Nombre de la categoría nueva:\n(por ejemplo: Potencia, Movilidad, Antropometría)');
+  if(!lbl||!lbl.trim())return;
+  lbl=lbl.trim();
+  var k=lbl.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+  if(!k)k='cat_'+Date.now();
+  if(TST_CAT_GROUPS.some(function(g){return g.k===k;})){ alert('Ya existe una categoría con ese nombre.'); return; }
+  var ico=prompt('Un emoji para identificarla (opcional):','📋')||'📋';
+  // Insertar antes de "Otro", que siempre va al final
+  var idx=TST_CAT_GROUPS.findIndex(function(g){return g.k==='otro';});
+  var nueva={k:k, lbl:lbl, ico:ico.trim()||'📋', col:'#5B6DA8'};
+  if(idx>=0) TST_CAT_GROUPS.splice(idx,0,nueva); else TST_CAT_GROUPS.push(nueva);
+  tstGroupsSave();
+  if(typeof tstRender==='function') tstRender();
+}
+window.tstGroupAdd=tstGroupAdd;
+
+function tstGroupRename(k){
+  var g=TST_CAT_GROUPS.find(function(x){return x.k===k;}); if(!g)return;
+  var lbl=prompt('Nuevo nombre para "'+g.lbl+'":', g.lbl);
+  if(!lbl||!lbl.trim())return;
+  g.lbl=lbl.trim();
+  var ico=prompt('Emoji:', g.ico||'📋');
+  if(ico&&ico.trim())g.ico=ico.trim();
+  tstGroupsSave();
+  if(typeof tstRender==='function') tstRender();
+}
+window.tstGroupRename=tstGroupRename;
+
+function tstGroupDelete(k){
+  if(k==='otro'){ alert('La categoría "Otro" no se puede eliminar: es donde caen los tests sin categoría.'); return; }
+  var g=TST_CAT_GROUPS.find(function(x){return x.k===k;}); if(!g)return;
+  var n=(TST_CATALOG||[]).filter(function(t){return t.group===k;}).length;
+  if(!confirm('¿Eliminar la categoría "'+g.lbl+'"?'+(n?('\n\nLos '+n+' test(s) que tiene pasan a "Otro". No se pierde ningún dato.'):'')))return;
+  (TST_CATALOG||[]).forEach(function(t){ if(t.group===k)t.group='otro'; });
+  var i=TST_CAT_GROUPS.findIndex(function(x){return x.k===k;});
+  if(i>=0)TST_CAT_GROUPS.splice(i,1);
+  tstGroupsSave();
+  try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+  if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} }
+  if(typeof tstRender==='function') tstRender();
+}
+window.tstGroupDelete=tstGroupDelete;
+
+function tstGroupMove(k, dir){
+  var i=TST_CAT_GROUPS.findIndex(function(x){return x.k===k;});
+  if(i<0)return;
+  var j=i+dir;
+  if(j<0||j>=TST_CAT_GROUPS.length)return;
+  var tmp=TST_CAT_GROUPS[i]; TST_CAT_GROUPS[i]=TST_CAT_GROUPS[j]; TST_CAT_GROUPS[j]=tmp;
+  tstGroupsSave();
+  if(typeof tstRender==='function') tstRender();
+}
+window.tstGroupMove=tstGroupMove;
 var TST_CATALOG_SEED=[
-  {id:'cmj',      name:'CMJ',                 group:'salto_v', unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
-  {id:'sj',       name:'Squat Jump',          group:'salto_v', unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
-  {id:'abk',      name:'Abalakov',            group:'salto_v', unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
-  {id:'cmj_uni',  name:'CMJ unilateral',      group:'salto_v', unit:'cm', better:'up',   lat:'uni', mode:'multi'},
-  {id:'hop',      name:'Salto horizontal',    group:'salto_h', unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
-  {id:'hop_uni',  name:'Single hop distancia',group:'salto_h', unit:'cm', better:'up',   lat:'uni', mode:'multi'},
-  {id:'imtp',     name:'IMTP (pico)',         group:'fuerza',  unit:'N',  better:'up',   lat:'bi',  mode:'single'},
-  {id:'iso_ext',  name:'Fuerza iso cuadriceps',group:'fuerza', unit:'N',  better:'up',   lat:'uni', mode:'single'},
-  {id:'spr10',    name:'Sprint 10 m',         group:'sprint',  unit:'s',  better:'down', lat:'bi',  mode:'single'},
-  {id:'spr30',    name:'Sprint 30 m',         group:'sprint',  unit:'s',  better:'down', lat:'bi',  mode:'single'},
-  {id:'cod505',   name:'505 (COD)',           group:'agil',    unit:'s',  better:'down', lat:'uni', mode:'single'}
+  {id:'cmj',      name:'CMJ',                 group:'salto',      unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
+  {id:'sj',       name:'Squat Jump',          group:'salto',      unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
+  {id:'abk',      name:'Abalakov',            group:'salto',      unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
+  {id:'cmj_uni',  name:'CMJ unilateral',      group:'salto',      unit:'cm', better:'up',   lat:'uni', mode:'multi'},
+  {id:'hop',      name:'Salto horizontal',    group:'salto',      unit:'cm', better:'up',   lat:'bi',  mode:'multi'},
+  {id:'hop_uni',  name:'Single hop distancia',group:'salto',      unit:'cm', better:'up',   lat:'uni', mode:'multi'},
+  {id:'triple_hop',name:'Triple hop',         group:'salto',      unit:'cm', better:'up',   lat:'uni', mode:'multi'},
+  {id:'spr10',    name:'Sprint 10 m',         group:'velocidad',  unit:'s',  better:'down', lat:'bi',  mode:'single'},
+  {id:'spr30',    name:'Sprint 30 m',         group:'velocidad',  unit:'s',  better:'down', lat:'bi',  mode:'single'},
+  {id:'spr40',    name:'Sprint 40 m',         group:'velocidad',  unit:'s',  better:'down', lat:'bi',  mode:'single'},
+  {id:'cod505',   name:'505 (COD)',           group:'velocidad',  unit:'s',  better:'down', lat:'uni', mode:'single'},
+  {id:'rm_banca', name:'Press banca (1RM)',   group:'fuerza',     unit:'kg', better:'up',   lat:'bi',  mode:'single'},
+  {id:'rm_sentadilla',name:'Sentadilla (1RM)',group:'fuerza',     unit:'kg', better:'up',   lat:'bi',  mode:'single'},
+  {id:'rm_peso_muerto',name:'Peso muerto (1RM)',group:'fuerza',   unit:'kg', better:'up',   lat:'bi',  mode:'single'},
+  {id:'rm_hip_thrust',name:'Hip thrust (1RM)',group:'fuerza',     unit:'kg', better:'up',   lat:'bi',  mode:'single'},
+  {id:'imtp',     name:'IMTP (pico)',         group:'fuerza_iso', unit:'N',  better:'up',   lat:'bi',  mode:'single'},
+  {id:'iso_ext',  name:'Iso cuádriceps',      group:'fuerza_iso', unit:'N',  better:'up',   lat:'uni', mode:'single'},
+  {id:'iso_flex', name:'Iso isquiotibiales',  group:'fuerza_iso', unit:'N',  better:'up',   lat:'uni', mode:'single'},
+  {id:'iso_add',  name:'Iso aductores',       group:'fuerza_iso', unit:'N',  better:'up',   lat:'uni', mode:'single'},
+  {id:'iso_abd',  name:'Iso abductores',      group:'fuerza_iso', unit:'N',  better:'up',   lat:'uni', mode:'single'}
 ];
 var TST_CATALOG=[];
 try{
   var _tc=JSON.parse(localStorage.getItem('tstCatalog_v1')||'null');
   TST_CATALOG=(Array.isArray(_tc)&&_tc.length)?_tc:TST_CATALOG_SEED.map(function(t){return Object.assign({},t);});
 }catch(e){ TST_CATALOG=TST_CATALOG_SEED.map(function(t){return Object.assign({},t);}); }
+// v155: reasignar categorías viejas y sumar los tests de fuerza que faltaban
+try{ if(typeof tstMigrateGroups==='function'){ tstMigrateGroups(); tstSeedStrength(); } }catch(e){}
 var TST_DATA=[];
 // ── TOMBSTONES DE TESTS (v129) ───────────────────────────────────────────
 // Borrar un registro del array no alcanza: tanto la recuperación del payload
@@ -35720,7 +35878,7 @@ function tstNorm(s){ return (typeof cargaNormName==='function')?cargaNormName(s)
 function tstToday(){ var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function tstById(id){ return TST_CATALOG.find(function(t){return t.id===id;})||null; }
 function tstEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function tstGroupLbl(k){ var g=TST_CAT_GROUPS.find(function(x){return x.k===k;}); return g?g.lbl:'Otro'; }
+function tstGroupLbl(k){ return tstGroupBy(k).lbl; }
 
 function tstRoster(){
   var names={};
@@ -35749,7 +35907,7 @@ function tstAsym(rec){
 function tstRender(){
   var out=document.getElementById('tst-container'); if(!out)return;
   var tabs='<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center">'+
-    [['load','📋 Cargar jornada'],['indiv','📈 Individual'],['team','👥 Plantel'],['jor','🗂 Jornadas'],['cat','⚙ Tests']].map(function(t){
+    [['load','📋 Cargar jornada'],['resi','🫁 Resistencia'],['indiv','📈 Individual'],['team','👥 Plantel'],['jor','🗂 Jornadas'],['cat','⚙ Tests']].map(function(t){
       var on=_tstView===t[0];
       return '<button onclick="tstSetView(\''+t[0]+'\')" style="padding:7px 15px;border:1px solid '+(on?'#3B4D88':'#ddd')+';background:'+(on?'#3B4D88':'#fff')+';color:'+(on?'#fff':'#555')+';border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'+t[1]+'</button>';
     }).join('')+
@@ -35760,6 +35918,12 @@ function tstRender(){
     '</span>'+
     '</div>';
   var body='';
+  if(_tstView==='resi'){
+    // v155: Resistencia dejó de ser subpestaña aparte y vive acá dentro.
+    out.innerHTML=tabs+'<div id="resi-container"></div>';
+    try{ if(typeof resiRender==='function') resiRender(); }catch(e){ console.warn('Resistencia:',e); }
+    return;
+  }
   if(_tstView==='load')body=tstRenderLoad();
   else if(_tstView==='indiv')body=tstRenderIndiv();
   else if(_tstView==='team')body=tstRenderTeam();
@@ -35777,9 +35941,22 @@ function tstRenderLoad(){
   }
   if(!_tstDate)_tstDate=tstToday();
   if(!_tstSelTests.length)_tstSelTests=TST_CATALOG.slice(0,3).map(function(t){return t.id;});
-  var chips=TST_CATALOG.map(function(t){
-    var on=_tstSelTests.indexOf(t.id)>=0;
-    return '<button onclick="tstToggleTest(\''+t.id+'\')" style="padding:5px 11px;border:1px solid '+(on?'#1D9E75':'#ddd')+';background:'+(on?'#edfaf3':'#fff')+';color:'+(on?'#1D6B4F':'#777')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+(on?'✓ ':'')+tstEsc(t.name)+'</button>';
+  // v155: chips AGRUPADOS por categoría, con selección rápida de toda la fila
+  var chips=tstCatalogByGroup().map(function(sec){
+    var g=sec.group;
+    var allOn=sec.tests.every(function(t){return _tstSelTests.indexOf(t.id)>=0;});
+    return '<div style="margin-bottom:9px">'+
+      '<div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">'+
+        '<span style="font-size:10.5px;font-weight:800;color:'+g.col+';text-transform:uppercase;letter-spacing:.3px">'+g.ico+' '+tstEsc(g.lbl)+'</span>'+
+        '<button onclick="tstToggleGroup(\''+g.k+'\')" style="border:none;background:none;color:#9aa5b5;font-size:9.5px;font-weight:700;cursor:pointer;padding:0">'+(allOn?'quitar todos':'elegir todos')+'</button>'+
+      '</div>'+
+      '<div style="display:flex;gap:5px;flex-wrap:wrap">'+
+        sec.tests.map(function(t){
+          var on=_tstSelTests.indexOf(t.id)>=0;
+          return '<button onclick="tstToggleTest(\''+t.id+'\')" style="padding:5px 11px;border:1px solid '+(on?g.col:'#ddd')+';background:'+(on?g.col:'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+(on?'✓ ':'')+tstEsc(t.name)+'</button>';
+        }).join('')+
+      '</div>'+
+    '</div>';
   }).join('');
   // v129: en vez de un calendario completo, se listan las jornadas que ya
   // tienen datos (para volver atrás) + "hoy" + un date input plegado para
@@ -35849,6 +36026,17 @@ function tstCellInput(t,name,rec){
 }
 function tstDateChange(v){ _tstDate=v||tstToday(); tstRender(); }
 window.tstDateChange=tstDateChange;
+// v155: elegir o quitar todos los tests de una categoría de una vez
+function tstToggleGroup(k){
+  var ids=(TST_CATALOG||[]).filter(function(t){return (t.group||'otro')===k;}).map(function(t){return t.id;});
+  if(!ids.length)return;
+  var allOn=ids.every(function(id){return _tstSelTests.indexOf(id)>=0;});
+  if(allOn){ _tstSelTests=_tstSelTests.filter(function(id){return ids.indexOf(id)<0;}); }
+  else { ids.forEach(function(id){ if(_tstSelTests.indexOf(id)<0)_tstSelTests.push(id); }); }
+  tstRender();
+}
+window.tstToggleGroup=tstToggleGroup;
+
 function tstToggleTest(id){
   var i=_tstSelTests.indexOf(id);
   if(i>=0)_tstSelTests.splice(i,1); else _tstSelTests.push(id);
@@ -36323,13 +36511,38 @@ function tstRenderCat(){
         '<button onclick="tstDelTest(\''+t.id+'\')" style="background:none;border:none;color:#ccc;font-size:14px;cursor:pointer" title="Eliminar">X</button>'+
       '</div>';
     }).join('');
-    return '<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:800;color:#3B4D88;text-transform:uppercase;letter-spacing:.05em;padding:4px 0">'+g.lbl+'</div><div style="background:#fff;border:1px solid #e4e6ec;border-radius:9px;overflow:hidden">'+items+'</div></div>';
+    // v155: encabezado de categoría con sus controles (renombrar, ordenar, borrar)
+    var gi=TST_CAT_GROUPS.findIndex(function(x){return x.k===g.k;});
+    return '<div style="margin-bottom:12px">'+
+      '<div style="display:flex;align-items:center;gap:6px;padding:5px 2px">'+
+        '<span style="font-size:11px;font-weight:800;color:'+(g.col||'#3B4D88')+';text-transform:uppercase;letter-spacing:.05em">'+(g.ico||'')+' '+tstEsc(g.lbl)+'</span>'+
+        '<span style="font-size:10px;color:#bbb">'+byGroup[g.k].length+'</span>'+
+        '<span style="display:inline-flex;gap:1px;margin-left:4px">'+
+          '<button onclick="tstGroupMove(\''+g.k+'\',-1)" title="Subir" style="border:none;background:none;cursor:pointer;color:#bbb;font-size:11px;padding:0 2px'+(gi===0?';opacity:.25;pointer-events:none':'')+'">↑</button>'+
+          '<button onclick="tstGroupMove(\''+g.k+'\',1)" title="Bajar" style="border:none;background:none;cursor:pointer;color:#bbb;font-size:11px;padding:0 2px'+(gi===TST_CAT_GROUPS.length-1?';opacity:.25;pointer-events:none':'')+'">↓</button>'+
+        '</span>'+
+        '<button onclick="tstGroupRename(\''+g.k+'\')" style="border:none;background:none;cursor:pointer;color:#9aa5b5;font-size:10px;font-weight:600;padding:0 3px">renombrar</button>'+
+        (g.k!=='otro'?'<button onclick="tstGroupDelete(\''+g.k+'\')" style="border:none;background:none;cursor:pointer;color:#e0a0a0;font-size:10px;font-weight:600;padding:0 3px">eliminar</button>':'')+
+      '</div>'+
+      '<div style="background:#fff;border:1px solid #e4e6ec;border-radius:9px;overflow:hidden">'+items+'</div></div>';
   }).join('');
-  return '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'+
+  // Categorías sin tests: mostrarlas igual para poder administrarlas
+  var vacias=TST_CAT_GROUPS.filter(function(g){return !byGroup[g.k];}).map(function(g){
+    return '<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:#fafbfd;border:1px dashed #e0e4ec;border-radius:8px;margin-bottom:6px">'+
+      '<span style="font-size:11px;font-weight:700;color:#9aa5b5">'+(g.ico||'')+' '+tstEsc(g.lbl)+'</span>'+
+      '<span style="font-size:10px;color:#c3c9d4">sin tests</span>'+
+      '<span style="margin-left:auto;display:flex;gap:4px">'+
+        '<button onclick="tstGroupRename(\''+g.k+'\')" style="border:none;background:none;cursor:pointer;color:#9aa5b5;font-size:10px;font-weight:600">renombrar</button>'+
+        (g.k!=='otro'?'<button onclick="tstGroupDelete(\''+g.k+'\')" style="border:none;background:none;cursor:pointer;color:#e0a0a0;font-size:10px;font-weight:600">eliminar</button>':'')+
+      '</span></div>';
+  }).join('');
+  return '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">'+
       '<button onclick="tstEditTest(\'\')" style="background:#1D9E75;color:#fff;border:none;border-radius:9px;padding:10px 18px;font-size:12px;font-weight:800;cursor:pointer">+ Nuevo test</button>'+
-      (TST_CATALOG.length===0?'<button onclick="tstLoadSeed()" style="background:#eef1f8;color:#3B4D88;border:none;border-radius:9px;padding:10px 18px;font-size:12px;font-weight:700;cursor:pointer">Cargar catalogo semilla</button>':'')+
+      '<button onclick="tstGroupAdd()" style="background:#3B4D88;color:#fff;border:none;border-radius:9px;padding:10px 18px;font-size:12px;font-weight:800;cursor:pointer">+ Nueva categoría</button>'+
+      (TST_CATALOG.length===0?'<button onclick="tstLoadSeed()" style="background:#eef1f8;color:#3B4D88;border:none;border-radius:9px;padding:10px 18px;font-size:12px;font-weight:700;cursor:pointer">Cargar catálogo semilla</button>':'')+
     '</div>'+
-    (groups||'<div style="color:#999;font-size:12px;padding:10px">Catalogo vacio. Crea tu primer test o carga el semilla.</div>');
+    (groups||'')+vacias+
+    (!groups&&!vacias?'<div style="color:#999;font-size:12px;padding:10px">Catálogo vacío. Creá tu primer test o cargá el semilla.</div>':'');
 }
 function tstLoadSeed(){
   if(TST_CATALOG.length&&!confirm('Esto agrega los tests del catalogo semilla. Continuar?'))return;
@@ -36352,7 +36565,7 @@ function tstEditTest(id){
       '<input id="tst-f-name" value="'+(t?tstEsc(t.name):'')+'" placeholder="ej: CMJ, Sprint 20m, IMTP" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px"></label>'+
     '<label style="display:block;font-size:11px;font-weight:700;color:#555;margin-top:10px">Categoria'+
       '<select id="tst-f-group" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+
-        TST_CAT_GROUPS.map(function(g){return opt(g.k,t?t.group:'salto_v',g.lbl);}).join('')+'</select></label>'+
+        TST_CAT_GROUPS.map(function(g){return opt(g.k,t?t.group:'salto',(g.ico||'')+' '+g.lbl);}).join('')+'</select></label>'+
     '<div style="display:flex;gap:10px;margin-top:10px">'+
       '<label style="flex:1;font-size:11px;font-weight:700;color:#555">Unidad'+
         '<select id="tst-f-unit" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+
@@ -36408,6 +36621,8 @@ document.addEventListener('DOMContentLoaded',function(){
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_CATALOG')<0)SB_SETTINGS_KEYS.push('TST_CATALOG');
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_DATA')<0)SB_SETTINGS_KEYS.push('TST_DATA');
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_DELETED')<0)SB_SETTINGS_KEYS.push('TST_DELETED');
+    // v155: las categorías de tests también se comparten entre dispositivos
+    if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('TST_CAT_GROUPS')<0)SB_SETTINGS_KEYS.push('TST_CAT_GROUPS');
     // v134: tombstones de perfiles, para que fusionar/borrar se respete en todos los dispositivos
     if(typeof SB_SETTINGS_KEYS!=='undefined'&&SB_SETTINGS_KEYS.indexOf('PROF_DELETED')<0)SB_SETTINGS_KEYS.push('PROF_DELETED');
     // v136: tombstones de semanas de microciclo, compartidos entre dispositivos
@@ -36484,6 +36699,10 @@ document.addEventListener('DOMContentLoaded',function(){
         }
         if(row&&row.key==='TST_CATALOG'){
           try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+          try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests')tstRender(); }catch(e){}
+        }
+        if(row&&row.key==='TST_CAT_GROUPS'){
+          try{ localStorage.setItem('tstGroups_v1',JSON.stringify(TST_CAT_GROUPS)); }catch(e){}
           try{ if(typeof _pfTab!=='undefined'&&_pfTab==='tests')tstRender(); }catch(e){}
         }
         if(row&&row.key==='PLAN_GROUP_DEFAULTS'){
@@ -36674,7 +36893,10 @@ function pfSetTab(tab){
     // Re-render del gimnasio (puede haberse perdido el render mientras estaba oculto)
     try{ if(typeof gymRender==='function') gymRender(); }catch(e){}
   } else if(tab==='resistencia'){
-    try{ resiRender(); }catch(e){ console.warn('Resistencia render:', e); }
+    // v155: Resistencia se integró a Tests. Redirigir para no dejar la vista vacía.
+    _pfTab='tests';
+    try{ if(typeof _tstView!=='undefined') _tstView='resi'; }catch(e){}
+    return pfSetTab('tests');
   } else if(tab==='tests'){
     try{ tstRender(); }catch(e){ console.warn('Tests render:', e); }
   }
