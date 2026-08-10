@@ -34961,6 +34961,17 @@ var SB_SETTINGS_KEYS = [
   'FIX_FIXTURE',
   'FIX_PLANILLAS',
   'RESI_TESTS',
+  // v158: datos de la pestaña Hoy. Estaban contemplados en ALWAYS_SYNC pero
+  // NUNCA se registraron acá, y como el sync recorre esta lista, no subían ni
+  // bajaban nunca. Por eso los pendientes del CT no se guardaban: quedaban
+  // sólo en el dispositivo donde se escribían.
+  'TST_EX_MAP',
+  'TST_NAME_MAP',
+  'HOY_TODOS',
+  'HOY_FLAGS',
+  'HOY_ASIST',
+  'HOY_CFG',
+  'CARGA_WEEK_CTX',
   'CATS',
   'CATN',
   'BC',
@@ -35044,6 +35055,53 @@ function _sbApplySettingRow(row){
   // v156: el CATÁLOGO tampoco se reemplaza. Antes se hacía `array.length=0` y
   // se copiaba lo de la nube: eso deshacía la reorganización por categorías y
   // borraba los tests que este dispositivo había creado o agregado.
+  // ── v158: datos de la pestaña Hoy ──
+  // Se fusionan y se persisten en su propia clave de localStorage. Sin esto,
+  // aunque llegaran de la nube, al recargar se leía la copia local vieja.
+  if(row.key==='HOY_TODOS'){
+    try{
+      var inc=Array.isArray(row.value)?row.value:[];
+      if(typeof HOY_TODOS!=='undefined'){
+        // Unión por id: gana el más nuevo; los borrados quedan borrados
+        var byId={}, ord=[];
+        var put=function(t){
+          if(!t||t.id==null)return;
+          var c=byId[t.id];
+          if(!c){ byId[t.id]=t; ord.push(t.id); return; }
+          if(Number(t._upd||0) > Number(c._upd||0)) byId[t.id]=t;
+        };
+        HOY_TODOS.forEach(put); inc.forEach(put);
+        var del={};
+        try{ del=JSON.parse(localStorage.getItem('hoyTodosDel_v1')||'{}'); }catch(e){}
+        HOY_TODOS.length=0;
+        ord.forEach(function(id){ if(del[String(id)]===undefined) HOY_TODOS.push(byId[id]); });
+        try{ localStorage.setItem('hoyTodos_v1', JSON.stringify(HOY_TODOS)); }catch(e){}
+        try{ if(typeof mainView!=='undefined'&&mainView==='hoy'&&typeof hoyRender==='function')hoyRender(); }catch(e){}
+      }
+    }catch(e){ console.warn('[Hoy] merge pendientes:',e); }
+    return;
+  }
+  if(row.key==='HOY_ASIST'||row.key==='HOY_FLAGS'||row.key==='HOY_CFG'||row.key==='CARGA_WEEK_CTX'){
+    try{
+      var tgt=_sbReadGlobal(row.key);
+      var val=row.value;
+      if(tgt && typeof tgt==='object' && val && typeof val==='object' && !Array.isArray(val)){
+        // Fusión por clave: lo que existe de un lado y no del otro se conserva
+        Object.keys(val).forEach(function(k){
+          if(row.key==='HOY_ASIST' && tgt[k] && typeof tgt[k]==='object'){
+            // Por día: unir jugador por jugador sin pisar lo marcado acá
+            Object.keys(val[k]).forEach(function(n){ if(tgt[k][n]===undefined) tgt[k][n]=val[k][n]; });
+          } else if(tgt[k]===undefined){
+            tgt[k]=val[k];
+          }
+        });
+        var LSKEY={HOY_ASIST:'hoyAsist_v1', HOY_FLAGS:'hoyFlags_v1', HOY_CFG:'hoyCfg_v1', CARGA_WEEK_CTX:'cargaWeekCtx_v1'};
+        try{ if(LSKEY[row.key]) localStorage.setItem(LSKEY[row.key], JSON.stringify(tgt)); }catch(e){}
+        try{ if(typeof mainView!=='undefined'&&mainView==='hoy'&&typeof hoyRender==='function')hoyRender(); }catch(e){}
+      }
+    }catch(e){ console.warn('[Hoy] merge '+row.key+':',e); }
+    return;
+  }
   // v157: los tests de RESISTENCIA tampoco se reemplazan. Antes se vaciaba el
   // array local y se copiaba el de la nube; si la nube no tenía los últimos
   // (porque el envío se había rendido por falta de sesión), desaparecían.
@@ -35856,6 +35914,581 @@ function tstSaveNow(){
 }
 window.tstSaveNow=tstSaveNow;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// IMPORTADOR DE ARCHIVOS DE TESTS (v159)
+// Toma exports de dinamómetros/plataformas (xlsx o csv) donde cada FILA es un
+// intento, y los convierte en registros de test. Resuelve:
+//   · una columna "Exercise" que puede no llamarse igual que el test cargado
+//     en la app → mapeo con sugerencia por similitud, y se recuerda
+//   · una columna L/R → izquierda / derecha
+//   · apellidos que pueden estar escritos distinto → mapeo contra perfiles
+//   · varias métricas por fila → se elige cuál usar (una o varias)
+//   · varios intentos por jugador → mejor, promedio, o ambos
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Mapeos recordados entre importaciones
+var TST_EX_MAP={};    // {"isometric knee extension": "iso_ext"}
+var TST_NAME_MAP={};  // {"demonte": "Tomás Demonte"}
+try{ TST_EX_MAP=JSON.parse(localStorage.getItem('tstExMap_v1')||'{}')||{}; }catch(e){ TST_EX_MAP={}; }
+try{ TST_NAME_MAP=JSON.parse(localStorage.getItem('tstNameMap_v1')||'{}')||{}; }catch(e){ TST_NAME_MAP={}; }
+function tstMapsSave(){
+  try{ localStorage.setItem('tstExMap_v1', JSON.stringify(TST_EX_MAP)); }catch(e){}
+  try{ localStorage.setItem('tstNameMap_v1', JSON.stringify(TST_NAME_MAP)); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function') sbScheduleTanda3Sync(); }catch(e){}
+}
+window.tstMapsSave=tstMapsSave;
+
+// Estado del asistente de importación
+var _tstImp={rows:[], cols:{}, headers:[], exercises:[], players:[], metrics:[],
+             metricSel:[], agg:'best', file:''};
+
+function _timpNorm(s){
+  return String(s||'').toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9]+/g,' ').trim();
+}
+function _timpSim(a,b){
+  var x=_timpNorm(a), y=_timpNorm(b);
+  if(!x||!y)return 0;
+  if(x===y)return 1;
+  if(x.indexOf(y)>=0||y.indexOf(x)>=0)return 0.85;
+  var wx=x.split(' '), wy=y.split(' ');
+  var common=wx.filter(function(w){return w.length>2&&wy.indexOf(w)>=0;}).length;
+  if(!common)return 0;
+  return Math.min(0.8, common/Math.max(wx.length,wy.length));
+}
+function _timpEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+// ── Detección de columnas ──
+// Reconoce por nombre de encabezado; si no, por el contenido de los datos.
+function tstImpDetect(headers, rows){
+  var c={date:-1, name:-1, exercise:-1, side:-1};
+  var sample=rows.slice(0,40);
+  // Cuántos valores de la columna parecen una fecha
+  var pareceFecha=function(i){
+    var vals=sample.map(function(r){return r[i];}).filter(function(v){return v!=null&&String(v).trim()!=='';});
+    if(!vals.length)return 0;
+    var ok=vals.filter(function(v){
+      if(v instanceof Date)return true;
+      return /\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}/.test(String(v));
+    }).length;
+    return ok/vals.length;
+  };
+  headers.forEach(function(h,i){
+    var n=_timpNorm(h);
+    if(c.exercise<0 && /(exercise|ejercicio|test|movement)/.test(n)) c.exercise=i;
+    if(c.side<0 && /^(l r|lr|side|lado|limb|l\/r)$/.test(n)) c.side=i;
+    // v159: el encabezado NO alcanza para la fecha. "Time to peak force(ms)"
+    // contiene "time" y se detectaba como fecha. Ahora además tiene que
+    // contener valores que parezcan fechas.
+    if(c.date<0 && /(date|fecha|timestamp|hora)/.test(n) && pareceFecha(i)>0.6) c.date=i;
+    if(c.name<0 && /(name|nombre|apellido|player|athlete|surname|last)/.test(n)) c.name=i;
+  });
+  // Por contenido, para las columnas sin encabezado (habitual en estos exports)
+  headers.forEach(function(h,i){
+    var vals=sample.map(function(r){return r[i];}).filter(function(v){return v!=null&&String(v).trim()!=='';});
+    if(!vals.length)return;
+    var txt=vals.map(function(v){return String(v).trim();});
+    if(c.side<0 && txt.every(function(v){return /^(l|r|left|right|i|d|izq|der)$/i.test(v);})) c.side=i;
+    if(c.date<0 && pareceFecha(i)>0.6) c.date=i;
+    if(c.name<0 && c.exercise!==i && txt.every(function(v){return /^[a-zá-úñ .'-]+$/i.test(v);}) && new Set(txt).size<=Math.max(3,vals.length*0.7)) c.name=i;
+  });
+  // Métricas: columnas numéricas que no son ninguna de las anteriores
+  var mets=[];
+  headers.forEach(function(h,i){
+    if(i===c.date||i===c.name||i===c.exercise||i===c.side)return;
+    var vals=sample.map(function(r){return r[i];}).filter(function(v){return v!=null&&String(v).trim()!=='';});
+    if(!vals.length)return;
+    var nums=vals.filter(function(v){return !isNaN(parseFloat(String(v).replace(',','.')));});
+    if(nums.length>=vals.length*0.7) mets.push({idx:i, name:String(h||('Columna '+(i+1))).trim()});
+  });
+  return {cols:c, metrics:mets};
+}
+window.tstImpDetect=tstImpDetect;
+
+function tstImpParseDate(v){
+  if(v==null)return '';
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  var s=String(v).trim();
+  var m=s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return m[1]+'-'+m[2]+'-'+m[3];
+  m=s.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+  if(m){
+    var y=m[3].length===2?('20'+m[3]):m[3];
+    return y+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0');
+  }
+  // Serial de Excel
+  var n=parseFloat(s);
+  if(!isNaN(n)&&n>25000&&n<60000){
+    var d=new Date(Date.UTC(1899,11,30)+n*86400000);
+    return d.toISOString().slice(0,10);
+  }
+  return '';
+}
+function tstImpSide(v){
+  var s=_timpNorm(v);
+  if(/^(l|left|i|izq|izquierda)$/.test(s))return 'I';
+  if(/^(r|right|d|der|derecha)$/.test(s))return 'D';
+  return '';
+}
+window.tstImpSide=tstImpSide;
+
+// ── Agregación de intentos ──
+// best: mejor según el criterio del test · avg: promedio · both: las dos
+function tstImpAggregate(values, better, mode){
+  var v=values.filter(function(x){return typeof x==='number'&&!isNaN(x);});
+  if(!v.length)return null;
+  var best=(better==='down')?Math.min.apply(null,v):Math.max.apply(null,v);
+  var avg=v.reduce(function(a,b){return a+b;},0)/v.length;
+  if(mode==='avg')return {val:avg, best:best, avg:avg, n:v.length};
+  if(mode==='both')return {val:best, best:best, avg:avg, n:v.length};
+  return {val:best, best:best, avg:avg, n:v.length};
+}
+window.tstImpAggregate=tstImpAggregate;
+
+// ── Construcción de los registros a importar ──
+// Devuelve [{testId, name, date, valI, valD, val, mets, n}]
+function tstImpBuild(){
+  var c=_tstImp.cols;
+  var out={};   // clave: testId|jugador|fecha
+  // v159: se guarda cada INTENTO completo (todas sus métricas juntas), no una
+  // lista por métrica. Así, al quedarse con el mejor intento, las métricas
+  // secundarias salen de ESE intento y no de uno distinto — que sería
+  // metodológicamente incorrecto: el RFD del mejor pico de fuerza, no el mejor
+  // RFD de cualquier intento.
+  _tstImp.rows.forEach(function(r){
+    var exRaw=c.exercise>=0?String(r[c.exercise]||'').trim():'';
+    var testId=TST_EX_MAP[_timpNorm(exRaw)];
+    if(!testId||testId==='__skip__')return;                  // sin mapear: se ignora
+    var nmRaw=c.name>=0?String(r[c.name]||'').trim():'';
+    var name=TST_NAME_MAP[_timpNorm(nmRaw)];
+    if(!name||name==='__skip__')return;
+    var date=c.date>=0?tstImpParseDate(r[c.date]):'';
+    if(!date)return;
+    var side=c.side>=0?tstImpSide(r[c.side]):'';
+    var k=testId+'|'+_timpNorm(name)+'|'+date;
+    if(!out[k]) out[k]={testId:testId, name:name, date:date, I:[], D:[], B:[]};
+    var att={};
+    var hay=false;
+    _tstImp.metricSel.forEach(function(mi){
+      var met=_tstImp.metrics.find(function(m){return m.idx===mi;});
+      if(!met)return;
+      var num=parseFloat(String(r[mi]==null?'':r[mi]).replace(',','.'));
+      if(isNaN(num))return;
+      att[met.name]=num; hay=true;
+    });
+    if(!hay)return;
+    (side==='I'?out[k].I:(side==='D'?out[k].D:out[k].B)).push(att);
+  });
+  // Agregar
+  var recs=[];
+  Object.keys(out).forEach(function(k){
+    var o=out[k];
+    var t=tstById(o.testId);
+    var better=t?t.better:'up';
+    var primary=_tstImp.metricSel.length?(_tstImp.metrics.find(function(m){return m.idx===_tstImp.metricSel[0];})||{}).name:null;
+    var rec={testId:o.testId, name:o.name, date:o.date, mets:{}, n:0};
+    // Del conjunto de intentos de un lado saca: el mejor intento (según la
+    // métrica principal) y el promedio de cada métrica.
+    var resumen=function(atts){
+      if(!atts||!atts.length)return null;
+      var conPrim=atts.filter(function(a){return primary&&a[primary]!=null&&!isNaN(a[primary]);});
+      var mejor=null;
+      if(conPrim.length){
+        mejor=conPrim[0];
+        conPrim.forEach(function(a){
+          if(better==='down'){ if(a[primary]<mejor[primary])mejor=a; }
+          else { if(a[primary]>mejor[primary])mejor=a; }
+        });
+      } else { mejor=atts[0]; }
+      var prom={};
+      _tstImp.metricSel.forEach(function(mi){
+        var met=_tstImp.metrics.find(function(m){return m.idx===mi;});
+        if(!met)return;
+        var vs=atts.map(function(a){return a[met.name];}).filter(function(v){return typeof v==='number'&&!isNaN(v);});
+        if(vs.length) prom[met.name]=vs.reduce(function(x,y){return x+y;},0)/vs.length;
+      });
+      return {best:mejor, avg:prom, n:atts.length};
+    };
+    var sI=resumen(o.I), sD=resumen(o.D), sB=resumen(o.B);
+    var elegir=function(sr, metName){
+      if(!sr)return null;
+      if(_tstImp.agg==='avg') return sr.avg[metName]!=null?sr.avg[metName]:null;
+      return sr.best[metName]!=null?sr.best[metName]:null;
+    };
+    _tstImp.metricSel.forEach(function(mi){
+      var met=_tstImp.metrics.find(function(m){return m.idx===mi;});
+      if(!met)return;
+      var vI=elegir(sI,met.name), vD=elegir(sD,met.name), vB=elegir(sB,met.name);
+      if(vI==null&&vD==null&&vB==null)return;
+      rec.mets[met.name]={
+        I:vI, D:vD, B:vB,
+        Ibest:sI?(sI.best[met.name]!=null?sI.best[met.name]:null):null,
+        Dbest:sD?(sD.best[met.name]!=null?sD.best[met.name]:null):null,
+        Bbest:sB?(sB.best[met.name]!=null?sB.best[met.name]:null):null,
+        Iavg:sI?(sI.avg[met.name]!=null?sI.avg[met.name]:null):null,
+        Davg:sD?(sD.avg[met.name]!=null?sD.avg[met.name]:null):null,
+        Bavg:sB?(sB.avg[met.name]!=null?sB.avg[met.name]:null):null,
+        n:(sI?sI.n:0)+(sD?sD.n:0)+(sB?sB.n:0)
+      };
+    });
+    rec.n=(sI?sI.n:0)+(sD?sD.n:0)+(sB?sB.n:0);
+    // La métrica principal alimenta los campos clásicos del test
+    if(primary&&rec.mets[primary]){
+      var p=rec.mets[primary];
+      if(p.I!=null)rec.valI=p.I;
+      if(p.D!=null)rec.valD=p.D;
+      if(p.B!=null)rec.val=p.B;
+      // Si es bilateral pero vino separado I/D, el valor global es el promedio
+      if(rec.val==null&&p.I!=null&&p.D!=null) rec.val=(p.I+p.D)/2;
+      else if(rec.val==null&&p.I!=null) rec.val=p.I;
+      else if(rec.val==null&&p.D!=null) rec.val=p.D;
+    }
+    rec.metricPrimary=primary;
+    rec.agg=_tstImp.agg;
+    if(rec.n>0) recs.push(rec);
+  });
+  return recs.sort(function(a,b){ return a.date.localeCompare(b.date)||a.name.localeCompare(b.name,'es'); });
+}
+window.tstImpBuild=tstImpBuild;
+
+// ── Escritura en TST_DATA (fusionando, sin perder nada) ──
+function tstImpCommit(recs){
+  var added=0, updated=0;
+  (recs||[]).forEach(function(r){
+    var idx=TST_DATA.findIndex(function(x){
+      return x.testId===r.testId && tstNorm(x.name)===tstNorm(r.name) && x.date===r.date;
+    });
+    var rec=idx>=0?TST_DATA[idx]:{id:Date.now()+Math.floor(Math.random()*100000), testId:r.testId, name:r.name, date:r.date};
+    if(r.valI!=null)rec.valI=r.valI;
+    if(r.valD!=null)rec.valD=r.valD;
+    if(r.val!=null)rec.val=r.val;
+    // Métricas extra: se fusionan con las que ya hubiera
+    rec.mets=Object.assign({}, rec.mets||{}, r.mets||{});
+    rec.metricPrimary=r.metricPrimary;
+    rec.agg=r.agg;
+    rec.reps=r.n;
+    rec._src='import';
+    if(typeof tstTouch==='function') tstTouch(rec);
+    if(idx>=0){ TST_DATA[idx]=rec; updated++; }
+    else { TST_DATA.push(rec); added++; }
+  });
+  if(added||updated){
+    if(typeof tstSaveAll==='function') tstSaveAll({force:true});
+    else if(typeof saveData==='function') saveData();
+  }
+  return {added:added, updated:updated};
+}
+window.tstImpCommit=tstImpCommit;
+
+
+// ═══ ASISTENTE DE IMPORTACIÓN (interfaz) ═══
+var _tstImpStep=0;   // 0=archivo · 1=tests · 2=jugadores · 3=métricas · 4=vista previa
+
+function tstImpOpen(){
+  _tstImpStep=0;
+  _tstImp={rows:[],cols:{},headers:[],exercises:[],players:[],metrics:[],metricSel:[],agg:'best',file:''};
+  var old=document.getElementById('tstimp-modal'); if(old)old.remove();
+  var d=document.createElement('div');
+  d.id='tstimp-modal';
+  d.style.cssText='position:fixed;inset:0;background:rgba(10,16,28,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:#fff;border-radius:12px;width:min(97vw,860px);max-height:93vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.4)" onclick="event.stopPropagation()">'+
+    '<div style="background:#0D1B2A;padding:13px 16px;border-radius:12px 12px 0 0;display:flex;align-items:flex-start;justify-content:space-between;gap:10px">'+
+      '<div><div style="color:#fff;font-size:14px;font-weight:800">📥 Importar tests desde archivo</div>'+
+      '<div id="tstimp-sub" style="color:#9fb3c8;font-size:11px;margin-top:2px">Excel o CSV con una fila por intento.</div></div>'+
+      '<button onclick="tstImpClose()" style="border:none;background:none;color:#9fb3c8;font-size:20px;cursor:pointer;line-height:1;padding:0">✕</button>'+
+    '</div>'+
+    '<div id="tstimp-steps" style="display:flex;gap:0;padding:9px 16px;background:#f8faff;border-bottom:1px solid #e8ecf4;font-size:10px;font-weight:700"></div>'+
+    '<div id="tstimp-body" style="padding:15px 16px;overflow-y:auto;flex:1"></div>'+
+    '<div id="tstimp-foot" style="padding:11px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"></div>'+
+  '</div>';
+  d.onclick=tstImpClose;
+  document.body.appendChild(d);
+  tstImpRender();
+}
+window.tstImpOpen=tstImpOpen;
+function tstImpClose(){ var m=document.getElementById('tstimp-modal'); if(m)m.remove(); }
+window.tstImpClose=tstImpClose;
+
+function tstImpRender(){
+  var body=document.getElementById('tstimp-body');
+  var foot=document.getElementById('tstimp-foot');
+  var steps=document.getElementById('tstimp-steps');
+  if(!body)return;
+  var names=['1 Archivo','2 Tests','3 Jugadores','4 Métricas','5 Confirmar'];
+  steps.innerHTML=names.map(function(n,i){
+    var on=i===_tstImpStep, done=i<_tstImpStep;
+    return '<div style="flex:1;text-align:center;padding:4px 2px;color:'+(on?'#0D1B2A':(done?'#1D9E75':'#c3c9d4'))+';border-bottom:2px solid '+(on?'#0D1B2A':(done?'#1D9E75':'transparent'))+'">'+(done?'✓ ':'')+n+'</div>';
+  }).join('');
+  var html='', ft='';
+  if(_tstImpStep===0) html=tstImpStepFile();
+  else if(_tstImpStep===1) html=tstImpStepTests();
+  else if(_tstImpStep===2) html=tstImpStepPlayers();
+  else if(_tstImpStep===3) html=tstImpStepMetrics();
+  else html=tstImpStepPreview();
+  body.innerHTML=html;
+  if(_tstImpStep>0) ft+='<button class="btn bc" onclick="tstImpBack()" style="font-size:11px;padding:7px 14px;margin-right:auto">← Atrás</button>';
+  if(_tstImpStep>0&&_tstImpStep<4) ft+='<button class="btn bg" onclick="tstImpNext()" style="font-size:11px;padding:7px 18px">Continuar →</button>';
+  if(_tstImpStep===4) ft+='<button class="btn bg" onclick="tstImpDoImport()" style="font-size:11px;padding:7px 20px">✓ Importar</button>';
+  foot.innerHTML=ft;
+}
+window.tstImpRender=tstImpRender;
+function tstImpBack(){ if(_tstImpStep>0){_tstImpStep--; tstImpRender();} }
+window.tstImpBack=tstImpBack;
+function tstImpNext(){
+  if(_tstImpStep===1){
+    var sin=_tstImp.exercises.filter(function(e){ return !TST_EX_MAP[_timpNorm(e)]; });
+    if(sin.length){ alert('Falta decidir qué hacer con: '+sin.join(', ')); return; }
+  }
+  if(_tstImpStep===2){
+    var sinJ=_tstImp.players.filter(function(p){ return !TST_NAME_MAP[_timpNorm(p)]; });
+    if(sinJ.length){ alert('Falta decidir qué hacer con: '+sinJ.join(', ')); return; }
+  }
+  if(_tstImpStep===3 && !_tstImp.metricSel.length){ alert('Elegí al menos una métrica.'); return; }
+  _tstImpStep++; tstImpRender();
+}
+window.tstImpNext=tstImpNext;
+
+// ── Paso 1: archivo ──
+function tstImpStepFile(){
+  return '<div ondragover="event.preventDefault();this.style.borderColor=\'#3B4D88\'" ondragleave="this.style.borderColor=\'#ccc\'" ondrop="tstImpDrop(event)" '+
+    'style="border:2px dashed #ccc;border-radius:10px;padding:26px 16px;text-align:center;background:#fafbfd">'+
+    '<div style="font-size:30px;margin-bottom:7px">📂</div>'+
+    '<div style="font-size:13px;color:#555;font-weight:600;margin-bottom:9px">Arrastrá el archivo acá</div>'+
+    '<label class="btn bb" style="font-size:12px;padding:7px 18px;cursor:pointer;margin:0;display:inline-block">Elegir archivo'+
+      '<input type="file" accept=".xlsx,.xls,.csv,.txt" onchange="tstImpFile(event)" style="display:none"></label>'+
+    '<div style="font-size:10.5px;color:#aaa;margin-top:9px">Excel (.xlsx) o CSV. Se espera una fila por intento, con columnas de fecha, jugador, ejercicio y las métricas.</div>'+
+  '</div>'+
+  '<div id="tstimp-msg" style="font-size:11.5px;margin-top:10px"></div>';
+}
+function tstImpDrop(ev){
+  ev.preventDefault();
+  var f=ev.dataTransfer&&ev.dataTransfer.files&&ev.dataTransfer.files[0];
+  if(f) tstImpRead(f);
+}
+window.tstImpDrop=tstImpDrop;
+function tstImpFile(ev){ var f=ev.target.files&&ev.target.files[0]; ev.target.value=''; if(f)tstImpRead(f); }
+window.tstImpFile=tstImpFile;
+function tstImpMsg(t,c){ var e=document.getElementById('tstimp-msg'); if(e){e.textContent=t||'';e.style.color=c||'#666';} }
+
+function tstImpRead(file){
+  _tstImp.file=file.name;
+  tstImpMsg('Leyendo '+file.name+'…','#666');
+  var isX=/\.(xlsx|xls)$/i.test(file.name);
+  var fr=new FileReader();
+  fr.onload=function(e){
+    try{
+      var headers=[], rows=[];
+      if(isX){
+        if(typeof XLSX==='undefined'){ tstImpMsg('No se pudo leer el Excel. Guardalo como CSV.','#E24B4A'); return; }
+        var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+        if(!aoa.length){ tstImpMsg('El archivo está vacío.','#E24B4A'); return; }
+        headers=aoa[0].map(function(h){return String(h||'').trim();});
+        rows=aoa.slice(1).filter(function(r){ return r.some(function(v){return v!=null&&String(v).trim()!=='';}); });
+      } else {
+        var txt=String(e.target.result||'').replace(/^\uFEFF/,'');
+        var lines=txt.split(/\r?\n/).filter(function(l){return l.trim();});
+        if(lines.length<2){ tstImpMsg('El archivo necesita encabezados y al menos una fila.','#E24B4A'); return; }
+        var split=function(l){ return (typeof parseRow==='function')?parseRow(l):l.split(/[;,\t]/); };
+        headers=split(lines[0]).map(function(h){return String(h||'').trim();});
+        rows=lines.slice(1).map(split);
+      }
+      if(!rows.length){ tstImpMsg('No se encontraron filas de datos.','#E24B4A'); return; }
+      var det=tstImpDetect(headers, rows);
+      _tstImp.headers=headers; _tstImp.rows=rows;
+      _tstImp.cols=det.cols; _tstImp.metrics=det.metrics;
+      // Ejercicios y jugadores presentes
+      var exs={}, pls={};
+      rows.forEach(function(r){
+        if(det.cols.exercise>=0){ var e2=String(r[det.cols.exercise]||'').trim(); if(e2)exs[e2]=(exs[e2]||0)+1; }
+        if(det.cols.name>=0){ var p=String(r[det.cols.name]||'').trim(); if(p)pls[p]=(pls[p]||0)+1; }
+      });
+      _tstImp.exercises=Object.keys(exs);
+      _tstImp.players=Object.keys(pls);
+      _tstImp.exCount=exs; _tstImp.plCount=pls;
+      // Preseleccionar métrica sugerida (la de fuerza relativa, si está)
+      var pref=det.metrics.find(function(m){return /relative peak force|rel.*peak|peak force rel/i.test(m.name);})
+            || det.metrics.find(function(m){return /peak force/i.test(m.name);})
+            || det.metrics[0];
+      _tstImp.metricSel=pref?[pref.idx]:[];
+      _tstImpStep=1;
+      tstImpRender();
+    }catch(err){ tstImpMsg('No se pudo leer: '+(err.message||err),'#E24B4A'); }
+  };
+  if(isX) fr.readAsArrayBuffer(file); else fr.readAsText(file);
+}
+
+// ── Paso 2: mapeo de ejercicios ──
+function tstImpStepTests(){
+  var c=_tstImp.cols;
+  var info='<div style="background:#eef3fb;border:1px solid #d5e0f0;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:11px;color:#334">'+
+    '<b>'+_timpEsc(_tstImp.file)+'</b> · '+_tstImp.rows.length+' filas · '+
+    'columnas detectadas: '+
+    (c.date>=0?'fecha ✓ ':'<span style="color:#E24B4A">fecha ✗ </span>')+
+    (c.name>=0?'jugador ✓ ':'<span style="color:#E24B4A">jugador ✗ </span>')+
+    (c.exercise>=0?'ejercicio ✓ ':'<span style="color:#E24B4A">ejercicio ✗ </span>')+
+    (c.side>=0?'L/R ✓':'L/R —')+
+    '</div>';
+  var html=info+'<div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:8px">¿A qué test corresponde cada ejercicio del archivo?</div>';
+  _tstImp.exercises.forEach(function(ex){
+    var k=_timpNorm(ex);
+    var cur=TST_EX_MAP[k];
+    if(cur===undefined){
+      // Sugerir por similitud
+      var best=null, bs=0.5;
+      TST_CATALOG.forEach(function(t){ var s=_timpSim(ex,t.name); if(s>bs){bs=s;best=t;} });
+      if(best){ cur=best.id; TST_EX_MAP[k]=cur; }
+    }
+    var opts='<option value="">— Elegir test —</option>';
+    tstCatalogByGroup().forEach(function(sec){
+      opts+='<optgroup label="'+_timpEsc(sec.group.ico+' '+sec.group.lbl)+'">';
+      sec.tests.forEach(function(t){ opts+='<option value="'+t.id+'"'+(cur===t.id?' selected':'')+'>'+_timpEsc(t.name)+'</option>'; });
+      opts+='</optgroup>';
+    });
+    opts+='<option value="__new__"'+(cur==='__new__'?' selected':'')+'>➕ Crear test nuevo con este nombre</option>';
+    opts+='<option value="__skip__"'+(cur==='__skip__'?' selected':'')+'>✕ No importar</option>';
+    html+='<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid #e8ebf2;border-radius:8px;margin-bottom:7px;flex-wrap:wrap">'+
+      '<div style="flex:1;min-width:180px">'+
+        '<div style="font-size:12.5px;font-weight:700;color:#0D1B2A">'+_timpEsc(ex)+'</div>'+
+        '<div style="font-size:10px;color:#8a93a5">'+(_tstImp.exCount[ex]||0)+' intento(s) en el archivo</div>'+
+      '</div>'+
+      '<span style="color:#c3c9d4">→</span>'+
+      '<select onchange="tstImpSetEx(\''+_timpEsc(k).replace(/'/g,"\\'")+'\',this.value)" style="flex:1;min-width:200px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:11.5px">'+opts+'</select>'+
+    '</div>';
+  });
+  return html;
+}
+function tstImpSetEx(k,v){ TST_EX_MAP[k]=v; tstMapsSave(); tstImpRender(); }
+window.tstImpSetEx=tstImpSetEx;
+
+// ── Paso 3: mapeo de jugadores ──
+function tstImpStepPlayers(){
+  var roster=(typeof tstRoster==='function')?tstRoster():[];
+  var html='<div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:4px">¿A qué jugador corresponde cada nombre del archivo?</div>'+
+    '<div style="font-size:10.5px;color:#8a93a5;margin-bottom:10px">El archivo suele traer sólo el apellido. Se sugiere la coincidencia más parecida del plantel.</div>';
+  _tstImp.players.forEach(function(p){
+    var k=_timpNorm(p);
+    var cur=TST_NAME_MAP[k];
+    if(cur===undefined){
+      var best=null, bs=0.45;
+      roster.forEach(function(n){ var s=_timpSim(p,n); if(s>bs){bs=s;best=n;} });
+      if(best){ cur=best; TST_NAME_MAP[k]=cur; }
+    }
+    var opts='<option value="">— Elegir jugador —</option>'+
+      roster.map(function(n){ return '<option value="'+_timpEsc(n)+'"'+(cur===n?' selected':'')+'>'+_timpEsc(n)+'</option>'; }).join('')+
+      '<option value="__skip__"'+(cur==='__skip__'?' selected':'')+'>✕ No importar</option>';
+    var ok=cur&&cur!=='__skip__';
+    html+='<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid '+(ok?'#d8ece2':'#f0dcdc')+';border-radius:8px;margin-bottom:7px;flex-wrap:wrap;background:'+(ok?'#fbfefc':'#fffbfb')+'">'+
+      '<div style="flex:1;min-width:150px">'+
+        '<div style="font-size:12.5px;font-weight:700;color:#0D1B2A">'+_timpEsc(p)+'</div>'+
+        '<div style="font-size:10px;color:#8a93a5">'+(_tstImp.plCount[p]||0)+' intento(s)</div>'+
+      '</div>'+
+      '<span style="color:#c3c9d4">→</span>'+
+      '<select onchange="tstImpSetName(\''+_timpEsc(k).replace(/'/g,"\\'")+'\',this.value)" style="flex:1;min-width:190px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:11.5px">'+opts+'</select>'+
+    '</div>';
+  });
+  return html;
+}
+function tstImpSetName(k,v){ TST_NAME_MAP[k]=v; tstMapsSave(); tstImpRender(); }
+window.tstImpSetName=tstImpSetName;
+
+// ── Paso 4: métricas y agregación ──
+function tstImpStepMetrics(){
+  var html='<div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:4px">¿Qué métricas querés guardar?</div>'+
+    '<div style="font-size:10.5px;color:#8a93a5;margin-bottom:10px">La primera que elijas es la principal: es la que se ve en las tablas y gráficos. Las demás quedan guardadas para consultarlas.</div>';
+  html+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">';
+  _tstImp.metrics.forEach(function(m){
+    var i=_tstImp.metricSel.indexOf(m.idx);
+    var on=i>=0;
+    var esPrim=(i===0);
+    html+='<button onclick="tstImpToggleMet('+m.idx+')" style="padding:6px 12px;border:1px solid '+(on?'#3B4D88':'#dde2ea')+';background:'+(on?'#3B4D88':'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:18px;font-size:11px;font-weight:600;cursor:pointer">'+
+      (esPrim?'★ ':(on?'✓ ':''))+_timpEsc(m.name)+'</button>';
+  });
+  html+='</div>';
+  html+='<div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:4px">Si hay varios intentos del mismo jugador, ¿qué valor uso?</div>'+
+    '<div style="font-size:10.5px;color:#8a93a5;margin-bottom:9px">Se calculan siempre los dos; esto define cuál queda como valor principal.</div>';
+  var opt=function(v,lbl,desc){
+    var on=_tstImp.agg===v;
+    return '<label style="display:flex;align-items:flex-start;gap:9px;padding:10px 12px;border:1px solid '+(on?'#1D9E75':'#e4e6ec')+';border-radius:8px;margin-bottom:7px;cursor:pointer;background:'+(on?'#f2fbf6':'#fff')+'">'+
+      '<input type="radio" name="tstimp-agg" '+(on?'checked':'')+' onchange="tstImpSetAgg(\''+v+'\')" style="accent-color:#1D9E75;margin-top:2px">'+
+      '<div><div style="font-size:12px;font-weight:700;color:#0D1B2A">'+lbl+'</div>'+
+      '<div style="font-size:10.5px;color:#8a93a5">'+desc+'</div></div></label>';
+  };
+  html+=opt('best','Mejor registro','Toma el mejor intento según el criterio del test (más alto, o más bajo si menos es mejor).');
+  html+=opt('avg','Promedio','Promedia todos los intentos válidos.');
+  html+=opt('both','Ambos — principal el mejor','Guarda mejor y promedio; el mejor queda como valor principal.');
+  return html;
+}
+function tstImpToggleMet(idx){
+  var i=_tstImp.metricSel.indexOf(idx);
+  if(i>=0)_tstImp.metricSel.splice(i,1); else _tstImp.metricSel.push(idx);
+  tstImpRender();
+}
+window.tstImpToggleMet=tstImpToggleMet;
+function tstImpSetAgg(v){ _tstImp.agg=v; tstImpRender(); }
+window.tstImpSetAgg=tstImpSetAgg;
+
+// ── Paso 5: vista previa ──
+function tstImpStepPreview(){
+  var recs=tstImpBuild();
+  window._tstImpRecs=recs;
+  if(!recs.length){
+    return '<div style="padding:22px;text-align:center;color:#E24B4A;font-size:12px">No se pudo armar ningún registro. Revisá los mapeos de tests y jugadores.</div>';
+  }
+  var prim=_tstImp.metrics.find(function(m){return m.idx===_tstImp.metricSel[0];});
+  var pn=prim?prim.name:'';
+  var fmt=function(v){ return v==null?'–':(Math.round(v*100)/100); };
+  var html='<div style="background:#f2fbf6;border:1px solid #cfe8dc;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:#1D6B4F">'+
+    'Se van a guardar <b>'+recs.length+'</b> registro(s) · métrica principal: <b>'+_timpEsc(pn)+'</b> · '+
+    (_tstImp.agg==='avg'?'promedio de intentos':(_tstImp.agg==='both'?'mejor y promedio':'mejor intento'))+
+    (_tstImp.metricSel.length>1?(' · '+(_tstImp.metricSel.length-1)+' métrica(s) extra guardadas'):'')+
+    '</div>';
+  html+='<div style="overflow-x:auto;border:1px solid #e4e6ec;border-radius:8px"><table style="border-collapse:collapse;width:100%;font-size:11px">'+
+    '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
+    '<th style="padding:7px 10px;text-align:left">Fecha</th>'+
+    '<th style="padding:7px 10px;text-align:left">Jugador</th>'+
+    '<th style="padding:7px 10px;text-align:left">Test</th>'+
+    '<th style="padding:7px 8px;text-align:center">Izq</th>'+
+    '<th style="padding:7px 8px;text-align:center">Der</th>'+
+    '<th style="padding:7px 8px;text-align:center">Asim.</th>'+
+    '<th style="padding:7px 8px;text-align:center">Intentos</th>'+
+    '</tr></thead><tbody>';
+  recs.forEach(function(r){
+    var t=tstById(r.testId);
+    var asy=null;
+    if(r.valI!=null&&r.valD!=null&&r.valI!==0){
+      var mx=Math.max(r.valI,r.valD), mn=Math.min(r.valI,r.valD);
+      if(mx) asy=((r.valD-r.valI)/mx*100);
+    }
+    var ac=asy==null?'#bbb':(Math.abs(asy)>=15?'#D9534F':(Math.abs(asy)>=10?'#E8A13C':'#1D9E75'));
+    html+='<tr style="border-bottom:1px solid #f0f2f6">'+
+      '<td style="padding:6px 10px;color:#666;white-space:nowrap">'+r.date.slice(8,10)+'/'+r.date.slice(5,7)+'</td>'+
+      '<td style="padding:6px 10px;font-weight:600;color:#0D1B2A;white-space:nowrap">'+_timpEsc(r.name)+'</td>'+
+      '<td style="padding:6px 10px;color:#555;white-space:nowrap">'+_timpEsc(t?t.name:r.testId)+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;color:#3B4D88;font-weight:700">'+fmt(r.valI)+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;color:#D85A30;font-weight:700">'+fmt(r.valD)+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;font-weight:700;color:'+ac+'">'+(asy==null?'–':((asy>0?'D +':'I +')+Math.abs(asy).toFixed(0)+'%'))+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;color:#8a93a5">'+r.n+'</td>'+
+    '</tr>';
+  });
+  html+='</tbody></table></div>';
+  return html;
+}
+
+function tstImpDoImport(){
+  var recs=window._tstImpRecs||[];
+  if(!recs.length){ alert('No hay registros para importar.'); return; }
+  var res=tstImpCommit(recs);
+  tstMapsSave();
+  tstImpClose();
+  if(typeof tstRender==='function') tstRender();
+  alert('Importación lista.\n\n'+res.added+' registro(s) nuevo(s)\n'+res.updated+' actualizado(s)');
+}
+window.tstImpDoImport=tstImpDoImport;
+
+
 // Refresco periódico + al volver a la pestaña
 function tstSyncStart(){
   if(window._tstSyncTimer)return;
@@ -35962,6 +36595,7 @@ function tstRender(){
     // v154: botón de guardado explícito + indicador de estado
     '<span style="margin-left:auto;display:flex;align-items:center;gap:9px">'+
       '<span id="tst-save-ind" style="font-size:11px;font-weight:700;opacity:0;transition:opacity .3s;white-space:nowrap"></span>'+
+      '<button onclick="tstImpOpen()" title="Importar tests desde un Excel o CSV" style="padding:7px 15px;border:1px solid #3B4D88;background:#fff;color:#3B4D88;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">📥 Importar</button>'+
       '<button onclick="tstSaveNow()" title="Guarda en este dispositivo y sube a la nube ahora mismo" style="padding:7px 15px;border:none;background:#1D9E75;color:#fff;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💾 Guardar</button>'+
     '</span>'+
     '</div>';
@@ -35993,15 +36627,19 @@ function tstRenderLoad(){
   var chips=tstCatalogByGroup().map(function(sec){
     var g=sec.group;
     var allOn=sec.tests.every(function(t){return _tstSelTests.indexOf(t.id)>=0;});
-    return '<div style="margin-bottom:9px">'+
-      '<div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">'+
-        '<span style="font-size:10.5px;font-weight:800;color:'+g.col+';text-transform:uppercase;letter-spacing:.3px">'+g.ico+' '+tstEsc(g.lbl)+'</span>'+
-        '<button onclick="tstToggleGroup(\''+g.k+'\')" style="border:none;background:none;color:#9aa5b5;font-size:9.5px;font-weight:700;cursor:pointer;padding:0">'+(allOn?'quitar todos':'elegir todos')+'</button>'+
+    var nSel=sec.tests.filter(function(t){return _tstSelTests.indexOf(t.id)>=0;}).length;
+    // v158: cada categoría en su propio bloque, con franja de color a la
+    // izquierda. Antes venía todo junto y no se distinguía dónde terminaba una.
+    return '<div style="border:1px solid #e8ebf2;border-left:4px solid '+g.col+';border-radius:8px;padding:9px 11px;margin-bottom:8px;background:#fcfdff">'+
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap">'+
+        '<span style="font-size:11px;font-weight:800;color:'+g.col+';text-transform:uppercase;letter-spacing:.4px">'+g.ico+' '+tstEsc(g.lbl)+'</span>'+
+        (nSel?'<span style="font-size:9.5px;font-weight:700;color:#fff;background:'+g.col+';border-radius:10px;padding:1px 7px">'+nSel+' elegido'+(nSel===1?'':'s')+'</span>':'')+
+        '<button onclick="tstToggleGroup(\''+g.k+'\')" style="margin-left:auto;border:1px solid #dde2ea;background:#fff;color:#6b7a90;font-size:9.5px;font-weight:700;cursor:pointer;padding:3px 9px;border-radius:12px">'+(allOn?'quitar todos':'elegir todos')+'</button>'+
       '</div>'+
       '<div style="display:flex;gap:5px;flex-wrap:wrap">'+
         sec.tests.map(function(t){
           var on=_tstSelTests.indexOf(t.id)>=0;
-          return '<button onclick="tstToggleTest(\''+t.id+'\')" style="padding:5px 11px;border:1px solid '+(on?g.col:'#ddd')+';background:'+(on?g.col:'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+(on?'✓ ':'')+tstEsc(t.name)+'</button>';
+          return '<button onclick="tstToggleTest(\''+t.id+'\')" style="padding:5px 11px;border:1px solid '+(on?g.col:'#dde2ea')+';background:'+(on?g.col:'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+(on?'✓ ':'')+tstEsc(t.name)+'</button>';
         }).join('')+
       '</div>'+
     '</div>';
@@ -36023,17 +36661,29 @@ function tstRenderLoad(){
       (isToday?'🆕 ':'')+tstFmtDate(d.date)+' <span style="font-size:9px;opacity:.65">'+d.n+'</span></button>';
   }).join('');
 
-  var head='<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;padding:14px;margin-bottom:12px">'+
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
-      '<span style="font-size:12px;font-weight:700;color:#333">📅 Jornada</span>'+
-      '<span style="font-size:11px;color:#0D1B2A;font-weight:700;background:#eef2fa;border-radius:5px;padding:3px 9px">'+tstFmtDateLong(_tstDate)+'</span>'+
-      '<details style="margin-left:auto"><summary style="font-size:11px;color:#3B4D88;font-weight:700;cursor:pointer;outline:none;list-style:none">📆 Otra fecha</summary>'+
-        '<input type="date" id="tst-date" value="'+_tstDate+'" onchange="tstDateChange(this.value)" style="margin-top:6px;padding:5px 9px;border:1px solid #ccc;border-radius:6px;font-size:12px">'+
+  // v158: el cuadro de jornada dividido en DOS secciones claras (fecha y
+  // tests), con encabezado propio cada una. Antes era un bloque continuo y
+  // se mezclaba todo.
+  var nTot=_tstSelTests.length;
+  var head='<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;margin-bottom:14px;overflow:hidden">'+
+    // ── Sección 1: FECHA ──
+    '<div style="background:#0D1B2A;padding:11px 14px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">'+
+      '<span style="font-size:12.5px;font-weight:800;color:#fff">📅 Jornada</span>'+
+      '<span style="font-size:12px;color:#0D1B2A;font-weight:700;background:#fff;border-radius:6px;padding:3px 11px">'+tstFmtDateLong(_tstDate)+'</span>'+
+      '<details style="margin-left:auto"><summary style="font-size:11px;color:#9fb3c8;font-weight:700;cursor:pointer;outline:none;list-style:none">📆 Otra fecha</summary>'+
+        '<input type="date" id="tst-date" value="'+_tstDate+'" onchange="tstDateChange(this.value)" style="margin-top:6px;padding:5px 9px;border:none;border-radius:6px;font-size:12px">'+
       '</details>'+
     '</div>'+
-    (dateChips?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:11px">'+dateChips+'</div>':'')+
-    '<div style="font-size:11px;color:#999;margin-bottom:7px">Elegí qué tests se toman en esta jornada:</div>'+
-    '<div style="display:flex;gap:6px;flex-wrap:wrap">'+chips+'</div>'+
+    (dateChips?'<div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 14px;background:#f8faff;border-bottom:1px solid #e8ecf4">'+dateChips+'</div>':'')+
+    // ── Sección 2: TESTS ──
+    '<div style="padding:12px 14px">'+
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+
+        '<span style="font-size:11.5px;font-weight:800;color:#0D1B2A;text-transform:uppercase;letter-spacing:.3px">🧪 Tests de esta jornada</span>'+
+        '<span style="font-size:10.5px;color:#8a93a5">'+(nTot?(nTot+' seleccionado'+(nTot===1?'':'s')):'ninguno seleccionado')+'</span>'+
+        (nTot?'<button onclick="tstClearSel()" style="margin-left:auto;border:1px solid #e6dada;background:#fff;color:#c47c7c;font-size:9.5px;font-weight:700;cursor:pointer;padding:3px 10px;border-radius:12px">limpiar selección</button>':'')+
+      '</div>'+
+      chips+
+    '</div>'+
   '</div>';
   var active=_tstSelTests.map(tstById).filter(Boolean);
   if(!active.length)return head+'<div style="padding:20px;text-align:center;color:#999;font-size:12px">Elegí al menos un test para armar la grilla.</div>';
@@ -36109,6 +36759,9 @@ function tstCellInput(t,name,rec){
 function tstDateChange(v){ _tstDate=v||tstToday(); tstRender(); }
 window.tstDateChange=tstDateChange;
 // v155: elegir o quitar todos los tests de una categoría de una vez
+function tstClearSel(){ _tstSelTests=[]; tstRender(); }
+window.tstClearSel=tstClearSel;
+
 function tstToggleGroup(k){
   var ids=(TST_CATALOG||[]).filter(function(t){return (t.group||'otro')===k;}).map(function(t){return t.id;});
   if(!ids.length)return;
@@ -40448,7 +41101,12 @@ function hoyEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/<
 // ── Pendientes del CT (checklist persistente) ──
 var HOY_TODOS=[];
 try{ HOY_TODOS=JSON.parse(localStorage.getItem('hoyTodos_v1')||'[]')||[]; }catch(e){ HOY_TODOS=[]; }
-function hoySaveTodos(){ try{ localStorage.setItem('hoyTodos_v1', JSON.stringify(HOY_TODOS)); }catch(e){} hoySyncCloud(); }
+function hoySaveTodos(){
+  // v158: sellar cada pendiente, para que el merge sepa cuál es el más nuevo
+  try{ HOY_TODOS.forEach(function(t){ if(t && t._upd==null) t._upd=Date.now(); }); }catch(e){}
+  try{ localStorage.setItem('hoyTodos_v1', JSON.stringify(HOY_TODOS)); }catch(e){}
+  hoySyncCloud();
+}
 // ── Calendario semanal de pendientes ──
 var _hoyTodoWeekOff=0; // 0 = semana actual; ±1 = semanas vecinas
 function hoyTodoWeekNav(d){ _hoyTodoWeekOff+=d; hoyRender(); }
@@ -40479,12 +41137,20 @@ function hoyTodoAdd(){
 window.hoyTodoAdd=hoyTodoAdd;
 function hoyTodoToggle(id){
   var t=HOY_TODOS.find(function(x){return x.id===id;}); if(!t)return;
+  t._upd=Date.now();
   t.done=!t.done; hoySaveTodos(); hoyRender();
 }
 window.hoyTodoToggle=hoyTodoToggle;
 function hoyTodoDel(id){
   var i=HOY_TODOS.findIndex(function(x){return x.id===id;}); if(i<0)return;
-  HOY_TODOS.splice(i,1); hoySaveTodos(); hoyRender();
+  HOY_TODOS.splice(i,1);
+  // v158: tombstone, para que el merge con la nube no lo devuelva
+  try{
+    var d=JSON.parse(localStorage.getItem('hoyTodosDel_v1')||'{}');
+    d[String(id)]=new Date().toISOString();
+    localStorage.setItem('hoyTodosDel_v1', JSON.stringify(d));
+  }catch(e){}
+  hoySaveTodos(); hoyRender();
 }
 window.hoyTodoDel=hoyTodoDel;
 function hoyTodoKey(ev){ if(ev.key==='Enter'){ ev.preventDefault(); hoyTodoAdd(); } }
