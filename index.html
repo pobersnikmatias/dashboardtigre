@@ -36937,6 +36937,15 @@ function tstChart(series,labels,opts){
       if(s.area){
         svg+='<path d="'+dLine+' L'+pts[pts.length-1][0].toFixed(1)+' '+(PT+ih)+' L'+pts[0][0].toFixed(1)+' '+(PT+ih)+' Z" fill="url(#'+uid+'g'+si+')"/>';
       }
+      // v162: etiqueta al final de las líneas de referencia, con su valor
+      if(s.tag){
+        var ly=pts[pts.length-1][1];
+        var lv=tstFmtV(pts[pts.length-1][3],unit,opts.test);
+        var txt=s.tag+' '+lv;
+        var wBox=txt.length*6.2+10;
+        svg+='<g><rect x="'+(W-PR-wBox)+'" y="'+(ly-9).toFixed(1)+'" width="'+wBox+'" height="17" rx="8" fill="'+s.color+'" opacity="0.92"/>'+
+          '<text x="'+(W-PR-wBox/2)+'" y="'+(ly+3.5).toFixed(1)+'" text-anchor="middle" font-size="10.5" font-weight="800" fill="#fff" font-family="system-ui,-apple-system,sans-serif">'+txt+'</text></g>';
+      }
       // v160: soporte de línea punteada, para las referencias del grupo
       var dashAttr=s.dash?(' stroke-dasharray="'+s.dash+'"'):'';
       svg+='<path d="'+dLine+'" fill="none" stroke="'+s.color+'" stroke-width="'+sw+'" stroke-opacity="'+op+'" stroke-linejoin="round" stroke-linecap="round"'+dashAttr+'/>';
@@ -37050,10 +37059,10 @@ function tstRenderIndiv(){
     var pct=(delta!=null&&first.v)?(delta/Math.abs(first.v)*100):null;
     var kpis='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">';
     var kpi=function(l,v,c,sub){
-      return '<div style="flex:1;min-width:74px;background:#f8faff;border:1px solid #e8ecf5;border-radius:7px;padding:5px 8px">'+
-        '<div style="font-size:8.5px;color:#a3a9b6;font-weight:700;text-transform:uppercase;letter-spacing:.2px">'+l+'</div>'+
-        '<div style="font-size:14px;font-weight:800;color:'+c+';line-height:1.25">'+v+'</div>'+
-        (sub?'<div style="font-size:8.5px;color:#a3a9b6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div>':'')+'</div>';
+      return '<div style="flex:1;min-width:88px;background:#f8faff;border:1px solid #e8ecf5;border-radius:8px;padding:7px 10px">'+
+        '<div style="font-size:9px;color:#a3a9b6;font-weight:700;text-transform:uppercase;letter-spacing:.25px">'+l+'</div>'+
+        '<div style="font-size:16px;font-weight:800;color:'+c+';line-height:1.3">'+v+'</div>'+
+        (sub?'<div style="font-size:9px;color:#a3a9b6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div>':'')+'</div>';
     };
     kpis+=kpi('Último', tstFmtV(last.v,t.unit,t)+' <span style="font-size:10px;color:#a3a9b6">'+t.unit+'</span>', '#0D1B2A', tstFmtDate(last.date));
     kpis+=kpi('Mejor marca', tstFmtV(bestV,t.unit,t)+' <span style="font-size:10px;color:#a3a9b6">'+t.unit+'</span>', '#E0A93B', tstFmtDate(vals[bestIdx].date));
@@ -37090,10 +37099,14 @@ function tstRenderIndiv(){
     } else {
       serie.push({key:'v',label:'',color:'#3B4D88',pts:nums,area:true,bestIdx:bestIdx});
     }
-    if(hayRefAll) serie.push({key:'__ref',label:'Mejores del plantel',color:'#9AA6BF',pts:refAll,w:1.6,dash:'6 4',dots:false,values:false,op:0.9});
-    if(hayRefPos) serie.push({key:'__refp',label:'Mejores '+miPos,color:'#6B7A90',pts:refPos,w:1.8,dash:'2 3',dots:false,values:false,op:0.95});
+    // v162: el SVG se escala al ancho real de la pantalla, así que una línea
+    // de 1,6 con guiones de 2px quedaba prácticamente invisible. Ahora son
+    // gruesas, de color marcado, con guion grande y una etiqueta al final con
+    // el valor, para que se distingan sí o sí.
+    if(hayRefAll) serie.push({key:'__ref',label:'Plantel',color:'#8A93A5',pts:refAll,w:3,dash:'14 7',dots:false,values:false,op:1,tag:'Plantel'});
+    if(hayRefPos) serie.push({key:'__refp',label:miPos,color:'#4A5568',pts:refPos,w:3,dash:'5 5',dots:false,values:false,op:1,tag:miPos});
 
-    chart=tstChart(serie,labels,{unit:t.unit,height:170,test:t});
+    chart=tstChart(serie,labels,{unit:t.unit,height:215,test:t});
     var items=isUni?[{color:'#3B4D88',label:'Izquierda'},{color:'#D85A30',label:'Derecha'}]:[];
     if(hayRefAll) items.push({color:'#9AA6BF',label:'Mejores del plantel '+refInfo.year+' ('+refInfo.nAll+' jug.)',dash:true});
     if(hayRefPos) items.push({color:'#6B7A90',label:'Mejores '+miPos+' '+refInfo.year+' ('+refInfo.nPos+' jug.)',dash:true});
@@ -37120,9 +37133,9 @@ function tstRenderIndiv(){
 
     // v161: tarjeta compacta, para que entren varios tests en pantalla
     var g=tstGroupBy(t.group);
-    return '<div style="background:#fff;border:1px solid #e4e6ec;border-left:3px solid '+(g.col||'#3B4D88')+';border-radius:9px;padding:11px 13px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px">'+
-        '<b style="font-size:13px;color:#0D1B2A">'+tstEsc(t.name)+'</b>'+
+    return '<div style="background:#fff;border:1px solid #e4e6ec;border-left:4px solid '+(g.col||'#3B4D88')+';border-radius:10px;padding:13px 15px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:9px">'+
+        '<b style="font-size:14px;color:#0D1B2A">'+tstEsc(t.name)+'</b>'+
         '<span style="font-size:9.5px;color:#a3a9b6;font-weight:600">'+t.unit+' · '+(t.better==='down'?'menos es mejor':'más es mejor')+'</span>'+
       '</div>'+
       kpis+legend+chart+
@@ -37133,7 +37146,7 @@ function tstRenderIndiv(){
     '</div>';
   }).join('');
   // Rejilla: dos columnas en pantallas anchas, una en móvil
-  if(cards) cards='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:10px">'+cards+'</div>';
+  if(cards) cards='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:12px">'+cards+'</div>';
 
   return '<div style="margin-bottom:12px">'+head+
     '<div style="background:#f8faff;border:1px solid #e4e6ec;border-top:none;border-radius:0 0 10px 10px;padding:10px 16px;font-size:11px;color:#666">'+
