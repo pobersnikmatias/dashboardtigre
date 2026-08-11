@@ -36926,6 +36926,7 @@ function tstChart(series,labels,opts){
     svg+='<text x="'+X(i).toFixed(1)+'" y="'+(H-13)+'" text-anchor="middle" font-size="10.5" fill="#a3a9b6" font-family="system-ui,-apple-system,sans-serif">'+tstFmtDate(lb)+'</text>';
   });
   // Series
+  var etiquetas=[];   // v161: se dibujan al final, ya sin superposiciones
   series.forEach(function(s,si){
     var pts=[];
     (s.pts||[]).forEach(function(v,i){ if(v!=null&&!isNaN(v))pts.push([X(i),Y(v),i,v]); });
@@ -36948,12 +36949,47 @@ function tstChart(series,labels,opts){
         if(isBest)svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="2.2" fill="'+s.color+'"/>';
       });
       if(n<=7 && s.values!==false){
+        // v161: las etiquetas se registran para resolver superposiciones al
+        // final. Antes, dos series con valores parecidos escribían el número
+        // en el mismo lugar y quedaba ilegible.
         pts.forEach(function(p){
-          svg+='<text x="'+p[0].toFixed(1)+'" y="'+(p[1]-12).toFixed(1)+'" text-anchor="middle" font-size="10.5" font-weight="700" fill="'+s.color+'" font-family="system-ui,-apple-system,sans-serif">'+tstFmtV(p[3],unit,opts.test)+'</text>';
+          etiquetas.push({x:p[0], y:p[1]-12, txt:tstFmtV(p[3],unit,opts.test), col:s.color, anchorY:p[1]});
         });
       }
     }
   });
+  // v161: resolución de superposiciones. Se agrupan las etiquetas que caen en
+  // la misma zona horizontal y se separan verticalmente, alternando arriba y
+  // abajo del punto para no tapar la línea.
+  if(etiquetas.length){
+    var porX={};
+    etiquetas.forEach(function(e){
+      var k=Math.round(e.x/26);   // columnas de ~26px
+      (porX[k]=porX[k]||[]).push(e);
+    });
+    Object.keys(porX).forEach(function(k){
+      var grupo=porX[k];
+      if(grupo.length===1)return;
+      // Ordenar por altura y separar lo mínimo necesario
+      grupo.sort(function(a,b){ return a.y-b.y; });
+      var MIN=12.5;
+      for(var i=1;i<grupo.length;i++){
+        if(grupo[i].y-grupo[i-1].y<MIN) grupo[i].y=grupo[i-1].y+MIN;
+      }
+      // Encajar el grupo dentro del área del gráfico SIN perder la separación:
+      // se mueve en bloque, nunca cada etiqueta por separado (eso volvía a
+      // juntarlas contra el borde).
+      var top=PT+9, bot=PT+ih-2;
+      var exceso=grupo[grupo.length-1].y-bot;
+      if(exceso>0) grupo.forEach(function(e){ e.y-=exceso; });
+      var falta=top-grupo[0].y;
+      if(falta>0) grupo.forEach(function(e){ e.y+=falta; });
+    });
+    etiquetas.forEach(function(e){
+      var y=e.y;
+      svg+='<text x="'+e.x.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="middle" font-size="10" font-weight="700" fill="'+e.col+'" font-family="system-ui,-apple-system,sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2.5" stroke-linejoin="round">'+e.txt+'</text>';
+    });
+  }
   svg+='</svg>';
   return svg;
 }
@@ -37012,12 +37048,12 @@ function tstRenderIndiv(){
     var delta=(vals.length>1)?(last.v-first.v):null;
     var deltaGood=delta==null?null:((t.better==='down')?delta<0:delta>0);
     var pct=(delta!=null&&first.v)?(delta/Math.abs(first.v)*100):null;
-    var kpis='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+    var kpis='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">';
     var kpi=function(l,v,c,sub){
-      return '<div style="flex:1;min-width:96px;background:#f8faff;border:1px solid #e8ecf5;border-radius:8px;padding:7px 10px">'+
-        '<div style="font-size:9px;color:#a3a9b6;font-weight:700;text-transform:uppercase;letter-spacing:.3px">'+l+'</div>'+
-        '<div style="font-size:16px;font-weight:800;color:'+c+';line-height:1.3">'+v+'</div>'+
-        (sub?'<div style="font-size:9px;color:#a3a9b6">'+sub+'</div>':'')+'</div>';
+      return '<div style="flex:1;min-width:74px;background:#f8faff;border:1px solid #e8ecf5;border-radius:7px;padding:5px 8px">'+
+        '<div style="font-size:8.5px;color:#a3a9b6;font-weight:700;text-transform:uppercase;letter-spacing:.2px">'+l+'</div>'+
+        '<div style="font-size:14px;font-weight:800;color:'+c+';line-height:1.25">'+v+'</div>'+
+        (sub?'<div style="font-size:8.5px;color:#a3a9b6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div>':'')+'</div>';
     };
     kpis+=kpi('Último', tstFmtV(last.v,t.unit,t)+' <span style="font-size:10px;color:#a3a9b6">'+t.unit+'</span>', '#0D1B2A', tstFmtDate(last.date));
     kpis+=kpi('Mejor marca', tstFmtV(bestV,t.unit,t)+' <span style="font-size:10px;color:#a3a9b6">'+t.unit+'</span>', '#E0A93B', tstFmtDate(vals[bestIdx].date));
@@ -37036,27 +37072,15 @@ function tstRenderIndiv(){
     // Línea punteada más marcada = media de los jugadores de su misma posición.
     // Sirve para ver de un vistazo si está por encima o por debajo.
     var miPos=tstPosOf(_tstIndivPlayer);
-    var refAll=[], refPos=[];
-    (function(){
-      var otros=TST_DATA.filter(function(r){ return r.testId===t.id && tstVal(r)!=null; });
-      var prom=function(arr){ var v=arr.filter(function(x){return x!=null&&!isNaN(x);}); return v.length?v.reduce(function(a,b){return a+b;},0)/v.length:null; };
-      labels.forEach(function(d){
-        var delDia=otros.filter(function(r){ return r.date===d; });
-        refAll.push(prom(delDia.map(tstVal)));
-        if(miPos){
-          var mismos=delDia.filter(function(r){ return tstPosOf(r.name)===miPos; });
-          refPos.push(mismos.length>=2?prom(mismos.map(tstVal)):null);
-        } else refPos.push(null);
-      });
-      // Si un día no tiene datos del grupo, se sostiene el último valor conocido
-      // para que la línea de referencia no se corte.
-      var last=null;
-      for(var i=0;i<refAll.length;i++){ if(refAll[i]!=null)last=refAll[i]; else if(last!=null)refAll[i]=last; }
-      last=null;
-      for(var j=0;j<refPos.length;j++){ if(refPos[j]!=null)last=refPos[j]; else if(last!=null)refPos[j]=last; }
-    })();
-    var hayRefAll=refAll.some(function(v){return v!=null;});
-    var hayRefPos=refPos.some(function(v){return v!=null;});
+    // v161: la referencia ya NO exige que el test se haya hecho el mismo día.
+    // Antes se comparaba jornada contra jornada y, como cada jugador se evalúa
+    // en momentos distintos, casi nunca había coincidencia y las líneas no
+    // aparecían. Ahora se toma la MEJOR MARCA DEL AÑO de cada jugador y se
+    // promedian: es un punto de comparación estable para todo el gráfico.
+    var refInfo=tstYearRef(t, labels, miPos, _tstIndivPlayer);
+    var refAll=refInfo.all, refPos=refInfo.pos;
+    var hayRefAll=refInfo.allVal!=null;
+    var hayRefPos=refInfo.posVal!=null;
 
     var chart, legend='';
     var serie=[];
@@ -37066,13 +37090,13 @@ function tstRenderIndiv(){
     } else {
       serie.push({key:'v',label:'',color:'#3B4D88',pts:nums,area:true,bestIdx:bestIdx});
     }
-    if(hayRefAll) serie.push({key:'__ref',label:'Media del plantel',color:'#9AA6BF',pts:refAll,w:1.8,dash:'6 4',dots:false,values:false,op:0.9});
-    if(hayRefPos) serie.push({key:'__refp',label:'Media '+miPos,color:'#6B7A90',pts:refPos,w:2,dash:'2 3',dots:false,values:false,op:0.95});
+    if(hayRefAll) serie.push({key:'__ref',label:'Mejores del plantel',color:'#9AA6BF',pts:refAll,w:1.6,dash:'6 4',dots:false,values:false,op:0.9});
+    if(hayRefPos) serie.push({key:'__refp',label:'Mejores '+miPos,color:'#6B7A90',pts:refPos,w:1.8,dash:'2 3',dots:false,values:false,op:0.95});
 
-    chart=tstChart(serie,labels,{unit:t.unit,height:236,test:t});
+    chart=tstChart(serie,labels,{unit:t.unit,height:170,test:t});
     var items=isUni?[{color:'#3B4D88',label:'Izquierda'},{color:'#D85A30',label:'Derecha'}]:[];
-    if(hayRefAll) items.push({color:'#9AA6BF',label:'Media del plantel',dash:true});
-    if(hayRefPos) items.push({color:'#6B7A90',label:'Media '+miPos+' ('+tstPosLbl(miPos)+')',dash:true});
+    if(hayRefAll) items.push({color:'#9AA6BF',label:'Mejores del plantel '+refInfo.year+' ('+refInfo.nAll+' jug.)',dash:true});
+    if(hayRefPos) items.push({color:'#6B7A90',label:'Mejores '+miPos+' '+refInfo.year+' ('+refInfo.nPos+' jug.)',dash:true});
     if(items.length) legend=tstLegend(items);
 
     // Tabla de registros con borrado
@@ -37094,18 +37118,22 @@ function tstRenderIndiv(){
         '</td></tr>';
     }).join('');
 
-    return '<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;padding:14px 16px;margin-bottom:12px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
-        '<b style="font-size:14px;color:#0D1B2A">'+tstEsc(t.name)+'</b>'+
-        '<span style="font-size:10px;color:#a3a9b6;font-weight:600">'+tstGroupLbl(t.group)+' · '+t.unit+' · '+(t.better==='down'?'menos es mejor':'más es mejor')+'</span>'+
+    // v161: tarjeta compacta, para que entren varios tests en pantalla
+    var g=tstGroupBy(t.group);
+    return '<div style="background:#fff;border:1px solid #e4e6ec;border-left:3px solid '+(g.col||'#3B4D88')+';border-radius:9px;padding:11px 13px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px">'+
+        '<b style="font-size:13px;color:#0D1B2A">'+tstEsc(t.name)+'</b>'+
+        '<span style="font-size:9.5px;color:#a3a9b6;font-weight:600">'+t.unit+' · '+(t.better==='down'?'menos es mejor':'más es mejor')+'</span>'+
       '</div>'+
       kpis+legend+chart+
-      '<details style="margin-top:10px">'+
-        '<summary style="font-size:11px;color:#3B4D88;font-weight:700;cursor:pointer;outline:none">🗂 Ver y borrar registros ('+vals.length+')</summary>'+
-        '<table style="border-collapse:collapse;width:100%;margin-top:8px">'+rowsHtml+'</table>'+
+      '<details style="margin-top:7px">'+
+        '<summary style="font-size:10.5px;color:#3B4D88;font-weight:700;cursor:pointer;outline:none">🗂 Registros ('+vals.length+')</summary>'+
+        '<table style="border-collapse:collapse;width:100%;margin-top:7px">'+rowsHtml+'</table>'+
       '</details>'+
     '</div>';
   }).join('');
+  // Rejilla: dos columnas en pantallas anchas, una en móvil
+  if(cards) cards='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:10px">'+cards+'</div>';
 
   return '<div style="margin-bottom:12px">'+head+
     '<div style="background:#f8faff;border:1px solid #e4e6ec;border-top:none;border-radius:0 0 10px 10px;padding:10px 16px;font-size:11px;color:#666">'+
@@ -37140,6 +37168,47 @@ function tstPosOf(name){
   }catch(e){ return ''; }
 }
 window.tstPosOf=tstPosOf;
+
+// v161: referencia por MEJORES MARCAS DEL AÑO.
+// Para cada jugador se toma su mejor marca del año (según el criterio del
+// test) y se promedian. Devuelve una línea horizontal constante, así se puede
+// comparar aunque los jugadores se hayan evaluado en fechas distintas.
+function tstYearRef(t, labels, miPos, excluirJugador){
+  var out={all:[], pos:[], allVal:null, posVal:null, nAll:0, nPos:0, year:null};
+  if(!t||!labels||!labels.length)return out;
+  // Año de referencia: el del último registro del jugador que se está mirando
+  var year=String(labels[labels.length-1]||'').slice(0,4);
+  out.year=year;
+  var recs=(TST_DATA||[]).filter(function(r){
+    return r.testId===t.id && tstVal(r)!=null && String(r.date||'').slice(0,4)===year;
+  });
+  // Mejor marca del año por jugador
+  var mejorPorJugador={};
+  recs.forEach(function(r){
+    var k=tstNorm(r.name);
+    var v=tstVal(r);
+    if(mejorPorJugador[k]===undefined){ mejorPorJugador[k]={v:v,name:r.name}; return; }
+    if(t.better==='down'){ if(v<mejorPorJugador[k].v)mejorPorJugador[k]={v:v,name:r.name}; }
+    else { if(v>mejorPorJugador[k].v)mejorPorJugador[k]={v:v,name:r.name}; }
+  });
+  var prom=function(arr){ var v=arr.filter(function(x){return x!=null&&!isNaN(x);}); return v.length?v.reduce(function(a,b){return a+b;},0)/v.length:null; };
+  var todos=Object.keys(mejorPorJugador);
+  var valsAll=todos.map(function(k){ return mejorPorJugador[k].v; });
+  // Con un solo jugador no hay con qué comparar
+  if(valsAll.length>=2){ out.allVal=prom(valsAll); out.nAll=valsAll.length; }
+  if(miPos){
+    var mismos=todos.filter(function(k){ return tstPosOf(mejorPorJugador[k].name)===miPos; });
+    if(mismos.length>=2){
+      out.posVal=prom(mismos.map(function(k){ return mejorPorJugador[k].v; }));
+      out.nPos=mismos.length;
+    }
+  }
+  // Series constantes, del largo del gráfico
+  out.all=labels.map(function(){ return out.allVal; });
+  out.pos=labels.map(function(){ return out.posVal; });
+  return out;
+}
+window.tstYearRef=tstYearRef;
 
 function tstPosLbl(k){ var x=TST_POS_LIST.find(function(p){return p.k===k;}); return x?x.lbl:k; }
 window.tstPosLbl=tstPosLbl;
