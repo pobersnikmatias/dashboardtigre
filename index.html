@@ -36932,20 +36932,26 @@ function tstChart(series,labels,opts){
     (s.pts||[]).forEach(function(v,i){ if(v!=null&&!isNaN(v))pts.push([X(i),Y(v),i,v]); });
     if(!pts.length)return;
     var sw=s.w!=null?s.w:2.4, op=s.op!=null?s.op:1;
+    // v163: las líneas de REFERENCIA son un valor constante: se trazan de
+    // borde a borde aunque el jugador tenga un solo registro. Antes hacía
+    // falta más de un punto para dibujar y, con una sola evaluación cargada,
+    // no aparecía ninguna línea.
+    if(s.tag){
+      var ry=Y(pts[0][3]);
+      svg+='<line x1="'+PL+'" y1="'+ry.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+ry.toFixed(1)+'" stroke="'+s.color+'" stroke-width="'+sw+'" stroke-opacity="'+op+'"'+(s.dash?(' stroke-dasharray="'+s.dash+'"'):'')+'/>';
+      var lv=tstFmtV(pts[0][3],unit,opts.test);
+      var txt=s.tag+' '+lv;
+      var wBox=txt.length*6.2+10;
+      svg+='<g><rect x="'+(W-PR-wBox)+'" y="'+(ry-9).toFixed(1)+'" width="'+wBox+'" height="17" rx="8" fill="'+s.color+'" opacity="0.92"/>'+
+        '<text x="'+(W-PR-wBox/2)+'" y="'+(ry+3.5).toFixed(1)+'" text-anchor="middle" font-size="10.5" font-weight="800" fill="#fff" font-family="system-ui,-apple-system,sans-serif">'+txt+'</text></g>';
+      return;   // ya se dibujó todo lo de esta serie
+    }
     if(pts.length>1){
       var dLine=pts.map(function(p,k){return (k?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1);}).join(' ');
       if(s.area){
         svg+='<path d="'+dLine+' L'+pts[pts.length-1][0].toFixed(1)+' '+(PT+ih)+' L'+pts[0][0].toFixed(1)+' '+(PT+ih)+' Z" fill="url(#'+uid+'g'+si+')"/>';
       }
-      // v162: etiqueta al final de las líneas de referencia, con su valor
-      if(s.tag){
-        var ly=pts[pts.length-1][1];
-        var lv=tstFmtV(pts[pts.length-1][3],unit,opts.test);
-        var txt=s.tag+' '+lv;
-        var wBox=txt.length*6.2+10;
-        svg+='<g><rect x="'+(W-PR-wBox)+'" y="'+(ly-9).toFixed(1)+'" width="'+wBox+'" height="17" rx="8" fill="'+s.color+'" opacity="0.92"/>'+
-          '<text x="'+(W-PR-wBox/2)+'" y="'+(ly+3.5).toFixed(1)+'" text-anchor="middle" font-size="10.5" font-weight="800" fill="#fff" font-family="system-ui,-apple-system,sans-serif">'+txt+'</text></g>';
-      }
+
       // v160: soporte de línea punteada, para las referencias del grupo
       var dashAttr=s.dash?(' stroke-dasharray="'+s.dash+'"'):'';
       svg+='<path d="'+dLine+'" fill="none" stroke="'+s.color+'" stroke-width="'+sw+'" stroke-opacity="'+op+'" stroke-linejoin="round" stroke-linecap="round"'+dashAttr+'/>';
@@ -37103,14 +37109,25 @@ function tstRenderIndiv(){
     // de 1,6 con guiones de 2px quedaba prácticamente invisible. Ahora son
     // gruesas, de color marcado, con guion grande y una etiqueta al final con
     // el valor, para que se distingan sí o sí.
-    if(hayRefAll) serie.push({key:'__ref',label:'Plantel',color:'#8A93A5',pts:refAll,w:3,dash:'14 7',dots:false,values:false,op:1,tag:'Plantel'});
-    if(hayRefPos) serie.push({key:'__refp',label:miPos,color:'#4A5568',pts:refPos,w:3,dash:'5 5',dots:false,values:false,op:1,tag:miPos});
+    // v163: líneas RECTAS Y SÓLIDAS. El guion se perdía al escalar el SVG al
+    // ancho real de la pantalla. Ahora son continuas, gruesas y con etiqueta.
+    if(hayRefAll) serie.push({key:'__ref',color:'#7D8698',pts:refAll,w:2.6,dots:false,values:false,op:1,tag:'Plantel'});
+    if(hayRefPos) serie.push({key:'__refp',color:'#3D4A5C',pts:refPos,w:2.6,dots:false,values:false,op:1,tag:miPos});
 
     chart=tstChart(serie,labels,{unit:t.unit,height:215,test:t});
     var items=isUni?[{color:'#3B4D88',label:'Izquierda'},{color:'#D85A30',label:'Derecha'}]:[];
-    if(hayRefAll) items.push({color:'#9AA6BF',label:'Mejores del plantel '+refInfo.year+' ('+refInfo.nAll+' jug.)',dash:true});
-    if(hayRefPos) items.push({color:'#6B7A90',label:'Mejores '+miPos+' '+refInfo.year+' ('+refInfo.nPos+' jug.)',dash:true});
+    if(hayRefAll) items.push({color:'#7D8698',label:'Mejores del plantel '+refInfo.year+' ('+refInfo.nAll+' jug.)'});
+    if(hayRefPos) items.push({color:'#3D4A5C',label:'Mejores '+miPos+' '+refInfo.year+' ('+refInfo.nPos+' jug.)'});
     if(items.length) legend=tstLegend(items);
+    // v163: si no hay referencia, DECIR POR QUÉ en vez de no mostrar nada.
+    // Antes simplemente no aparecía la línea y no se entendía el motivo.
+    if(!hayRefAll){
+      legend+='<div style="font-size:10px;color:#a3a9b6;margin-bottom:4px">Sin línea de referencia: hacen falta al menos 2 jugadores con este test en '+refInfo.year+
+        (refInfo.nAllRaw===1?' (por ahora hay 1)':'')+'.</div>';
+    } else if(!hayRefPos && miPos){
+      legend+='<div style="font-size:10px;color:#a3a9b6;margin-bottom:4px">Sin línea de '+miPos+': hacen falta al menos 2 jugadores de esa posición ('+
+        (refInfo.nPosRaw||0)+' por ahora).</div>';
+    }
 
     // Tabla de registros con borrado
     var rowsHtml=vals.slice().reverse().map(function(x){
@@ -37207,10 +37224,12 @@ function tstYearRef(t, labels, miPos, excluirJugador){
   var prom=function(arr){ var v=arr.filter(function(x){return x!=null&&!isNaN(x);}); return v.length?v.reduce(function(a,b){return a+b;},0)/v.length:null; };
   var todos=Object.keys(mejorPorJugador);
   var valsAll=todos.map(function(k){ return mejorPorJugador[k].v; });
+  out.nAllRaw=valsAll.length;
   // Con un solo jugador no hay con qué comparar
   if(valsAll.length>=2){ out.allVal=prom(valsAll); out.nAll=valsAll.length; }
   if(miPos){
     var mismos=todos.filter(function(k){ return tstPosOf(mejorPorJugador[k].name)===miPos; });
+    out.nPosRaw=mismos.length;
     if(mismos.length>=2){
       out.posVal=prom(mismos.map(function(k){ return mejorPorJugador[k].v; }));
       out.nPos=mismos.length;
