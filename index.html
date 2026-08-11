@@ -4778,7 +4778,7 @@ function applyPayload(p){
     // the rest of loadData. Defensive check via typeof.
     if(p.GYM_SESSIONS && typeof GYM_SESSIONS!=='undefined'){GYM_SESSIONS.length=0;p.GYM_SESSIONS.forEach(function(s){GYM_SESSIONS.push(s);});}
     if(p.GYM_EXERCISES && typeof GYM_EXERCISES!=='undefined'){GYM_EXERCISES.length=0;p.GYM_EXERCISES.forEach(function(e){GYM_EXERCISES.push(e);});}
-    if(p.GYM_CATS && typeof GYM_CATS!=='undefined'){GYM_CATS.length=0;p.GYM_CATS.forEach(function(c){GYM_CATS.push(c);});}
+    if(p.GYM_CATS && typeof GYM_CATS!=='undefined'){GYM_CATS.length=0;p.GYM_CATS.forEach(function(c){GYM_CATS.push(c);});if(typeof gymSortCats==='function')gymSortCats();}
     if(p.GYM_EVALS && typeof GYM_EVALS!=='undefined')Object.assign(GYM_EVALS,p.GYM_EVALS);
     if(p.TST_DATA && typeof TST_DATA!=='undefined' && Array.isArray(p.TST_DATA)){TST_DATA.length=0;p.TST_DATA.forEach(function(r){TST_DATA.push(r);});}
     if(p.NUTRITION_DATA && typeof NUTRITION_DATA!=='undefined')Object.assign(NUTRITION_DATA,p.NUTRITION_DATA);
@@ -4896,7 +4896,7 @@ function importData(ev){
       if(p.MC_PLAYER_BANDS){Object.keys(MC_PLAYER_BANDS).forEach(function(k){delete MC_PLAYER_BANDS[k];});Object.assign(MC_PLAYER_BANDS,p.MC_PLAYER_BANDS);}
       if(p.GYM_SESSIONS){GYM_SESSIONS.length=0;p.GYM_SESSIONS.forEach(function(s){GYM_SESSIONS.push(s);});}
       if(p.GYM_EXERCISES){GYM_EXERCISES.length=0;p.GYM_EXERCISES.forEach(function(e){GYM_EXERCISES.push(e);});}
-      if(p.GYM_CATS){GYM_CATS.length=0;p.GYM_CATS.forEach(function(c){GYM_CATS.push(c);});}
+      if(p.GYM_CATS){GYM_CATS.length=0;p.GYM_CATS.forEach(function(c){GYM_CATS.push(c);});if(typeof gymSortCats==='function')gymSortCats();}
       if(p.GYM_EVALS){Object.keys(GYM_EVALS).forEach(function(k){delete GYM_EVALS[k];});Object.assign(GYM_EVALS,p.GYM_EVALS);}
       if(p.NUTRITION_DATA && typeof NUTRITION_DATA!=='undefined'){Object.keys(NUTRITION_DATA).forEach(function(k){delete NUTRITION_DATA[k];});Object.assign(NUTRITION_DATA,p.NUTRITION_DATA);}
       if(p.MOBILITY_DATA && typeof MOBILITY_DATA!=='undefined'){Object.keys(MOBILITY_DATA).forEach(function(k){delete MOBILITY_DATA[k];});Object.assign(MOBILITY_DATA,p.MOBILITY_DATA);}
@@ -14311,7 +14311,11 @@ function wellPsePollOnce(){
           return (typeof cargaNormName==='function'?cargaNormName(x.name):x.name)+'__'+((typeof cargaParseDate==='function'&&cargaParseDate(x.date))||x.date)===k;
         });
         if(idx<0){ WELLNESS_DATA.push(rec); changed++; }
-        else if(JSON.stringify(WELLNESS_DATA[idx])!==JSON.stringify(rec)){ WELLNESS_DATA[idx]=rec; changed++; }
+        else {
+          var mioW=WELLNESS_DATA[idx];
+          if(Number(mioW._upd||0) > Number(rec._upd||0)) return;   // v164
+          if(JSON.stringify(mioW)!==JSON.stringify(rec)){ WELLNESS_DATA[idx]=rec; changed++; }
+        }
       });
     }catch(e){}
     // PSE
@@ -14325,7 +14329,14 @@ function wellPsePollOnce(){
           return (typeof cargaNormName==='function'?cargaNormName(x.name):x.name)+'__'+x.date+'__'+(x.week||'')+'__'+(x.day||'')===k;
         });
         if(idx<0){ PSE_DATA.push(rec); changed++; }
-        else if(JSON.stringify(PSE_DATA[idx])!==JSON.stringify(rec)){ PSE_DATA[idx]=rec; changed++; }
+        else {
+          // v164: NO pisar si lo local es más nuevo. Éste era el bug de los
+          // minutos: se escribían, el refresco traía la fila de la nube (que
+          // todavía no los tenía) y los borraba.
+          var mio=PSE_DATA[idx];
+          if(Number(mio._upd||0) > Number(rec._upd||0)) return;
+          if(JSON.stringify(mio)!==JSON.stringify(rec)){ PSE_DATA[idx]=rec; changed++; }
+        }
       });
     }catch(e){}
     if(changed){
@@ -18393,7 +18404,7 @@ var _gymEditRows = [];  // filas del modal edición
     var p = JSON.parse(raw);
     if(p.GYM_SESSIONS && p.GYM_SESSIONS.length){ GYM_SESSIONS.length=0; p.GYM_SESSIONS.forEach(function(s){GYM_SESSIONS.push(s);}); }
     if(p.GYM_EXERCISES && p.GYM_EXERCISES.length){ GYM_EXERCISES.length=0; p.GYM_EXERCISES.forEach(function(e){GYM_EXERCISES.push(e);}); }
-    if(p.GYM_CATS && p.GYM_CATS.length){ GYM_CATS.length=0; p.GYM_CATS.forEach(function(c){GYM_CATS.push(c);}); }
+    if(p.GYM_CATS && p.GYM_CATS.length){ GYM_CATS.length=0; p.GYM_CATS.forEach(function(c){GYM_CATS.push(c);}); if(typeof gymSortCats==='function')gymSortCats(); }
     if(p.GYM_EVALS) Object.assign(GYM_EVALS, p.GYM_EVALS);
     if(p.EVAL_ALIASES) Object.assign(EVAL_ALIASES, p.EVAL_ALIASES);
   }catch(e){ console.warn('gymLoadData error:', e); }
@@ -20435,10 +20446,36 @@ function gymMoveCat(idx, dir){
   var tidx = GYM_CATS.indexOf(target);
   // Swap in GYM_CATS
   GYM_CATS[idx]=target; GYM_CATS[tidx]=c;
+  // v164: reindexar y subir, para que el orden sobreviva a la recarga
+  gymReindexCats();
   saveData();
+  if(typeof sbScheduleTanda2aSync==='function'){ try{ sbScheduleTanda2aSync(); }catch(e){} }
   gymRenderCatsList();
   gymRenderLibCats();
 }
+// v164: graba la posición de cada categoría en su propio campo `_ord`.
+// v164: ordena GYM_CATS por el campo `_ord` guardado. Estable: las que no
+// tienen orden quedan al final, en su posición relativa original.
+function gymSortCats(){
+  try{
+    var conOrden=(GYM_CATS||[]).map(function(c,i){ return {c:c, o:(c&&c._ord!=null)?Number(c._ord):null, i:i}; });
+    conOrden.sort(function(a,b){
+      if(a.o==null&&b.o==null) return a.i-b.i;
+      if(a.o==null) return 1;
+      if(b.o==null) return -1;
+      return a.o-b.o || a.i-b.i;
+    });
+    var out=conOrden.map(function(x){return x.c;});
+    GYM_CATS.length=0;
+    out.forEach(function(c){ GYM_CATS.push(c); });
+  }catch(e){}
+}
+window.gymSortCats=gymSortCats;
+
+function gymReindexCats(){
+  try{ (GYM_CATS||[]).forEach(function(c,i){ if(c) c._ord=i; }); }catch(e){}
+}
+window.gymReindexCats=gymReindexCats;
 window.gymMoveCat = gymMoveCat;
 
 function gymAddCat(){
@@ -20448,7 +20485,7 @@ function gymAddCat(){
   var msg    = document.getElementById('gym-cat-msg');
   if(!name){ msg.style.color='#E24B4A'; msg.textContent='Escribí un nombre.'; return; }
   if(GYM_CATS.find(function(c){return c.name===name;})){ msg.style.color='#E24B4A'; msg.textContent='Ya existe.'; return; }
-  GYM_CATS.push({name:name, color:color, parent:parent||null});
+  GYM_CATS.push({name:name, color:color, parent:parent||null, _ord:GYM_CATS.length});
   saveData();
   document.getElementById('gym-new-cat-name').value='';
   msg.style.color='#1D9E75'; msg.textContent='"'+name+'" agregada.'; setTimeout(function(){msg.textContent='';},3000);
@@ -26045,6 +26082,9 @@ function cargaSetPseMin(name, dateIso, mins){
     rec.min = m>0 ? m : null;
     if(!rec.fields) rec.fields={};
     if(m>0) rec.fields._min = m; else delete rec.fields._min;
+    // v164: sellar la edición. Sin esto el refresco automático traía la
+    // versión de la nube (sin minutos) y pisaba lo recién escrito.
+    rec._upd=Date.now(); rec.fields._upd=rec._upd;
   }
   saveData();
   // v152: subir a la nube también los minutos individuales
@@ -26070,6 +26110,7 @@ function cargaSetPseMinGroup(dateIso, mins){
       r.min=m>0?m:null;
       if(!r.fields) r.fields={};
       if(m>0) r.fields._min=m; else delete r.fields._min;
+      r._upd=Date.now(); r.fields._upd=r._upd;   // v164: sello de edición
       n++;
     }
   });
@@ -33168,6 +33209,9 @@ function _sbPseToPayload(r){
   var f = r.fields || {};
   // Guardar minutos de trabajo en el JSONB para calcular UA sin GPS
   if(r.min!=null && !isNaN(r.min) && (f._min==null)) { f = Object.assign({}, f, {_min:r.min}); }
+  // v164: el sello de modificación viaja dentro de fields, para poder decidir
+  // quién gana cuando el mismo registro se editó en dos lados.
+  if(r._upd!=null && f._upd==null) { f = Object.assign({}, f, {_upd:r._upd}); }
   return {
     name: r.name || '',
     date: _sbValidDate(r.date),
@@ -33187,6 +33231,7 @@ function _sbPseFromRow(row){
     pse: row.pse,
     fields: f,
     min: (f._min!=null && !isNaN(f._min)) ? f._min : null,
+    _upd: (f._upd!=null && !isNaN(f._upd)) ? f._upd : 0,
     week: row.week || '',
     day: row.day || ''
   };
@@ -33819,9 +33864,14 @@ function sbGymCatsFetchAll(){
   return sbClient.from('gym_cats').select('*').eq('categoria', SB_CATEGORIA)
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
-function _sbGymCatToPayload(c){
+function _sbGymCatToPayload(c, idx){
   var data = Object.assign({}, c);
   delete data.name; delete data.color; delete data.parent;
+  // v164: el ORDEN se guarda explícitamente. Antes el orden era sólo la
+  // posición en el array local; la nube no lo guardaba y al recargar las
+  // categorías volvían en el orden arbitrario de la base de datos.
+  if(idx!=null) data._ord=idx;
+  else if(c._ord!=null) data._ord=c._ord;
   return {
     name: c.name || '',
     color: c.color || null,
@@ -33899,7 +33949,7 @@ function sbScheduleTanda2aSync(){
     }
     // GYM_CATS
     if(typeof GYM_CATS!=='undefined' && Array.isArray(GYM_CATS) && GYM_CATS.length){
-      var cPayload = GYM_CATS.map(_sbGymCatToPayload).filter(function(p){return p.name;});
+      var cPayload = GYM_CATS.map(function(c,i){return _sbGymCatToPayload(c,i);}).filter(function(p){return p.name;});
       if(cPayload.length){
         console.log('[Supabase] Sync gym_cats (' + cPayload.length + ')');
         sbClient.from('gym_cats').upsert(cPayload, { onConflict: 'name,categoria' }).then(function(res){
@@ -33954,9 +34004,17 @@ sbLoadInitialData = function(){
       var keys = {};
       rows.forEach(function(row){ keys[row.name] = _sbGymCatFromRow(row); });
       var localOnly = GYM_CATS.filter(function(c){ return !keys[c.name]; });
+      // v164: respetar el orden guardado. Las que no lo tengan van al final,
+      // conservando su posición relativa.
+      var deNube = Object.values(keys);
+      deNube.sort(function(a,b){
+        var oa=(a._ord!=null)?Number(a._ord):9999, ob=(b._ord!=null)?Number(b._ord):9999;
+        return oa-ob;
+      });
       GYM_CATS.length = 0;
-      Object.values(keys).forEach(function(c){ GYM_CATS.push(c); });
+      deNube.forEach(function(c){ GYM_CATS.push(c); });
       localOnly.forEach(function(c){ GYM_CATS.push(c); });
+      gymReindexCats();
       console.log('[Supabase] Cargados ' + rows.length + ' gym_cats.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
     } else {
       console.log('[Supabase] No hay gym_cats en Supabase todavía.');
@@ -34014,7 +34072,7 @@ function sbMigrateTanda2aLocalToCloud(){
     if(eP.length) tasks.push(sbClient.from('gym_exercises').upsert(eP, { onConflict: 'id' }));
   }
   if(nCat){
-    var cP = GYM_CATS.map(_sbGymCatToPayload).filter(function(p){return p.name;});
+    var cP = GYM_CATS.map(function(c,i){return _sbGymCatToPayload(c,i);}).filter(function(p){return p.name;});
     if(cP.length) tasks.push(sbClient.from('gym_cats').upsert(cP, { onConflict: 'name,categoria' }));
   }
   if(nEv) tasks.push(sbClient.from('gym_evals').upsert(_sbGymEvalsToPayloads(GYM_EVALS), { onConflict: 'player_key,categoria' }));
