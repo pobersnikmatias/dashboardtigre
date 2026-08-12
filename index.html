@@ -35862,9 +35862,21 @@ function tstMergeRecords(base, incoming){
     if(!k||k==='||||')return;
     var cur=out[k];
     if(!cur){ out[k]=r; order.push(k); return; }
+    // v166: la NOTA se rescata siempre, gane quien gane. El comentario y los
+    // números suelen cargarse desde dispositivos distintos (vos los valores,
+    // tu compañero la observación), así que no pueden competir entre sí.
+    var notaRescatada = cur.note || r.note || null;
     // Gana el más nuevo. Si ninguno tiene sello, gana el que tiene más datos.
     var a=Number(cur._upd||0), b=Number(r._upd||0);
-    if(b>a){ out[k]=r; return; }
+    if(b>a){
+      out[k]=r;
+      if(!out[k].note && notaRescatada) out[k].note=notaRescatada;
+      return;
+    }
+    if(b<a){
+      if(!cur.note && notaRescatada) cur.note=notaRescatada;
+      return;
+    }
     if(b===a){
       var score=function(x){
         var n=0;
@@ -35872,6 +35884,7 @@ function tstMergeRecords(base, incoming){
         return n;
       };
       if(score(r)>score(cur)) out[k]=r;
+      if(out[k] && !out[k].note && notaRescatada) out[k].note=notaRescatada;
     }
   };
   (base||[]).forEach(put);
@@ -36873,14 +36886,16 @@ function tstCellInput(t,name,rec){
     var asy=tstAsym(rec);
     var asyHtml=asy!=null?'<div style="font-size:8.5px;font-weight:700;color:'+(Math.abs(asy)>=15?'#D9534F':(Math.abs(asy)>=10?'#E8A13C':'#1D9E75'))+'">D '+(asy>0?'+':'')+asy.toFixed(0)+'%</div>':'';
     return '<div style="display:flex;gap:3px;align-items:center;justify-content:center">'+
-      '<input value="'+vi+'" placeholder="I" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'I\',this.value)" style="width:46px;padding:5px 3px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+
-      '<input value="'+vd+'" placeholder="D" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'D\',this.value)" style="width:46px;padding:5px 3px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+
-      asyHtml+'</div>';
+      '<input value="'+vi+'" placeholder="I" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'I\',this.value)" style="width:44px;padding:5px 3px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+
+      '<input value="'+vd+'" placeholder="D" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'D\',this.value)" style="width:44px;padding:5px 3px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+
+      tstNoteBtn(t.id,name,rec)+asyHtml+'</div>';
   }
   var raw=rec?(rec._raw!=null?rec._raw:(rec.val!=null?rec.val:'')):'';
   var avg=(rec&&rec.reps>1&&rec.val!=null)?'<div style="font-size:8.5px;color:#3B4D88;font-weight:700">x '+rec.val.toFixed(1)+'</div>':'';
   var ph=t.mode==='multi'?'ej: 38 40 39':'valor';
-  return '<div><input value="'+raw+'" placeholder="'+ph+'" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'B\',this.value)" style="width:76px;padding:5px 4px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+avg+'</div>';
+  return '<div style="display:flex;gap:2px;align-items:center;justify-content:center">'+
+    '<div><input value="'+raw+'" placeholder="'+ph+'" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'B\',this.value)" style="width:72px;padding:5px 4px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+avg+'</div>'+
+    tstNoteBtn(t.id,name,rec)+'</div>';
 }
 function tstDateChange(v){ _tstDate=v||tstToday(); tstRender(); }
 window.tstDateChange=tstDateChange;
@@ -36904,6 +36919,48 @@ function tstToggleTest(id){
   tstRender();
 }
 window.tstToggleTest=tstToggleTest;
+// ═══ COMENTARIOS POR REGISTRO (v166) ═════════════════════════════════════
+// La nota es de UN test, UN jugador y UNA fecha. Un test posterior arranca sin
+// comentario: no se arrastra.
+function tstEditNote(testId, nameL, nameEnc, dateIso){
+  var name=decodeURIComponent(nameEnc);
+  var date=dateIso||_tstDate;
+  var t=tstById(testId);
+  var idx=TST_DATA.findIndex(function(r){
+    return r.testId===testId && tstNorm(r.name)===nameL && r.date===date;
+  });
+  var actual=(idx>=0 && TST_DATA[idx].note)?TST_DATA[idx].note:'';
+  var titulo=name+'\n'+((t&&t.name)||testId)+' · '+tstFmtDateLong(date)+
+    '\n\nComentario (ej: "Refiere dolor en aductor derecho").\nDejalo vacío para borrarlo:';
+  var v=prompt(titulo, actual);
+  if(v===null)return;                      // canceló
+  v=String(v).trim();
+  if(idx<0){
+    if(!v)return;                          // no crear un registro sólo por una nota vacía
+    var rec={id:Date.now()+Math.floor(Math.random()*100000), testId:testId, name:name, date:date, note:v};
+    if(typeof tstTouch==='function') tstTouch(rec);
+    TST_DATA.push(rec);
+  } else {
+    if(v) TST_DATA[idx].note=v; else delete TST_DATA[idx].note;
+    if(typeof tstTouch==='function') tstTouch(TST_DATA[idx]);
+  }
+  if(typeof tstSaveAll==='function') tstSaveAll();
+  else if(typeof saveData==='function') saveData();
+  tstRender();
+}
+window.tstEditNote=tstEditNote;
+
+// Botón de comentario para la grilla de carga
+function tstNoteBtn(testId, name, rec, dateIso){
+  var tiene=!!(rec&&rec.note);
+  var nl=tstNorm(name).replace(/'/g,"\\'");
+  var tip=tiene?String(rec.note).replace(/"/g,'&quot;'):'Agregar comentario';
+  return '<button onclick="tstEditNote(\''+testId+'\',\''+nl+'\',\''+encodeURIComponent(name)+'\',\''+(dateIso||_tstDate)+'\')" '+
+    'title="'+tip+'" style="border:none;background:none;cursor:pointer;font-size:12px;padding:0 2px;line-height:1;'+
+    (tiene?'':'opacity:.3')+'">'+(tiene?'📝':'✎')+'</button>';
+}
+window.tstNoteBtn=tstNoteBtn;
+
 function tstSaveCell(testId,nameL,nameEnc,side,rawVal){
   var name=decodeURIComponent(nameEnc);
   var t=tstById(testId); if(!t)return;
@@ -37088,6 +37145,10 @@ function tstChart(series,labels,opts){
         svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isBest?6:4.2)+'" fill="#fff" stroke="'+s.color+'" stroke-width="'+(isBest?3:2.4)+'" stroke-opacity="'+op+'">'+
           '<title>'+tstFmtDateLong(labels[p[2]])+(s.label?' · '+s.label:'')+': '+tstFmtV(p[3],unit,opts.test)+' '+unit+'</title></circle>';
         if(isBest)svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="2.2" fill="'+s.color+'"/>';
+        // v166: distintivo para los días con comentario
+        if(s.noteIdx && s.noteIdx.indexOf(p[2])>=0){
+          svg+='<circle cx="'+(p[0]+7).toFixed(1)+'" cy="'+(p[1]-7).toFixed(1)+'" r="4" fill="#E8A13C" stroke="#fff" stroke-width="1.5"><title>Tiene comentario</title></circle>';
+        }
       });
       if(n<=7 && s.values!==false){
         // v161: las etiquetas se registran para resolver superposiciones al
@@ -37174,9 +37235,13 @@ function tstRenderIndiv(){
 
   var cards=order.map(function(t){
     var series=byTest[t.id].slice().sort(function(a,b){return a.date<b.date?-1:1;});
+    // v166: incluir los registros que sólo tienen comentario (sin valor), para
+    // no perder de vista una observación cargada antes de medir.
     var vals=series.map(function(r){
       return {id:r.id, date:r.date, v:tstVal(r), vI:(r.valI!=null?r.valI:null), vD:(r.valD!=null?r.valD:null), asy:tstAsym(r), note:r.note};
     }).filter(function(x){return x.v!=null;});
+    var soloNota=series.filter(function(r){ return tstVal(r)==null && r.note; })
+      .map(function(r){ return {id:r.id, date:r.date, note:r.note}; });
     if(!vals.length)return '';
     var isUni=(t.lat==='uni')&&vals.some(function(x){return x.vI!=null||x.vD!=null;});
     var labels=vals.map(function(x){return x.date;});
@@ -37231,6 +37296,12 @@ function tstRenderIndiv(){
     } else {
       serie.push({key:'v',label:'',color:'#3B4D88',pts:nums,area:true,bestIdx:bestIdx});
     }
+    // v166: marcar con un punto los días que tienen comentario
+    serie.forEach(function(sr){
+      if(sr.key==='v'||sr.key==='I'||sr.key==='D'){
+        sr.noteIdx=vals.map(function(x,i){ return x.note?i:-1; }).filter(function(i){return i>=0;});
+      }
+    });
     // v162: el SVG se escala al ancho real de la pantalla, así que una línea
     // de 1,6 con guiones de 2px quedaba prácticamente invisible. Ahora son
     // gruesas, de color marcado, con guion grande y una etiqueta al final con
@@ -37265,13 +37336,30 @@ function tstRenderIndiv(){
         var a2=Math.abs(x.asy);
         asyCell='<span style="color:'+(a2>=15?'#D9534F':(a2>=10?'#E8A13C':'#1D9E75'))+';font-weight:700">'+(x.asy>0?'D +':'I +')+a2.toFixed(0)+'%</span>';
       }
+      // v166: comentario de ese día, editable desde acá
+      var nl=tstNorm(_tstIndivPlayer).replace(/'/g,"\\'");
+      var noteCell='<div onclick="tstEditNote(\''+t.id+'\',\''+nl+'\',\''+encodeURIComponent(_tstIndivPlayer)+'\',\''+x.date+'\')" '+
+        'style="cursor:pointer;font-size:10.5px;'+(x.note?'color:#8a6d3b':'color:#ccc')+'" title="'+(x.note?'Editar comentario':'Agregar comentario')+'">'+
+        (x.note?('📝 '+tstEsc(x.note)):'✎ agregar comentario')+'</div>';
       return '<tr>'+
-        '<td style="padding:6px 10px;font-size:11px;color:#666;border-bottom:1px solid #f2f2f2;white-space:nowrap">'+tstFmtDateLong(x.date)+'</td>'+
-        '<td style="padding:6px 10px;font-size:12px;border-bottom:1px solid #f2f2f2;white-space:nowrap">'+valCell+'</td>'+
-        '<td style="padding:6px 10px;font-size:11px;border-bottom:1px solid #f2f2f2;white-space:nowrap">'+asyCell+'</td>'+
-        '<td style="padding:4px 8px;border-bottom:1px solid #f2f2f2;text-align:right">'+
+        '<td style="padding:6px 10px;font-size:11px;color:#666;border-bottom:1px solid #f2f2f2;white-space:nowrap;vertical-align:top">'+tstFmtDateLong(x.date)+'</td>'+
+        '<td style="padding:6px 10px;font-size:12px;border-bottom:1px solid #f2f2f2;white-space:nowrap;vertical-align:top">'+valCell+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;border-bottom:1px solid #f2f2f2;white-space:nowrap;vertical-align:top">'+asyCell+'</td>'+
+        '<td style="padding:6px 10px;border-bottom:1px solid #f2f2f2;min-width:150px">'+noteCell+'</td>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid #f2f2f2;text-align:right;vertical-align:top">'+
           '<button onclick="tstDelRecord(\''+x.id+'\')" title="Borrar este registro" style="background:#fff;border:1px solid #f0d0d0;color:#D9534F;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">🗑</button>'+
         '</td></tr>';
+    }).join('');
+    // Registros que sólo tienen comentario
+    rowsHtml+=soloNota.map(function(x){
+      var nl2=tstNorm(_tstIndivPlayer).replace(/'/g,"\\'");
+      return '<tr style="background:#fffdf5">'+
+        '<td style="padding:6px 10px;font-size:11px;color:#666;border-bottom:1px solid #f2f2f2;white-space:nowrap">'+tstFmtDateLong(x.date)+'</td>'+
+        '<td colspan="2" style="padding:6px 10px;font-size:11px;color:#bbb;border-bottom:1px solid #f2f2f2">sin medición</td>'+
+        '<td style="padding:6px 10px;border-bottom:1px solid #f2f2f2">'+
+          '<div onclick="tstEditNote(\''+t.id+'\',\''+nl2+'\',\''+encodeURIComponent(_tstIndivPlayer)+'\',\''+x.date+'\')" style="cursor:pointer;font-size:10.5px;color:#8a6d3b">📝 '+tstEsc(x.note)+'</div></td>'+
+        '<td style="padding:4px 8px;text-align:right;border-bottom:1px solid #f2f2f2">'+
+          '<button onclick="tstDelRecord(\''+x.id+'\')" title="Borrar" style="background:#fff;border:1px solid #f0d0d0;color:#D9534F;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">🗑</button></td></tr>';
     }).join('');
 
     // v161: tarjeta compacta, para que entren varios tests en pantalla
@@ -37282,8 +37370,21 @@ function tstRenderIndiv(){
         '<span style="font-size:9.5px;color:#a3a9b6;font-weight:600">'+t.unit+' · '+(t.better==='down'?'menos es mejor':'más es mejor')+'</span>'+
       '</div>'+
       kpis+legend+chart+
+      // v166: los comentarios a la vista, sin tener que desplegar la tabla
+      (function(){
+        var conNota=vals.filter(function(x){return x.note;}).concat(soloNota);
+        if(!conNota.length)return '';
+        conNota.sort(function(a,b){ return a.date<b.date?1:-1; });
+        return '<div style="margin-top:8px;background:#fffdf5;border:1px solid #f0e6c8;border-radius:7px;padding:7px 10px">'+
+          conNota.slice(0,3).map(function(x){
+            return '<div style="font-size:10.5px;color:#7a6338;margin:1px 0"><b>'+tstFmtDate(x.date)+'</b> · '+tstEsc(x.note)+'</div>';
+          }).join('')+
+          (conNota.length>3?'<div style="font-size:9.5px;color:#a89878;margin-top:2px">+'+(conNota.length-3)+' comentario(s) más en la tabla</div>':'')+
+        '</div>';
+      })()+
       '<details style="margin-top:7px">'+
-        '<summary style="font-size:10.5px;color:#3B4D88;font-weight:700;cursor:pointer;outline:none">🗂 Registros ('+vals.length+')</summary>'+
+        '<summary style="font-size:10.5px;color:#3B4D88;font-weight:700;cursor:pointer;outline:none">🗂 Registros ('+vals.length+')'+
+          (vals.filter(function(x){return x.note;}).length+soloNota.length?' · 📝 '+(vals.filter(function(x){return x.note;}).length+soloNota.length):'')+'</summary>'+
         '<table style="border-collapse:collapse;width:100%;margin-top:7px">'+rowsHtml+'</table>'+
       '</details>'+
     '</div>';
