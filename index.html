@@ -20473,7 +20473,14 @@ function gymSortCats(){
 window.gymSortCats=gymSortCats;
 
 function gymReindexCats(){
-  try{ (GYM_CATS||[]).forEach(function(c,i){ if(c) c._ord=i; }); }catch(e){}
+  // v165: además del índice, se sella CUÁNDO se ordenó. El sync del compañero
+  // subía el orden de su copia vieja y pisaba el que vos acababas de definir.
+  // Con el sello, sólo gana el reordenamiento más reciente.
+  var ts=Date.now();
+  try{
+    (GYM_CATS||[]).forEach(function(c,i){ if(c){ c._ord=i; c._ordTs=ts; } });
+    localStorage.setItem('gymCatsOrdTs_v1', String(ts));
+  }catch(e){}
 }
 window.gymReindexCats=gymReindexCats;
 window.gymMoveCat = gymMoveCat;
@@ -33332,25 +33339,51 @@ function sbScheduleWellPseSync(){
     _sbWellPseSyncTimer = null;
     // Wellness
     if(typeof WELLNESS_DATA!=='undefined' && Array.isArray(WELLNESS_DATA) && WELLNESS_DATA.length){
-      var wPayload = WELLNESS_DATA.map(_sbWellnessToPayload).filter(function(p){return p.date;});
-      if(wPayload.length){
-        console.log('[Supabase] Sync wellness (' + wPayload.length + ')');
+      // v165: leer la nube y FUSIONAR antes de subir. El sync subía el array
+      // completo tal como estaba en memoria: si el compañero tenía una copia
+      // vieja, su sync borraba de la nube los minutos que vos acababas de
+      // cargar. Ahora sólo sube lo que es más nuevo que lo que ya está.
+      sbClient.from('wellness_data').select('*').eq('categoria', SB_CATEGORIA).then(function(cw){
+        var enNube={};
+        if(cw && cw.data) cw.data.forEach(function(row){
+          var r=_sbWellnessFromRow(row);
+          enNube[(r.name||'')+'|'+(r.date||'')]=Number((row.fields&&row.fields._upd)||0);
+        });
+        var wPayload = WELLNESS_DATA.map(_sbWellnessToPayload).filter(function(p){
+          if(!p.date)return false;
+          var k=(p.name||'')+'|'+(p.date||'');
+          if(!(k in enNube))return true;                       // no está: subir
+          return Number((p.fields&&p.fields._upd)||0) >= enNube[k];   // sólo si soy igual o más nuevo
+        });
+        if(!wPayload.length){ console.log('[Supabase] Wellness sin cambios para subir.'); return; }
+        console.log('[Supabase] Sync wellness (' + wPayload.length + ' de ' + WELLNESS_DATA.length + ')');
         sbClient.from('wellness_data').upsert(wPayload, { onConflict: 'name,date,categoria' }).then(function(res){
           if(res.error){ console.error('[Supabase] Sync wellness error:', res.error); setTimeout(sbScheduleWellPseSync, 10000); }
           else console.log('[Supabase] Sync wellness OK');
         });
-      }
+      });
     }
     // PSE
     if(typeof PSE_DATA!=='undefined' && Array.isArray(PSE_DATA) && PSE_DATA.length){
-      var pPayload = PSE_DATA.map(_sbPseToPayload).filter(function(p){return p.date;});
-      if(pPayload.length){
-        console.log('[Supabase] Sync PSE (' + pPayload.length + ')');
+      sbClient.from('pse_data').select('*').eq('categoria', SB_CATEGORIA).then(function(cp){
+        var enNubeP={};
+        if(cp && cp.data) cp.data.forEach(function(row){
+          var k=(row.name||'')+'|'+(row.date||'')+'|'+(row.week||'')+'|'+(row.day||'');
+          enNubeP[k]=Number((row.fields&&row.fields._upd)||0);
+        });
+        var pPayload = PSE_DATA.map(_sbPseToPayload).filter(function(p){
+          if(!p.date)return false;
+          var k=(p.name||'')+'|'+(p.date||'')+'|'+(p.week||'')+'|'+(p.day||'');
+          if(!(k in enNubeP))return true;
+          return Number((p.fields&&p.fields._upd)||0) >= enNubeP[k];
+        });
+        if(!pPayload.length){ console.log('[Supabase] PSE sin cambios para subir.'); return; }
+        console.log('[Supabase] Sync PSE (' + pPayload.length + ' de ' + PSE_DATA.length + ')');
         sbClient.from('pse_data').upsert(pPayload, { onConflict: 'name,date,week,day,categoria' }).then(function(res){
           if(res.error){ console.error('[Supabase] Sync PSE error:', res.error); setTimeout(sbScheduleWellPseSync, 10000); }
           else console.log('[Supabase] Sync PSE OK');
         });
-      }
+      });
     }
   }, 1500);
 }
@@ -33949,14 +33982,45 @@ function sbScheduleTanda2aSync(){
     }
     // GYM_CATS
     if(typeof GYM_CATS!=='undefined' && Array.isArray(GYM_CATS) && GYM_CATS.length){
-      var cPayload = GYM_CATS.map(function(c,i){return _sbGymCatToPayload(c,i);}).filter(function(p){return p.name;});
-      if(cPayload.length){
+      // v165: leer el orden que ya está en la nube. Si el de allá es MÁS
+      // NUEVO que el mío, no lo piso: subo sólo el resto de los campos.
+      sbClient.from('gym_cats').select('*').eq('categoria', SB_CATEGORIA).then(function(cg){
+        var tsNube=0, enNube={};
+        if(cg && cg.data) cg.data.forEach(function(row){
+          var d=row.data||{};
+          enNube[row.name]=d;
+          var t=Number(d._ordTs||0);
+          if(t>tsNube) tsNube=t;
+        });
+        var tsMio=0;
+        try{ tsMio=Number(localStorage.getItem('gymCatsOrdTs_v1')||0); }catch(e){}
+        (GYM_CATS||[]).forEach(function(c){ if(c&&c._ordTs>tsMio) tsMio=Number(c._ordTs); });
+        var miOrdenGana = tsMio>=tsNube;
+        if(!miOrdenGana){
+          console.log('[Supabase] gym_cats: el orden de la nube es más nuevo, se respeta.');
+          // Adoptar el orden remoto en memoria
+          (GYM_CATS||[]).forEach(function(c){
+            var d=enNube[c.name];
+            if(d&&d._ord!=null){ c._ord=d._ord; c._ordTs=d._ordTs; }
+          });
+          if(typeof gymSortCats==='function') gymSortCats();
+          try{ localStorage.setItem('gymCatsOrdTs_v1', String(tsNube)); }catch(e){}
+          try{ if(typeof saveData==='function')saveData(); }catch(e){}
+          try{ if(typeof gymRenderCatsList==='function')gymRenderCatsList(); if(typeof gymRenderLibCats==='function')gymRenderLibCats(); }catch(e){}
+        }
+        var cPayload = GYM_CATS.map(function(c,i){
+          var pl=_sbGymCatToPayload(c, miOrdenGana?i:(c._ord!=null?c._ord:i));
+          if(miOrdenGana) pl.data._ordTs=tsMio||Date.now();
+          else if(c._ordTs!=null) pl.data._ordTs=c._ordTs;
+          return pl;
+        }).filter(function(p){return p.name;});
+        if(!cPayload.length)return;
         console.log('[Supabase] Sync gym_cats (' + cPayload.length + ')');
         sbClient.from('gym_cats').upsert(cPayload, { onConflict: 'name,categoria' }).then(function(res){
           if(res.error) console.error('[Supabase] Sync gym_cats error:', res.error);
           else console.log('[Supabase] Sync gym_cats OK');
         });
-      }
+      });
     }
     // GYM_EVALS
     if(typeof GYM_EVALS!=='undefined' && GYM_EVALS && Object.keys(GYM_EVALS).length){
@@ -34014,7 +34078,11 @@ sbLoadInitialData = function(){
       GYM_CATS.length = 0;
       deNube.forEach(function(c){ GYM_CATS.push(c); });
       localOnly.forEach(function(c){ GYM_CATS.push(c); });
-      gymReindexCats();
+      // v165: NO reindexar acá (eso pisaba el orden con la posición del array
+      // y generaba un sello nuevo). Sólo se conserva el que vino de la nube.
+      var maxTs=0;
+      GYM_CATS.forEach(function(c){ if(c&&Number(c._ordTs||0)>maxTs) maxTs=Number(c._ordTs); });
+      if(maxTs){ try{ localStorage.setItem('gymCatsOrdTs_v1', String(maxTs)); }catch(e){} }
       console.log('[Supabase] Cargados ' + rows.length + ' gym_cats.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
     } else {
       console.log('[Supabase] No hay gym_cats en Supabase todavía.');
