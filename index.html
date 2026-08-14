@@ -35091,6 +35091,9 @@ var SB_SETTINGS_KEYS = [
   // NUNCA se registraron acá, y como el sync recorre esta lista, no subían ni
   // bajaban nunca. Por eso los pendientes del CT no se guardaban: quedaban
   // sólo en el dispositivo donde se escribían.
+  'VBT_SESSIONS',
+  'VBT_ZONES',
+  'VBT_V1RM',
   'TST_EX_MAP',
   'TST_NAME_MAP',
   'HOY_TODOS',
@@ -35240,6 +35243,22 @@ function _sbApplySettingRow(row){
         }
       }
     }catch(e){ console.warn('[Resistencia] merge:',e); }
+    return;
+  }
+  // v167: las sesiones VBT se FUSIONAN, nunca se reemplazan.
+  if(row.key==='VBT_SESSIONS'){
+    try{
+      if(typeof vbtMergeSessions==='function') vbtMergeSessions(Array.isArray(row.value)?row.value:[]);
+    }catch(e){ console.warn('[VBT] merge:',e); }
+    return;
+  }
+  if(row.key==='VBT_ZONES'){
+    try{
+      if(Array.isArray(row.value)&&row.value.length&&typeof VBT_ZONES!=='undefined'){
+        VBT_ZONES.length=0; row.value.forEach(function(z){ VBT_ZONES.push(z); });
+        localStorage.setItem('vbtZones_v1', JSON.stringify(VBT_ZONES));
+      }
+    }catch(e){}
     return;
   }
   if(row.key==='TST_CATALOG'){
@@ -36052,6 +36071,258 @@ function tstSaveNow(){
   return n;
 }
 window.tstSaveNow=tstSaveNow;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MÓDULO VBT (v167) — Velocity Based Training
+// Cada sesión trae varias SERIES por jugador (peso + MPV + Peak Power + Peak
+// Force). No entra en el modelo de TST_DATA (un valor por jugador y fecha),
+// así que vive en su propio espacio: VBT_SESSIONS.
+// Estructura: {id, date, name, sets:[{name, ex, w, mpv, pp, pf, reps, excl}]}
+// ═══════════════════════════════════════════════════════════════════════════
+var VBT_SESSIONS=[];
+try{
+  var _vs=JSON.parse(localStorage.getItem('vbtSessions_v1')||'null');
+  if(Array.isArray(_vs)) VBT_SESSIONS=_vs;
+}catch(e){}
+
+// Zonas de entrenamiento. Vienen de la literatura (% del 1RM traducido a
+// velocidad), pero son EDITABLES: la MPV donde cada jugador maximiza potencia
+// o fuerza es individual y puede no coincidir con la referencia general.
+var VBT_ZONES_DEFAULT=[
+  {k:'vmax',  lbl:'Velocidad máxima',  min:1.00, max:9.99, col:'#2E9BB5'},
+  {k:'pot',   lbl:'Potencia',          min:0.75, max:1.00, col:'#1D9E75'},
+  {k:'fzavel',lbl:'Fuerza-velocidad',  min:0.50, max:0.75, col:'#EF9F27'},
+  {k:'fzmax', lbl:'Fuerza máxima',     min:0.00, max:0.50, col:'#D9534F'}
+];
+var VBT_ZONES=[];
+try{
+  var _vz=JSON.parse(localStorage.getItem('vbtZones_v1')||'null');
+  VBT_ZONES=(Array.isArray(_vz)&&_vz.length)?_vz:VBT_ZONES_DEFAULT.map(function(z){return Object.assign({},z);});
+}catch(e){ VBT_ZONES=VBT_ZONES_DEFAULT.map(function(z){return Object.assign({},z);}); }
+
+// Umbral de MPV que corresponde al 1RM, por ejercicio. Sánchez-Medina 2017:
+// ~0.17 m/s en sentadilla, ~0.15 en press banca, ~0.20 en peso muerto.
+var VBT_V1RM={};
+try{ VBT_V1RM=JSON.parse(localStorage.getItem('vbtV1rm_v1')||'{}')||{}; }catch(e){ VBT_V1RM={}; }
+function vbtV1rmOf(ex){
+  var k=String(ex||'').toLowerCase();
+  if(VBT_V1RM[k]!=null) return Number(VBT_V1RM[k]);
+  if(/banca|bench|press/.test(k)) return 0.15;
+  if(/muerto|deadlift/.test(k)) return 0.20;
+  return 0.17;
+}
+window.vbtV1rmOf=vbtV1rmOf;
+
+function vbtSave(){
+  try{ VBT_SESSIONS.forEach(function(s){ if(s&&s._upd==null)s._upd=Date.now(); }); }catch(e){}
+  try{ localStorage.setItem('vbtSessions_v1', JSON.stringify(VBT_SESSIONS)); }catch(e){}
+  try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync(); }catch(e){}
+}
+window.vbtSave=vbtSave;
+function vbtZonesSave(){
+  try{ localStorage.setItem('vbtZones_v1', JSON.stringify(VBT_ZONES)); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync(); }catch(e){}
+}
+window.vbtZonesSave=vbtZonesSave;
+
+// ── Unión de sesiones entre dispositivos (mismo criterio que el resto) ──
+function vbtMergeSessions(cloud){
+  var by={}, order=[];
+  var put=function(s){
+    if(!s||!s.id)return;
+    var cur=by[s.id];
+    if(!cur){ by[s.id]=s; order.push(s.id); return; }
+    if(Number(s._upd||0) > Number(cur._upd||0)) by[s.id]=s;
+  };
+  (VBT_SESSIONS||[]).forEach(put);
+  (cloud||[]).forEach(put);
+  var del={};
+  try{ del=JSON.parse(localStorage.getItem('vbtDeleted_v1')||'{}'); }catch(e){}
+  VBT_SESSIONS.length=0;
+  order.forEach(function(id){ if(del[String(id)]===undefined) VBT_SESSIONS.push(by[id]); });
+  try{ localStorage.setItem('vbtSessions_v1', JSON.stringify(VBT_SESSIONS)); }catch(e){}
+  return VBT_SESSIONS.length;
+}
+window.vbtMergeSessions=vbtMergeSessions;
+
+// ═══ DETECCIÓN DE REPETICIONES MAL DETECTADAS ═══════════════════════════
+// Criterio: comparar cada serie contra la MEDIANA del mismo jugador+ejercicio.
+// Se usa mediana y MAD (no promedio ni desvío) porque son robustos: un valor
+// disparatado no corrompe la referencia contra la que se lo compara.
+// Se marca sólo si (a) se desvía mucho en términos robustos Y (b) más que
+// duplica la mediana. Ambas condiciones evitan marcar variación biológica real.
+// NUNCA se descarta solo: se marca y el usuario decide.
+function _vbtMedian(a){
+  if(!a.length)return 0;
+  var v=a.slice().sort(function(x,y){return x-y;});
+  var m=Math.floor(v.length/2);
+  return v.length%2?v[m]:(v[m-1]+v[m])/2;
+}
+function vbtDetectOutliers(sets, thrZ, ratioMin){
+  thrZ=thrZ||4.0; ratioMin=ratioMin||2.0;
+  var g={};
+  (sets||[]).forEach(function(s,i){
+    var k=(s.name||'')+'||'+(s.ex||'');
+    (g[k]=g[k]||[]).push(i);
+  });
+  var flags={};
+  Object.keys(g).forEach(function(k){
+    var idxs=g[k];
+    if(idxs.length<3)return;      // con menos de 3 no hay referencia confiable
+    ['pp','pf'].forEach(function(met){
+      var vals=idxs.map(function(i){ return Number(sets[i][met])||0; });
+      var med=_vbtMedian(vals);
+      if(med<=0)return;
+      var devs=vals.map(function(v){ return Math.abs(v-med); });
+      var mad=_vbtMedian(devs);
+      idxs.forEach(function(i,j){
+        var v=vals[j];
+        if(v<=med)return;                       // sólo valores ANORMALMENTE ALTOS
+        var sospecha=false, z=null;
+        if(mad>0){
+          z=0.6745*(v-med)/mad;
+          sospecha=(z>thrZ && v/med>=ratioMin);
+        } else {
+          sospecha=(v/med>=2.2);
+        }
+        if(sospecha){
+          if(!flags[i]) flags[i]={mets:[], det:[]};
+          flags[i].mets.push(met);
+          flags[i].det.push({met:met, med:med, val:v, ratio:v/med, z:z});
+        }
+      });
+    });
+  });
+  return flags;
+}
+window.vbtDetectOutliers=vbtDetectOutliers;
+
+// ═══ PERFIL CARGA-VELOCIDAD ══════════════════════════════════════════════
+// Regresión lineal MPV = a + b·kg. Con ella se estima el 1RM (peso donde la
+// MPV llega al umbral del ejercicio) y se calcula el peso para una velocidad
+// objetivo, que es lo que permite diagramar la sesión.
+function vbtProfile(sets, name, ex){
+  var pts=(sets||[]).filter(function(s){
+    return !s.excl && s.name===name && s.ex===ex && s.w>0 && s.mpv>0;
+  }).map(function(s){ return {w:Number(s.w), mpv:Number(s.mpv)}; });
+  if(pts.length<2) return {ok:false, n:pts.length, pts:pts};
+  var n=pts.length;
+  var sx=0, sy=0, sxy=0, sxx=0;
+  pts.forEach(function(p){ sx+=p.w; sy+=p.mpv; sxy+=p.w*p.mpv; sxx+=p.w*p.w; });
+  var den=(n*sxx - sx*sx);
+  if(!den) return {ok:false, n:n, pts:pts};
+  var b=(n*sxy - sx*sy)/den;          // pendiente (negativa: más peso, menos velocidad)
+  var a=(sy - b*sx)/n;                // intercepto
+  // R²
+  var my=sy/n, ssTot=0, ssRes=0;
+  pts.forEach(function(p){
+    var pred=a+b*p.w;
+    ssTot+=(p.mpv-my)*(p.mpv-my);
+    ssRes+=(p.mpv-pred)*(p.mpv-pred);
+  });
+  var r2=ssTot>0?(1-ssRes/ssTot):0;
+  var v1rm=vbtV1rmOf(ex);
+  var oneRM=(b!==0)?((v1rm-a)/b):null;
+  return {ok:true, a:a, b:b, r2:r2, n:n, pts:pts, oneRM:oneRM, v1rm:v1rm,
+          minW:Math.min.apply(null,pts.map(function(p){return p.w;})),
+          maxW:Math.max.apply(null,pts.map(function(p){return p.w;}))};
+}
+window.vbtProfile=vbtProfile;
+
+// Peso necesario para moverse a una velocidad objetivo
+function vbtWeightForVelocity(prof, mpvObjetivo){
+  if(!prof||!prof.ok||!prof.b) return null;
+  var w=(mpvObjetivo - prof.a)/prof.b;
+  return (w>0 && isFinite(w))?w:null;
+}
+window.vbtWeightForVelocity=vbtWeightForVelocity;
+
+// Velocidad esperada para un peso dado
+function vbtVelocityForWeight(prof, kg){
+  if(!prof||!prof.ok) return null;
+  var v=prof.a + prof.b*kg;
+  return (v>0&&isFinite(v))?v:null;
+}
+window.vbtVelocityForWeight=vbtVelocityForWeight;
+
+// Zona de entrenamiento a la que pertenece una MPV
+function vbtZoneOf(mpv){
+  if(mpv==null)return null;
+  for(var i=0;i<VBT_ZONES.length;i++){
+    var z=VBT_ZONES[i];
+    if(mpv>=z.min && mpv<z.max) return z;
+  }
+  return null;
+}
+window.vbtZoneOf=vbtZoneOf;
+
+// ═══ MPV ÓPTIMA MEDIDA ═══════════════════════════════════════════════════
+// A qué velocidad ESTE jugador produjo más potencia y más fuerza. Es un dato
+// propio, distinto de las zonas de literatura: sirve para contrastarlas.
+function vbtOptimal(sets, name, ex){
+  var v=(sets||[]).filter(function(s){
+    return !s.excl && s.name===name && s.ex===ex && s.mpv>0;
+  });
+  if(!v.length) return null;
+  var bestPP=null, bestPF=null;
+  v.forEach(function(s){
+    if(s.pp>0 && (!bestPP || s.pp>bestPP.pp)) bestPP=s;
+    if(s.pf>0 && (!bestPF || s.pf>bestPF.pf)) bestPF=s;
+  });
+  return {
+    ppMpv: bestPP?bestPP.mpv:null, ppVal: bestPP?bestPP.pp:null, ppW: bestPP?bestPP.w:null,
+    pfMpv: bestPF?bestPF.mpv:null, pfVal: bestPF?bestPF.pf:null, pfW: bestPF?bestPF.w:null,
+    n: v.length
+  };
+}
+window.vbtOptimal=vbtOptimal;
+
+// ═══ COMPARACIÓN ENTRE SESIONES ═══════════════════════════════════════════
+// Responde las dos preguntas del PF:
+//  1. A misma MPV, ¿aumentó la potencia o la fuerza? → mejoró la producción.
+//  2. A mismo peso, ¿aumentó la MPV? → mejoró la capacidad de mover esa carga.
+function vbtCompare(setsA, setsB, name, ex, tolMpv, tolW){
+  tolMpv=tolMpv||0.05;   // ventana de velocidad "igual"
+  tolW=tolW||2.5;        // ventana de peso "igual" (kg)
+  var A=(setsA||[]).filter(function(s){ return !s.excl && s.name===name && s.ex===ex && s.mpv>0; });
+  var B=(setsB||[]).filter(function(s){ return !s.excl && s.name===name && s.ex===ex && s.mpv>0; });
+  if(!A.length||!B.length) return null;
+  var prom=function(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; };
+  var out={mismaMpv:[], mismoPeso:[]};
+  // 1) A misma velocidad
+  A.forEach(function(sa){
+    var pares=B.filter(function(sb){ return Math.abs(sb.mpv-sa.mpv)<=tolMpv; });
+    if(!pares.length)return;
+    var ppB=prom(pares.filter(function(x){return x.pp>0;}).map(function(x){return x.pp;}));
+    var pfB=prom(pares.filter(function(x){return x.pf>0;}).map(function(x){return x.pf;}));
+    out.mismaMpv.push({
+      mpv:sa.mpv, wA:sa.w, wB:prom(pares.map(function(x){return x.w;})),
+      ppA:sa.pp, ppB:ppB, pfA:sa.pf, pfB:pfB,
+      dPP:(ppB!=null&&sa.pp>0)?((ppB-sa.pp)/sa.pp*100):null,
+      dPF:(pfB!=null&&sa.pf>0)?((pfB-sa.pf)/sa.pf*100):null
+    });
+  });
+  // 2) A mismo peso
+  var pesos={};
+  A.forEach(function(sa){ pesos[Math.round(sa.w)]=true; });
+  Object.keys(pesos).forEach(function(wk){
+    var w=Number(wk);
+    var a=A.filter(function(x){ return Math.abs(x.w-w)<=tolW; });
+    var b=B.filter(function(x){ return Math.abs(x.w-w)<=tolW; });
+    if(!a.length||!b.length)return;
+    var mA=prom(a.map(function(x){return x.mpv;}));
+    var mB=prom(b.map(function(x){return x.mpv;}));
+    out.mismoPeso.push({
+      w:w, mpvA:mA, mpvB:mB,
+      dMpv:(mA>0)?((mB-mA)/mA*100):null,
+      ppA:prom(a.map(function(x){return x.pp;})), ppB:prom(b.map(function(x){return x.pp;}))
+    });
+  });
+  return out;
+}
+window.vbtCompare=vbtCompare;
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // IMPORTADOR DE ARCHIVOS DE TESTS (v159)
