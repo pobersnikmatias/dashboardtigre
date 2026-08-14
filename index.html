@@ -35092,6 +35092,8 @@ var SB_SETTINGS_KEYS = [
   // bajaban nunca. Por eso los pendientes del CT no se guardaban: quedaban
   // sólo en el dispositivo donde se escribían.
   'VBT_SESSIONS',
+  'VBT_EX_MAP',
+  'VBT_NAME_MAP',
   'VBT_ZONES',
   'VBT_V1RM',
   'TST_EX_MAP',
@@ -36202,6 +36204,24 @@ window.vbtDetectOutliers=vbtDetectOutliers;
 // Regresión lineal MPV = a + b·kg. Con ella se estima el 1RM (peso donde la
 // MPV llega al umbral del ejercicio) y se calcula el peso para una velocidad
 // objetivo, que es lo que permite diagramar la sesión.
+// v169: evalúa cuán confiable es el 1RM estimado. Con pocos pesos, un rango
+// estrecho o una pendiente muy plana, la recta se extrapola demasiado lejos y
+// el resultado deja de ser creíble (ej: una recta casi horizontal proyecta un
+// 1RM de 350 kg desde series de 60 a 110).
+function vbtRMConfianza(prof){
+  if(!prof||!prof.ok||!prof.oneRM) return {ok:false, nivel:'nulo', msg:'sin perfil'};
+  var rango=prof.maxW-prof.minW;
+  var extrapol=prof.oneRM/prof.maxW;          // cuántas veces el peso más alto medido
+  var problemas=[];
+  if(prof.n<3) problemas.push('sólo '+prof.n+' cargas');
+  if(rango<25) problemas.push('rango de pesos estrecho ('+Math.round(rango)+' kg)');
+  if(extrapol>2.2) problemas.push('extrapola '+extrapol.toFixed(1)+'× el peso más alto');
+  if(prof.r2<0.9 && prof.n>2) problemas.push('ajuste bajo');
+  var nivel = problemas.length===0 ? 'alta' : (problemas.length===1 ? 'media' : 'baja');
+  return {ok:problemas.length===0, nivel:nivel, problemas:problemas, extrapol:extrapol, rango:rango};
+}
+window.vbtRMConfianza=vbtRMConfianza;
+
 function vbtProfile(sets, name, ex){
   var pts=(sets||[]).filter(function(s){
     return !s.excl && s.name===name && s.ex===ex && s.w>0 && s.mpv>0;
@@ -36322,6 +36342,858 @@ function vbtCompare(setsA, setsB, name, ex, tolMpv, tolW){
   return out;
 }
 window.vbtCompare=vbtCompare;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INTERFAZ VBT (v168)
+// Subpestaña ⚡ VBT dentro de Tests: importar sesiones, ver perfiles
+// carga-velocidad, comparar sesiones y calcular pesos para diagramar.
+// ═══════════════════════════════════════════════════════════════════════════
+var _vbtView='perfil';      // perfil | optima | evol | calc | sesiones
+var _vbtPlayer='';
+var _vbtEx='';
+var _vbtSesA='', _vbtSesB='';
+
+function vbtEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function vbtAllSets(){
+  var out=[];
+  (VBT_SESSIONS||[]).forEach(function(ses){
+    (ses.sets||[]).forEach(function(st){
+      out.push(Object.assign({}, st, {_ses:ses.id, _date:ses.date}));
+    });
+  });
+  return out;
+}
+window.vbtAllSets=vbtAllSets;
+
+function vbtPlayers(ex){
+  var m={};
+  vbtAllSets().forEach(function(s){ if(!ex||s.ex===ex) m[s.name]=true; });
+  return Object.keys(m).sort(function(a,b){return a.localeCompare(b,'es');});
+}
+function vbtExercises(){
+  var m={};
+  vbtAllSets().forEach(function(s){ if(s.ex) m[s.ex]=true; });
+  return Object.keys(m).sort();
+}
+
+function vbtSetView(v){ _vbtView=v; tstRender(); }
+window.vbtSetView=vbtSetView;
+function vbtSetPlayer(v){ _vbtPlayer=v; tstRender(); }
+window.vbtSetPlayer=vbtSetPlayer;
+function vbtSetEx(v){ _vbtEx=v; tstRender(); }
+window.vbtSetEx=vbtSetEx;
+
+// ═══ RENDER PRINCIPAL ═══
+function vbtRender(){
+  var exs=vbtExercises();
+  if(!_vbtEx||exs.indexOf(_vbtEx)<0) _vbtEx=exs[0]||'';
+  var pls=vbtPlayers(_vbtEx);
+  if(!_vbtPlayer||pls.indexOf(_vbtPlayer)<0) _vbtPlayer=pls[0]||'';
+
+  var head='<div style="background:#0D1B2A;border-radius:10px 10px 0 0;padding:12px 15px">'+
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'+
+      '<span style="color:#fff;font-size:14px;font-weight:800">⚡ VBT — Entrenamiento por velocidad</span>'+
+      '<button onclick="vbtImpOpen()" style="margin-left:auto;padding:6px 14px;border:none;border-radius:7px;background:#1D9E75;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer">📥 Importar sesión</button>'+
+    '</div>'+
+    '<div style="display:flex;gap:5px;flex-wrap:wrap">'+
+      [['perfil','📉 Perfil carga-velocidad'],['optima','🎯 MPV óptima'],['plantel','👥 Plantel'],['evol','📈 Evolución'],
+       ['calc','🧮 Calculadora de cargas'],['sesiones','🗂 Sesiones']].map(function(v){
+        var on=_vbtView===v[0];
+        return '<button onclick="vbtSetView(\''+v[0]+'\')" style="padding:5px 11px;border:1px solid '+(on?'#fff':'#ffffff33')+';background:'+(on?'#fff':'none')+';color:'+(on?'#0D1B2A':'#9fb3c8')+';border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">'+v[1]+'</button>';
+      }).join('')+
+    '</div></div>';
+
+  if(!VBT_SESSIONS.length){
+    return head+'<div style="background:#fff;border:1px solid #e4e6ec;border-top:none;border-radius:0 0 10px 10px;padding:34px;text-align:center">'+
+      '<div style="font-size:32px;margin-bottom:9px">⚡</div>'+
+      '<div style="font-size:13px;font-weight:700;color:#555">Todavía no importaste ninguna sesión</div>'+
+      '<div style="font-size:11px;color:#aaa;margin-top:6px;max-width:430px;margin-left:auto;margin-right:auto">'+
+        'Subí el Excel del encoder. Se espera una fila por serie, con jugador, ejercicio, peso y las métricas (MPV, Peak Power, Peak Force).</div>'+
+      '<button onclick="vbtImpOpen()" style="margin-top:13px;padding:8px 20px;border:none;border-radius:8px;background:#1D9E75;color:#fff;font-size:12px;font-weight:700;cursor:pointer">📥 Importar sesión</button>'+
+    '</div>';
+  }
+
+  // Selectores de contexto
+  var ctx='<div style="background:#f8faff;border-bottom:1px solid #e8ecf4;padding:9px 15px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">'+
+    '<span style="font-size:10.5px;color:#8a93a5;font-weight:700">Ejercicio</span>'+
+    '<select onchange="vbtSetEx(this.value)" style="padding:5px 10px;border:1px solid #ccd3de;border-radius:6px;font-size:11.5px;font-weight:700">'+
+      exs.map(function(e){return '<option'+(e===_vbtEx?' selected':'')+'>'+vbtEsc(e)+'</option>';}).join('')+'</select>';
+  if(_vbtView==='perfil'||_vbtView==='optima'||_vbtView==='evol'){
+    ctx+='<span style="font-size:10.5px;color:#8a93a5;font-weight:700;margin-left:6px">Jugador</span>'+
+      '<select onchange="vbtSetPlayer(this.value)" style="padding:5px 10px;border:1px solid #ccd3de;border-radius:6px;font-size:11.5px;font-weight:700;min-width:160px">'+
+        pls.map(function(p){return '<option'+(p===_vbtPlayer?' selected':'')+'>'+vbtEsc(p)+'</option>';}).join('')+'</select>';
+  }
+  ctx+='</div>';
+
+  var body='';
+  if(_vbtView==='perfil') body=vbtViewPerfil();
+  else if(_vbtView==='optima') body=vbtViewOptima();
+  else if(_vbtView==='plantel') body=vbtViewPlantel();
+  else if(_vbtView==='evol') body=vbtViewEvol();
+  else if(_vbtView==='calc') body=vbtViewCalc();
+  else body=vbtViewSesiones();
+
+  return head+'<div style="background:#fff;border:1px solid #e4e6ec;border-top:none;border-radius:0 0 10px 10px">'+ctx+
+    '<div style="padding:14px 15px">'+body+'</div></div>';
+}
+window.vbtRender=vbtRender;
+
+// ── Gráfico de dispersión con recta opcional ──
+function vbtScatter(pts, opts){
+  opts=opts||{};
+  var W=700, H=opts.height||240, PL=52, PR=20, PT=16, PB=34;
+  var iw=W-PL-PR, ih=H-PT-PB;
+  if(!pts.length) return '';
+  var xs=pts.map(function(p){return p.x;}), ys=pts.map(function(p){return p.y;});
+  var xmin=Math.min.apply(null,xs), xmax=Math.max.apply(null,xs);
+  var ymin=Math.min.apply(null,ys), ymax=Math.max.apply(null,ys);
+  var xpad=(xmax-xmin)*0.12||1, ypad=(ymax-ymin)*0.15||1;
+  xmin-=xpad; xmax+=xpad; ymin=Math.max(0,ymin-ypad); ymax+=ypad;
+  var X=function(v){ return PL+(v-xmin)/(xmax-xmin)*iw; };
+  var Y=function(v){ return PT+ih-(v-ymin)/(ymax-ymin)*ih; };
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">';
+  // Grilla
+  for(var i=0;i<=4;i++){
+    var yv=ymin+(ymax-ymin)*i/4, yy=Y(yv);
+    svg+='<line x1="'+PL+'" y1="'+yy.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+yy.toFixed(1)+'" stroke="#eef0f4" stroke-width="1"/>';
+    svg+='<text x="'+(PL-7)+'" y="'+(yy+3.5).toFixed(1)+'" text-anchor="end" font-size="9.5" fill="#a3a9b6" font-family="system-ui,sans-serif">'+
+      (opts.yFmt?opts.yFmt(yv):Math.round(yv))+'</text>';
+  }
+  for(var j=0;j<=4;j++){
+    var xv=xmin+(xmax-xmin)*j/4, xx=X(xv);
+    svg+='<text x="'+xx.toFixed(1)+'" y="'+(PT+ih+16)+'" text-anchor="middle" font-size="9.5" fill="#a3a9b6" font-family="system-ui,sans-serif">'+
+      (opts.xFmt?opts.xFmt(xv):Math.round(xv))+'</text>';
+  }
+  // Zonas de velocidad como bandas verticales (si el eje X es MPV)
+  if(opts.zonesX){
+    VBT_ZONES.forEach(function(z){
+      var a=Math.max(xmin,z.min), b=Math.min(xmax,z.max);
+      if(b<=a)return;
+      svg+='<rect x="'+X(a).toFixed(1)+'" y="'+PT+'" width="'+(X(b)-X(a)).toFixed(1)+'" height="'+ih+'" fill="'+z.col+'" opacity="0.07"/>';
+    });
+  }
+  // Recta de regresión
+  if(opts.line){
+    var x1=xmin, x2=xmax;
+    var y1=opts.line.a+opts.line.b*x1, y2=opts.line.a+opts.line.b*x2;
+    svg+='<line x1="'+X(x1).toFixed(1)+'" y1="'+Y(y1).toFixed(1)+'" x2="'+X(x2).toFixed(1)+'" y2="'+Y(y2).toFixed(1)+
+      '" stroke="#3B4D88" stroke-width="2.2" stroke-opacity="0.75"/>';
+  }
+  // Puntos
+  pts.forEach(function(p){
+    var c=p.col||'#3B4D88';
+    svg+='<circle cx="'+X(p.x).toFixed(1)+'" cy="'+Y(p.y).toFixed(1)+'" r="'+(p.r||5)+'" fill="'+c+'" fill-opacity="0.85" stroke="#fff" stroke-width="1.5">'+
+      (p.tip?'<title>'+vbtEsc(p.tip)+'</title>':'')+'</circle>';
+    if(p.lbl) svg+='<text x="'+X(p.x).toFixed(1)+'" y="'+(Y(p.y)-9).toFixed(1)+'" text-anchor="middle" font-size="9.5" font-weight="700" fill="'+c+'" font-family="system-ui,sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2.5">'+p.lbl+'</text>';
+  });
+  svg+='</svg>';
+  return svg;
+}
+window.vbtScatter=vbtScatter;
+
+// ── VISTA: perfil carga-velocidad ──
+function vbtViewPerfil(){
+  var sets=vbtAllSets();
+  var prof=vbtProfile(sets,_vbtPlayer,_vbtEx);
+  if(!prof.ok){
+    return '<div style="padding:24px;text-align:center;color:#999;font-size:12px">'+
+      'Hacen falta al menos 2 series con pesos distintos de <b>'+vbtEsc(_vbtPlayer)+'</b> en '+vbtEsc(_vbtEx)+'.'+
+      (prof.n?' (hay '+prof.n+')':'')+'</div>';
+  }
+  var pts=prof.pts.map(function(p){
+    return {x:p.w, y:p.mpv, tip:p.w+' kg → MPV '+p.mpv.toFixed(2), lbl:p.mpv.toFixed(2)};
+  });
+  var r2col=prof.r2>=0.95?'#1D9E75':(prof.r2>=0.85?'#EF9F27':'#D9534F');
+  var kpi=function(l,v,c,sub){
+    return '<div style="flex:1;min-width:100px;background:#f8faff;border:1px solid #e8ecf5;border-radius:8px;padding:8px 11px">'+
+      '<div style="font-size:9px;color:#a3a9b6;font-weight:700;text-transform:uppercase">'+l+'</div>'+
+      '<div style="font-size:17px;font-weight:800;color:'+c+';line-height:1.25">'+v+'</div>'+
+      (sub?'<div style="font-size:9px;color:#a3a9b6">'+sub+'</div>':'')+'</div>';
+  };
+  var html='<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px">'+
+    (function(){
+      var cf=vbtRMConfianza(prof);
+      var col=cf.nivel==='alta'?'#0D1B2A':(cf.nivel==='media'?'#EF9F27':'#D9534F');
+      var sub=cf.nivel==='alta'?('a MPV '+prof.v1rm):('⚠ '+cf.problemas[0]);
+      return kpi('1RM estimado', Math.round(prof.oneRM)+' <span style="font-size:11px;color:#aaa">kg</span>', col, sub);
+    })()+
+    kpi('Ajuste (R²)', prof.r2.toFixed(3), r2col, prof.r2>=0.95?'excelente':(prof.r2>=0.85?'aceptable':'revisar series'))+
+    kpi('Series usadas', prof.n, '#3B4D88', prof.minW+'–'+prof.maxW+' kg')+
+    kpi('Pendiente', prof.b.toFixed(4), '#8a93a5', 'MPV por kg')+
+  '</div>';
+  html+='<div style="font-size:10.5px;color:#8a93a5;margin-bottom:5px">Cada punto es una serie. La recta es su relación carga-velocidad.</div>';
+  html+=vbtScatter(pts,{line:{a:prof.a,b:prof.b}, height:250,
+    xFmt:function(v){return Math.round(v)+'kg';}, yFmt:function(v){return v.toFixed(2);}});
+  if(prof.r2<0.85){
+    html+='<div style="margin-top:9px;background:#fff8ec;border:1px solid #f0e0c0;border-radius:7px;padding:8px 11px;font-size:11px;color:#8a6d3b">'+
+      '⚠️ El ajuste es bajo. Puede haber una serie mal detectada. Revisala en 🗂 Sesiones y excluila si corresponde.</div>';
+  }
+  // v169: advertir cuando el 1RM estimado no es confiable
+  var cf=vbtRMConfianza(prof);
+  if(cf.nivel!=='alta'){
+    html+='<div style="margin-top:9px;background:'+(cf.nivel==='baja'?'#fdf2f2':'#fff8ec')+';border:1px solid '+(cf.nivel==='baja'?'#f0d5d5':'#f0e0c0')+';border-radius:7px;padding:8px 11px;font-size:11px;color:'+(cf.nivel==='baja'?'#A03A36':'#8a6d3b')+'">'+
+      '<b>1RM estimado poco confiable</b> — '+cf.problemas.join(' · ')+'.<br>'+
+      '<span style="font-size:10.5px">La recta se proyecta desde '+prof.minW+'–'+prof.maxW+' kg hasta '+Math.round(prof.oneRM)+' kg. '+
+      'Para estimarlo bien conviene medir al menos 3 cargas que cubran un rango amplio y lleguen cerca del máximo. '+
+      'Los pesos de la calculadora dentro del rango medido siguen siendo válidos.</span></div>';
+  }
+  return html;
+}
+
+// ── VISTA: MPV óptima (dato propio vs zonas de literatura) ──
+function vbtViewOptima(){
+  var sets=vbtAllSets();
+  var o=vbtOptimal(sets,_vbtPlayer,_vbtEx);
+  if(!o) return '<div style="padding:24px;text-align:center;color:#999;font-size:12px">Sin series de este jugador en '+vbtEsc(_vbtEx)+'.</div>';
+  var mine=sets.filter(function(s){ return !s.excl && s.name===_vbtPlayer && s.ex===_vbtEx && s.mpv>0; });
+  var ppPts=mine.filter(function(s){return s.pp>0;}).map(function(s){
+    return {x:s.mpv, y:s.pp, col:'#1D9E75', tip:s.w+' kg · MPV '+s.mpv.toFixed(2)+' · '+Math.round(s.pp)+' W'};
+  });
+  var pfPts=mine.filter(function(s){return s.pf>0;}).map(function(s){
+    return {x:s.mpv, y:s.pf, col:'#D9534F', tip:s.w+' kg · MPV '+s.mpv.toFixed(2)+' · '+Math.round(s.pf)+' N'};
+  });
+  var zonaPP=vbtZoneOf(o.ppMpv), zonaPF=vbtZoneOf(o.pfMpv);
+  var html='<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px">'+
+    '<div style="flex:1;min-width:200px;background:#f2fbf6;border:1px solid #cfe8dc;border-radius:8px;padding:9px 12px">'+
+      '<div style="font-size:9.5px;color:#1D6B4F;font-weight:800;text-transform:uppercase">Pico de potencia</div>'+
+      '<div style="font-size:19px;font-weight:800;color:#1D9E75">MPV '+(o.ppMpv||0).toFixed(2)+'</div>'+
+      '<div style="font-size:10.5px;color:#6b8a7a">'+Math.round(o.ppVal||0)+' W con '+(o.ppW||'—')+' kg'+
+        (zonaPP?' · zona '+zonaPP.lbl:'')+'</div>'+
+    '</div>'+
+    '<div style="flex:1;min-width:200px;background:#fdf2f2;border:1px solid #f0d5d5;border-radius:8px;padding:9px 12px">'+
+      '<div style="font-size:9.5px;color:#A03A36;font-weight:800;text-transform:uppercase">Pico de fuerza</div>'+
+      '<div style="font-size:19px;font-weight:800;color:#D9534F">MPV '+(o.pfMpv||0).toFixed(2)+'</div>'+
+      '<div style="font-size:10.5px;color:#9a7070">'+Math.round(o.pfVal||0)+' N con '+(o.pfW||'—')+' kg'+
+        (zonaPF?' · zona '+zonaPF.lbl:'')+'</div>'+
+    '</div>'+
+  '</div>';
+  html+='<div style="font-size:11px;font-weight:800;color:#1D9E75;margin-bottom:4px">Potencia según velocidad</div>'+
+    '<div style="font-size:10px;color:#8a93a5;margin-bottom:5px">El fondo marca las zonas de referencia. El pico real puede no coincidir: ese es tu dato.</div>'+
+    vbtScatter(ppPts,{height:200,zonesX:true,xFmt:function(v){return v.toFixed(2);},yFmt:function(v){return Math.round(v)+'W';}});
+  html+='<div style="font-size:11px;font-weight:800;color:#D9534F;margin:13px 0 5px">Fuerza según velocidad</div>'+
+    vbtScatter(pfPts,{height:200,zonesX:true,xFmt:function(v){return v.toFixed(2);},yFmt:function(v){return Math.round(v)+'N';}});
+  // Leyenda de zonas
+  html+='<div style="display:flex;gap:11px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:#8a93a5">'+
+    VBT_ZONES.map(function(z){
+      return '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:11px;height:11px;border-radius:3px;background:'+z.col+';opacity:.4;display:inline-block"></span>'+
+        z.lbl+' ('+z.min.toFixed(2)+'–'+(z.max>9?'∞':z.max.toFixed(2))+')</span>';
+    }).join('')+
+    '<button onclick="vbtEditZones()" style="border:none;background:none;color:#3B4D88;font-size:10px;font-weight:700;cursor:pointer;padding:0">✎ editar zonas</button>'+
+  '</div>';
+  return html;
+}
+
+// ── VISTA: evolución entre sesiones ──
+function vbtViewEvol(){
+  var ses=(VBT_SESSIONS||[]).slice().sort(function(a,b){ return String(a.date).localeCompare(String(b.date)); });
+  if(ses.length<2) return '<div style="padding:24px;text-align:center;color:#999;font-size:12px">Hacen falta al menos 2 sesiones para comparar. Por ahora hay '+ses.length+'.</div>';
+  if(!_vbtSesA||!ses.some(function(s){return s.id==_vbtSesA;})) _vbtSesA=ses[ses.length-2].id;
+  if(!_vbtSesB||!ses.some(function(s){return s.id==_vbtSesB;})) _vbtSesB=ses[ses.length-1].id;
+  var A=ses.find(function(s){return s.id==_vbtSesA;}), B=ses.find(function(s){return s.id==_vbtSesB;});
+  var opt=function(sel){ return ses.map(function(s){
+    return '<option value="'+s.id+'"'+(String(s.id)===String(sel)?' selected':'')+'>'+vbtEsc(s.date)+' · '+vbtEsc(s.name||'sesión')+'</option>';
+  }).join(''); };
+  var html='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;font-size:11px;color:#8a93a5">'+
+    'Comparar <select onchange="_vbtSesA=this.value;tstRender()" style="padding:4px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:11px">'+opt(_vbtSesA)+'</select>'+
+    ' con <select onchange="_vbtSesB=this.value;tstRender()" style="padding:4px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:11px">'+opt(_vbtSesB)+'</select>'+
+  '</div>';
+  var cmp=vbtCompare(A.sets,B.sets,_vbtPlayer,_vbtEx);
+  if(!cmp||(!cmp.mismaMpv.length&&!cmp.mismoPeso.length)){
+    return html+'<div style="padding:20px;text-align:center;color:#999;font-size:12px">No hay series comparables de '+vbtEsc(_vbtPlayer)+' en '+vbtEsc(_vbtEx)+' entre estas dos sesiones.</div>';
+  }
+  var flecha=function(d){
+    if(d==null) return '<span style="color:#ccc">—</span>';
+    var c=d>2?'#1D9E75':(d<-2?'#D9534F':'#8a93a5');
+    var f=d>2?'▲':(d<-2?'▼':'≈');
+    return '<span style="color:'+c+';font-weight:800">'+f+' '+(d>0?'+':'')+d.toFixed(1)+'%</span>';
+  };
+  // 1) A misma velocidad
+  if(cmp.mismaMpv.length){
+    html+='<div style="background:#f8faff;border:1px solid #e0e8f5;border-radius:8px;padding:10px 12px;margin-bottom:11px">'+
+      '<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:3px">A la misma velocidad, ¿produce más?</div>'+
+      '<div style="font-size:10px;color:#8a93a5;margin-bottom:8px">Si sube la potencia o la fuerza moviéndose igual de rápido, mejoró la producción.</div>'+
+      '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
+      '<tr style="color:#8a93a5;font-size:9.5px;text-transform:uppercase"><th style="text-align:left;padding:3px">MPV</th><th style="padding:3px">Peso</th><th style="padding:3px">Potencia</th><th style="padding:3px">Fuerza</th></tr>'+
+      cmp.mismaMpv.map(function(r){
+        return '<tr style="border-top:1px solid #eef0f4">'+
+          '<td style="padding:5px 3px;font-weight:700;color:#0D1B2A">'+r.mpv.toFixed(2)+'</td>'+
+          '<td style="padding:5px 3px;text-align:center;color:#8a93a5">'+Math.round(r.wA)+'→'+Math.round(r.wB)+' kg</td>'+
+          '<td style="padding:5px 3px;text-align:center">'+flecha(r.dPP)+'</td>'+
+          '<td style="padding:5px 3px;text-align:center">'+flecha(r.dPF)+'</td></tr>';
+      }).join('')+'</table></div>';
+  }
+  // 2) A mismo peso
+  if(cmp.mismoPeso.length){
+    html+='<div style="background:#f2fbf6;border:1px solid #cfe8dc;border-radius:8px;padding:10px 12px">'+
+      '<div style="font-size:11.5px;font-weight:800;color:#1D6B4F;margin-bottom:3px">Con el mismo peso, ¿se mueve más rápido?</div>'+
+      '<div style="font-size:10px;color:#6b8a7a;margin-bottom:8px">Más velocidad con la misma carga indica mejora de fuerza.</div>'+
+      '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
+      '<tr style="color:#6b8a7a;font-size:9.5px;text-transform:uppercase"><th style="text-align:left;padding:3px">Peso</th><th style="padding:3px">MPV antes</th><th style="padding:3px">MPV ahora</th><th style="padding:3px">Cambio</th></tr>'+
+      cmp.mismoPeso.map(function(r){
+        return '<tr style="border-top:1px solid #dff0e6">'+
+          '<td style="padding:5px 3px;font-weight:700;color:#0D1B2A">'+r.w+' kg</td>'+
+          '<td style="padding:5px 3px;text-align:center;color:#8a93a5">'+r.mpvA.toFixed(2)+'</td>'+
+          '<td style="padding:5px 3px;text-align:center;font-weight:700">'+r.mpvB.toFixed(2)+'</td>'+
+          '<td style="padding:5px 3px;text-align:center">'+flecha(r.dMpv)+'</td></tr>';
+      }).join('')+'</table></div>';
+  }
+  return html;
+}
+
+// ── VISTA: calculadora de cargas (uso práctico) ──
+var _vbtCalcMpv=0.75;
+function vbtSetCalcMpv(v){ _vbtCalcMpv=parseFloat(v)||0.75; tstRender(); }
+window.vbtSetCalcMpv=vbtSetCalcMpv;
+
+function vbtViewCalc(){
+  var sets=vbtAllSets();
+  var pls=vbtPlayers(_vbtEx).filter(function(p){
+    return !_vbtPosFilter || (typeof vbtPosOf==='function' && vbtPosOf(p)===_vbtPosFilter);
+  });
+  if(!pls.length) pls=vbtPlayers(_vbtEx);
+  var z=vbtZoneOf(_vbtCalcMpv);
+  var html='<div style="background:#eef3fb;border:1px solid #d5e0f0;border-radius:8px;padding:11px 13px;margin-bottom:12px">'+
+    '<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:7px">¿Qué peso le pongo a cada jugador?</div>'+
+    '<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">'+
+      '<span style="font-size:11px;color:#4a5568;font-weight:600">Velocidad objetivo</span>'+
+      '<input type="number" step="0.05" min="0.1" max="1.5" value="'+_vbtCalcMpv+'" onchange="vbtSetCalcMpv(this.value)" '+
+        'style="width:78px;padding:5px 8px;border:1px solid #ccd3de;border-radius:6px;font-size:13px;font-weight:800;text-align:center;color:#0D1B2A">'+
+      '<span style="font-size:11px;color:#8a93a5">m/s</span>'+
+      (z?'<span style="font-size:10.5px;font-weight:800;color:#fff;background:'+z.col+';border-radius:11px;padding:3px 11px">'+z.lbl+'</span>':'')+
+      '<span style="margin-left:auto;display:flex;gap:4px">'+
+        VBT_ZONES.slice().reverse().map(function(zz){
+          var mid=(zz.max>9?1.15:(zz.min+zz.max)/2);
+          return '<button onclick="vbtSetCalcMpv('+mid.toFixed(2)+')" style="border:1px solid '+zz.col+';background:#fff;color:'+zz.col+';border-radius:12px;padding:3px 9px;font-size:9.5px;font-weight:700;cursor:pointer">'+zz.lbl+'</button>';
+        }).join('')+
+      '</span>'+
+    '</div></div>';
+  var filas=pls.map(function(p){
+    var prof=vbtProfile(sets,p,_vbtEx);
+    if(!prof.ok) return {name:p, w:null, n:prof.n};
+    var w=vbtWeightForVelocity(prof,_vbtCalcMpv);
+    var pct=(prof.oneRM&&w)?(w/prof.oneRM*100):null;
+    // Fuera del rango medido = extrapolación
+    var extrap=(w!=null&&(w<prof.minW*0.75||w>prof.maxW*1.25));
+    return {name:p, w:w, oneRM:prof.oneRM, pct:pct, r2:prof.r2, extrap:extrap, n:prof.n};
+  });
+  html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'+
+    '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
+      '<th style="padding:8px 11px;text-align:left;font-weight:700;color:#555">Jugador</th>'+
+      '<th style="padding:8px 9px;text-align:center;font-weight:800;color:#0D1B2A">Peso sugerido</th>'+
+      '<th style="padding:8px 9px;text-align:center;font-weight:700;color:#555">% del 1RM</th>'+
+      '<th style="padding:8px 9px;text-align:center;font-weight:700;color:#555">1RM est.</th>'+
+      '<th style="padding:8px 9px;text-align:center;font-weight:700;color:#555">Ajuste</th>'+
+    '</tr></thead><tbody>';
+  filas.forEach(function(f){
+    if(f.w==null){
+      html+='<tr style="border-bottom:1px solid #f0f2f6"><td style="padding:6px 11px;font-weight:600;color:#0D1B2A">'+vbtEsc(f.name)+'</td>'+
+        '<td colspan="4" style="padding:6px 9px;text-align:center;color:#bbb;font-size:10.5px">sin perfil (necesita 2+ pesos distintos'+(f.n?', tiene '+f.n:'')+')</td></tr>';
+      return;
+    }
+    var rc=f.r2>=0.95?'#1D9E75':(f.r2>=0.85?'#EF9F27':'#D9534F');
+    html+='<tr style="border-bottom:1px solid #f0f2f6">'+
+      '<td style="padding:6px 11px;font-weight:600;color:#0D1B2A">'+vbtEsc(f.name)+'</td>'+
+      '<td style="padding:6px 9px;text-align:center"><span style="font-size:15px;font-weight:800;color:#0D1B2A">'+Math.round(f.w/2.5)*2.5+'</span>'+
+        '<span style="font-size:10px;color:#aaa"> kg</span>'+
+        (f.extrap?'<span title="Fuera del rango de pesos medidos: es una extrapolación" style="color:#EF9F27;font-size:11px"> ⚠</span>':'')+'</td>'+
+      '<td style="padding:6px 9px;text-align:center;color:#3B4D88;font-weight:700">'+(f.pct?Math.round(f.pct)+'%':'—')+'</td>'+
+      '<td style="padding:6px 9px;text-align:center;color:#8a93a5">'+Math.round(f.oneRM)+' kg</td>'+
+      '<td style="padding:6px 9px;text-align:center;color:'+rc+';font-weight:700">'+f.r2.toFixed(2)+'</td>'+
+    '</tr>';
+  });
+  html+='</tbody></table></div>';
+  html+='<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:11px">'+
+    '<button onclick="vbtPrintSession()" style="padding:7px 16px;border:none;border-radius:7px;background:#0D1B2A;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer">🖨 Planilla para el gimnasio</button>'+
+    '<span style="font-size:10px;color:#a3a9b6;flex:1;min-width:200px">Los pesos se redondean a 2,5 kg. El símbolo ⚠ marca extrapolaciones fuera del rango medido: conviene verificarlas en la primera serie.</span>'+
+  '</div>';
+  return html;
+}
+
+// ── VISTA: sesiones (revisar y excluir series) ──
+function vbtViewSesiones(){
+  var ses=(VBT_SESSIONS||[]).slice().sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
+  var html='';
+  ses.forEach(function(s){
+    var sets=s.sets||[];
+    var flags=vbtDetectOutliers(sets);
+    var nOut=Object.keys(flags).length;
+    var nExcl=sets.filter(function(x){return x.excl;}).length;
+    html+='<div style="border:1px solid #e4e6ec;border-radius:9px;margin-bottom:10px;overflow:hidden">'+
+      '<div style="background:#f5f7fa;padding:9px 12px;display:flex;align-items:center;gap:9px;flex-wrap:wrap">'+
+        '<b style="font-size:12.5px;color:#0D1B2A">'+vbtEsc(s.date)+'</b>'+
+        '<span style="font-size:11px;color:#6b7a90">'+vbtEsc(s.name||'sesión')+'</span>'+
+        '<span style="font-size:10px;color:#8a93a5">'+sets.length+' series</span>'+
+        (nOut?'<span style="font-size:10px;font-weight:700;color:#fff;background:#EF9F27;border-radius:10px;padding:2px 8px">⚠ '+nOut+' sospechosa'+(nOut===1?'':'s')+'</span>':'')+
+        (nExcl?'<span style="font-size:10px;color:#8a93a5">'+nExcl+' excluida(s)</span>':'')+
+        '<button onclick="vbtDelSession(\''+s.id+'\')" style="margin-left:auto;border:1px solid #f0d0d0;background:#fff;color:#D9534F;border-radius:6px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer">🗑 Eliminar</button>'+
+      '</div>'+
+      '<div style="overflow-x:auto;max-height:290px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">'+
+        '<thead><tr style="background:#fafbfd;position:sticky;top:0"><th style="padding:5px 9px;text-align:left;color:#8a93a5;font-size:9.5px">Jugador</th>'+
+        '<th style="padding:5px 6px;color:#8a93a5;font-size:9.5px">Ejercicio</th><th style="padding:5px 6px;color:#8a93a5;font-size:9.5px">kg</th>'+
+        '<th style="padding:5px 6px;color:#8a93a5;font-size:9.5px">MPV</th><th style="padding:5px 6px;color:#8a93a5;font-size:9.5px">Potencia</th>'+
+        '<th style="padding:5px 6px;color:#8a93a5;font-size:9.5px">Fuerza</th><th style="padding:5px 6px"></th></tr></thead><tbody>';
+    sets.forEach(function(st,i){
+      var sos=flags[i];
+      var bg=st.excl?'background:#f5f5f5;opacity:.55':(sos?'background:#fffaf0':'');
+      html+='<tr style="border-top:1px solid #f2f4f8;'+bg+'">'+
+        '<td style="padding:4px 9px;font-weight:600;color:#0D1B2A;white-space:nowrap">'+vbtEsc(st.name)+'</td>'+
+        '<td style="padding:4px 6px;color:#6b7a90;white-space:nowrap">'+vbtEsc(st.ex)+'</td>'+
+        '<td style="padding:4px 6px;text-align:center;font-weight:700">'+st.w+'</td>'+
+        '<td style="padding:4px 6px;text-align:center;font-weight:700;color:#3B4D88">'+Number(st.mpv).toFixed(2)+'</td>'+
+        '<td style="padding:4px 6px;text-align:center'+(sos&&sos.mets.indexOf('pp')>=0?';color:#EF9F27;font-weight:800':'')+'">'+Math.round(st.pp||0)+'</td>'+
+        '<td style="padding:4px 6px;text-align:center'+(sos&&sos.mets.indexOf('pf')>=0?';color:#EF9F27;font-weight:800':'')+'">'+Math.round(st.pf||0)+'</td>'+
+        '<td style="padding:4px 6px;text-align:right;white-space:nowrap">'+
+          (sos?'<span title="'+sos.det.map(function(d){return d.met.toUpperCase()+' '+d.ratio.toFixed(1)+'x la mediana ('+Math.round(d.med)+')';}).join(' · ')+'" style="color:#EF9F27;font-size:11px">⚠</span> ':'')+
+          '<button onclick="vbtToggleExcl(\''+s.id+'\','+i+')" title="'+(st.excl?'Volver a incluir':'Excluir del análisis')+'" '+
+            'style="border:1px solid '+(st.excl?'#cfe8dc':'#e6e0d0')+';background:#fff;color:'+(st.excl?'#1D9E75':'#8a6d3b')+';border-radius:5px;padding:2px 7px;font-size:9.5px;font-weight:700;cursor:pointer">'+
+            (st.excl?'incluir':'excluir')+'</button></td>'+
+      '</tr>';
+    });
+    html+='</tbody></table></div></div>';
+  });
+  return html||'<div style="padding:20px;text-align:center;color:#999">Sin sesiones.</div>';
+}
+
+function vbtToggleExcl(sesId, idx){
+  var s=(VBT_SESSIONS||[]).find(function(x){return String(x.id)===String(sesId);});
+  if(!s||!s.sets||!s.sets[idx])return;
+  s.sets[idx].excl=!s.sets[idx].excl;
+  s._upd=Date.now();
+  vbtSave();
+  tstRender();
+}
+window.vbtToggleExcl=vbtToggleExcl;
+
+function vbtDelSession(id){
+  var s=(VBT_SESSIONS||[]).find(function(x){return String(x.id)===String(id);});
+  if(!s)return;
+  if(!confirm('¿Eliminar la sesión del '+s.date+'?\n\n'+(s.sets||[]).length+' series se van a borrar. No se puede deshacer.'))return;
+  var i=VBT_SESSIONS.indexOf(s);
+  if(i>=0)VBT_SESSIONS.splice(i,1);
+  try{
+    var d=JSON.parse(localStorage.getItem('vbtDeleted_v1')||'{}');
+    d[String(id)]=new Date().toISOString();
+    localStorage.setItem('vbtDeleted_v1', JSON.stringify(d));
+  }catch(e){}
+  vbtSave();
+  tstRender();
+}
+window.vbtDelSession=vbtDelSession;
+
+// ── Editar zonas ──
+function vbtEditZones(){
+  var txt=VBT_ZONES.map(function(z){ return z.lbl+': '+z.min.toFixed(2)+' a '+(z.max>9?'max':z.max.toFixed(2)); }).join('\n');
+  var v=prompt('Límites de velocidad de cada zona (m/s).\n\nEscribí el límite INFERIOR de cada una, separados por coma,\nde la más rápida a la más lenta:\n\n'+txt+'\n\nActual:',
+    VBT_ZONES.map(function(z){return z.min.toFixed(2);}).join(', '));
+  if(v===null)return;
+  var nums=String(v).split(',').map(function(x){return parseFloat(x.trim());}).filter(function(x){return !isNaN(x);});
+  if(nums.length!==VBT_ZONES.length){ alert('Hacen falta '+VBT_ZONES.length+' valores.'); return; }
+  VBT_ZONES.forEach(function(z,i){
+    z.min=nums[i];
+    z.max=(i===0)?9.99:nums[i-1];
+  });
+  vbtZonesSave();
+  tstRender();
+}
+window.vbtEditZones=vbtEditZones;
+
+// ═══ ASISTENTE DE IMPORTACIÓN VBT ═══
+var _vbtImp={rows:[],headers:[],cols:{},players:[],exs:[],date:'',name:''};
+var _vbtImpStep=0;
+var VBT_EX_MAP={}, VBT_NAME_MAP={};
+try{ VBT_EX_MAP=JSON.parse(localStorage.getItem('vbtExMap_v1')||'{}')||{}; }catch(e){}
+try{ VBT_NAME_MAP=JSON.parse(localStorage.getItem('vbtNameMap_v1')||'{}')||{}; }catch(e){}
+function vbtMapsSave(){
+  try{ localStorage.setItem('vbtExMap_v1',JSON.stringify(VBT_EX_MAP)); }catch(e){}
+  try{ localStorage.setItem('vbtNameMap_v1',JSON.stringify(VBT_NAME_MAP)); }catch(e){}
+}
+
+function vbtImpOpen(){
+  _vbtImpStep=0;
+  _vbtImp={rows:[],headers:[],cols:{},players:[],exs:[],date:new Date().toISOString().slice(0,10),name:''};
+  var old=document.getElementById('vbtimp'); if(old)old.remove();
+  var d=document.createElement('div');
+  d.id='vbtimp';
+  d.style.cssText='position:fixed;inset:0;background:rgba(10,16,28,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:#fff;border-radius:12px;width:min(97vw,820px);max-height:93vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.4)" onclick="event.stopPropagation()">'+
+    '<div style="background:#0D1B2A;padding:13px 16px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;gap:10px">'+
+      '<div><div style="color:#fff;font-size:14px;font-weight:800">⚡ Importar sesión VBT</div>'+
+      '<div style="color:#9fb3c8;font-size:11px;margin-top:2px">Excel del encoder, una fila por serie.</div></div>'+
+      '<button onclick="vbtImpClose()" style="border:none;background:none;color:#9fb3c8;font-size:20px;cursor:pointer;padding:0">✕</button></div>'+
+    '<div id="vbtimp-body" style="padding:15px 16px;overflow-y:auto;flex:1"></div>'+
+    '<div id="vbtimp-foot" style="padding:11px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"></div></div>';
+  d.onclick=vbtImpClose;
+  document.body.appendChild(d);
+  vbtImpRender();
+}
+window.vbtImpOpen=vbtImpOpen;
+function vbtImpClose(){ var m=document.getElementById('vbtimp'); if(m)m.remove(); }
+window.vbtImpClose=vbtImpClose;
+
+function vbtImpRender(){
+  var b=document.getElementById('vbtimp-body'), f=document.getElementById('vbtimp-foot');
+  if(!b)return;
+  var h='', ft='';
+  if(_vbtImpStep===0){
+    h='<div ondragover="event.preventDefault()" ondrop="vbtImpDrop(event)" style="border:2px dashed #ccc;border-radius:10px;padding:26px;text-align:center;background:#fafbfd">'+
+      '<div style="font-size:30px;margin-bottom:7px">📂</div>'+
+      '<div style="font-size:13px;color:#555;font-weight:600;margin-bottom:9px">Arrastrá el archivo del encoder</div>'+
+      '<label style="display:inline-block;background:#3B4D88;color:#fff;font-size:12px;padding:7px 18px;border-radius:7px;cursor:pointer;font-weight:700">Elegir archivo'+
+        '<input type="file" accept=".xlsx,.xls,.csv" onchange="vbtImpFile(event)" style="display:none"></label>'+
+      '<div style="font-size:10.5px;color:#aaa;margin-top:9px">Necesita columnas de jugador, ejercicio, peso y las métricas.</div></div>'+
+      '<div id="vbtimp-msg" style="font-size:11.5px;margin-top:10px"></div>';
+  } else if(_vbtImpStep===1){
+    h='<div style="background:#eef3fb;border:1px solid #d5e0f0;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:11px">'+
+      '<b>'+vbtEsc(_vbtImp.file)+'</b> · '+_vbtImp.rows.length+' series leídas</div>';
+    h+='<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px">'+
+      '<label style="font-size:11px;font-weight:700;color:#555">Fecha de la sesión<br>'+
+        '<input type="date" id="vbtimp-date" value="'+_vbtImp.date+'" style="margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px"></label>'+
+      '<label style="flex:1;min-width:180px;font-size:11px;font-weight:700;color:#555">Nombre (opcional)<br>'+
+        '<input type="text" id="vbtimp-name" placeholder="ej: Semana 3 — fuerza" value="'+vbtEsc(_vbtImp.name)+'" style="width:100%;box-sizing:border-box;margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px"></label></div>';
+    h+='<div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:7px">Ejercicios del archivo</div>';
+    _vbtImp.exs.forEach(function(ex){
+      var k=ex.toLowerCase();
+      var cur=VBT_EX_MAP[k]!==undefined?VBT_EX_MAP[k]:ex;
+      h+='<div style="display:flex;align-items:center;gap:9px;padding:7px 10px;border:1px solid #e8ebf2;border-radius:7px;margin-bottom:6px;flex-wrap:wrap">'+
+        '<b style="font-size:12px;color:#0D1B2A;min-width:130px">'+vbtEsc(ex)+'</b><span style="color:#c3c9d4">→</span>'+
+        '<input value="'+vbtEsc(cur)+'" onchange="VBT_EX_MAP[\''+k.replace(/'/g,"\\'")+'\']=this.value;vbtMapsSave()" '+
+        'placeholder="nombre en la app" style="flex:1;min-width:150px;padding:5px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:11.5px"></div>';
+    });
+  } else {
+    h='<div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:4px">Jugadores del archivo</div>'+
+      '<div style="font-size:10.5px;color:#8a93a5;margin-bottom:9px">Se sugiere el más parecido del plantel.</div>';
+    var roster=(typeof tstRoster==='function')?tstRoster():[];
+    _vbtImp.players.forEach(function(p){
+      var k=p.toLowerCase();
+      var cur=VBT_NAME_MAP[k];
+      if(cur===undefined){
+        var best=null,bs=0.45;
+        roster.forEach(function(n){ var s=_timpSim(p,n); if(s>bs){bs=s;best=n;} });
+        cur=best||p; VBT_NAME_MAP[k]=cur;
+      }
+      var opts='<option value="'+vbtEsc(p)+'"'+(cur===p?' selected':'')+'>'+vbtEsc(p)+' (tal cual)</option>'+
+        roster.map(function(n){return '<option value="'+vbtEsc(n)+'"'+(cur===n?' selected':'')+'>'+vbtEsc(n)+'</option>';}).join('')+
+        '<option value="__skip__"'+(cur==='__skip__'?' selected':'')+'>✕ No importar</option>';
+      var ok=cur&&cur!=='__skip__';
+      h+='<div style="display:flex;align-items:center;gap:9px;padding:7px 10px;border:1px solid '+(ok?'#d8ece2':'#f0dcdc')+';border-radius:7px;margin-bottom:6px;flex-wrap:wrap">'+
+        '<b style="font-size:12px;color:#0D1B2A;min-width:120px">'+vbtEsc(p)+'</b><span style="color:#c3c9d4">→</span>'+
+        '<select onchange="VBT_NAME_MAP[\''+k.replace(/'/g,"\\'")+'\']=this.value;vbtMapsSave()" style="flex:1;min-width:170px;padding:5px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:11.5px">'+opts+'</select></div>';
+    });
+  }
+  b.innerHTML=h;
+  if(_vbtImpStep>0) ft+='<button onclick="_vbtImpStep--;vbtImpRender()" style="margin-right:auto;padding:7px 14px;border:1px solid #ddd;background:#fff;border-radius:7px;font-size:11px;cursor:pointer">← Atrás</button>';
+  if(_vbtImpStep===1) ft+='<button onclick="vbtImpNext()" style="padding:7px 18px;border:none;background:#3B4D88;color:#fff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Continuar →</button>';
+  if(_vbtImpStep===2) ft+='<button onclick="vbtImpDo()" style="padding:7px 20px;border:none;background:#1D9E75;color:#fff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">✓ Importar</button>';
+  f.innerHTML=ft;
+}
+window.vbtImpRender=vbtImpRender;
+function vbtImpNext(){
+  var d=document.getElementById('vbtimp-date'), n=document.getElementById('vbtimp-name');
+  if(d&&d.value)_vbtImp.date=d.value;
+  if(n)_vbtImp.name=n.value;
+  _vbtImpStep=2; vbtImpRender();
+}
+window.vbtImpNext=vbtImpNext;
+function vbtImpDrop(ev){ ev.preventDefault(); var f=ev.dataTransfer.files&&ev.dataTransfer.files[0]; if(f)vbtImpRead(f); }
+window.vbtImpDrop=vbtImpDrop;
+function vbtImpFile(ev){ var f=ev.target.files&&ev.target.files[0]; ev.target.value=''; if(f)vbtImpRead(f); }
+window.vbtImpFile=vbtImpFile;
+
+function vbtImpKg(v){
+  var n=parseFloat(String(v==null?'':v).toUpperCase().replace(/KG|LB/g,'').replace(',','.').trim());
+  return isNaN(n)?null:n;
+}
+window.vbtImpKg=vbtImpKg;
+
+// Detecta las columnas del export del encoder
+function vbtImpDetect(headers, rows){
+  var c={name:-1,ex:-1,w:-1,mpv:-1,pp:-1,pf:-1,reps:-1};
+  var norm=function(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim(); };
+  headers.forEach(function(h,i){
+    var n=norm(h);
+    if(c.name<0 && /^(name|nombre|player|athlete|jugador|apellido)$/.test(n)) c.name=i;
+    if(c.ex<0 && /^(drill|exercise|ejercicio|movement|lift)$/.test(n)) c.ex=i;
+    if(c.reps<0 && /^(reps|repeticiones|rep)$/.test(n)) c.reps=i;
+    if(c.mpv<0 && /mean propulsive velocity/.test(n)) c.mpv=i;
+    if(c.pp<0 && /^peak power/.test(n)) c.pp=i;
+    if(c.pf<0 && /^peak force/.test(n)) c.pf=i;
+    // El peso suele venir en una columna con valores tipo "100KG"
+    if(c.w<0 && /^(concentric|load|weight|peso|carga|kg)$/.test(n)) c.w=i;
+  });
+  // Por contenido: columna con la mayoría de valores tipo "NNkg"
+  if(c.w<0){
+    headers.forEach(function(h,i){
+      if(i===c.name||i===c.ex)return;
+      var vals=rows.slice(0,40).map(function(r){return r[i];}).filter(function(v){return v!=null&&String(v).trim()!=='';});
+      if(!vals.length)return;
+      var conKg=vals.filter(function(v){return /^\s*\d+([.,]\d+)?\s*(kg|lb)\s*$/i.test(String(v));}).length;
+      if(conKg>=vals.length*0.7) c.w=i;
+    });
+  }
+  return c;
+}
+window.vbtImpDetect=vbtImpDetect;
+
+function vbtImpRead(file){
+  _vbtImp.file=file.name;
+  var msg=document.getElementById('vbtimp-msg');
+  if(msg){msg.textContent='Leyendo…';msg.style.color='#666';}
+  var isX=/\.(xlsx|xls)$/i.test(file.name);
+  var fr=new FileReader();
+  fr.onload=function(e){
+    try{
+      var headers=[],rows=[];
+      if(isX){
+        if(typeof XLSX==='undefined'){ if(msg){msg.textContent='No se pudo leer el Excel. Guardalo como CSV.';msg.style.color='#E24B4A';} return; }
+        var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',raw:false});
+        var aoa=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:''});
+        headers=(aoa[0]||[]).map(function(h){return String(h||'').trim();});
+        rows=aoa.slice(1);
+      } else {
+        var lines=String(e.target.result||'').replace(/^\uFEFF/,'').split(/\r?\n/).filter(function(l){return l.trim();});
+        var sp=function(l){ return (typeof parseRow==='function')?parseRow(l):l.split(/[;,\t]/); };
+        headers=sp(lines[0]).map(function(h){return String(h||'').trim();});
+        rows=lines.slice(1).map(sp);
+      }
+      var c=vbtImpDetect(headers,rows);
+      if(c.name<0||c.w<0||c.mpv<0){
+        if(msg){msg.innerHTML='No se pudieron detectar las columnas necesarias.<br>Jugador: '+(c.name<0?'✗':'✓')+
+          ' · Peso: '+(c.w<0?'✗':'✓')+' · MPV: '+(c.mpv<0?'✗':'✓');msg.style.color='#E24B4A';}
+        return;
+      }
+      var out=[], exs={}, pls={};
+      rows.forEach(function(r){
+        var nm=String(r[c.name]||'').trim();
+        if(!nm||nm.toLowerCase()==='user')return;
+        var w=vbtImpKg(r[c.w]);
+        var mpv=parseFloat(String(r[c.mpv]||'').replace(',','.'));
+        if(!w||isNaN(mpv)||mpv<=0)return;
+        var ex=c.ex>=0?String(r[c.ex]||'').trim():'General';
+        out.push({name:nm, ex:ex, w:w, mpv:mpv,
+          pp:parseFloat(String(r[c.pp]||'').replace(',','.'))||0,
+          pf:parseFloat(String(r[c.pf]||'').replace(',','.'))||0,
+          reps:parseInt(r[c.reps])||0});
+        exs[ex]=true; pls[nm]=true;
+      });
+      if(!out.length){ if(msg){msg.textContent='No se encontraron series con peso y velocidad válidos.';msg.style.color='#E24B4A';} return; }
+      _vbtImp.rows=out; _vbtImp.cols=c;
+      _vbtImp.exs=Object.keys(exs); _vbtImp.players=Object.keys(pls);
+      _vbtImpStep=1; vbtImpRender();
+    }catch(err){ if(msg){msg.textContent='Error: '+(err.message||err);msg.style.color='#E24B4A';} }
+  };
+  if(isX)fr.readAsArrayBuffer(file); else fr.readAsText(file);
+}
+
+function vbtImpDo(){
+  var sets=[];
+  _vbtImp.rows.forEach(function(r){
+    var nm=VBT_NAME_MAP[r.name.toLowerCase()];
+    if(nm==='__skip__')return;
+    if(!nm)nm=r.name;
+    var ex=VBT_EX_MAP[r.ex.toLowerCase()];
+    if(!ex)ex=r.ex;
+    sets.push({name:nm, ex:ex, w:r.w, mpv:r.mpv, pp:r.pp, pf:r.pf, reps:r.reps});
+  });
+  if(!sets.length){ alert('No quedó ninguna serie para importar.'); return; }
+  var ses={id:'vbt'+Date.now(), date:_vbtImp.date, name:_vbtImp.name||'', sets:sets, _upd:Date.now()};
+  VBT_SESSIONS.push(ses);
+  vbtSave();
+  vbtMapsSave();
+  vbtImpClose();
+  var fl=vbtDetectOutliers(sets);
+  var n=Object.keys(fl).length;
+  _vbtView=n?'sesiones':'perfil';
+  if(typeof tstRender==='function')tstRender();
+  alert('Sesión importada: '+sets.length+' series.'+
+    (n?('\n\n⚠ '+n+' serie(s) con valores sospechosos.\nSe abren en 🗂 Sesiones para que las revises: podés excluirlas del análisis sin borrarlas.'):''));
+}
+window.vbtImpDo=vbtImpDo;
+
+// ═══ VISTA: COMPARATIVA DEL PLANTEL (v169) ═══════════════════════════════
+// Perfiles de todos los jugadores superpuestos, con filtro por posición.
+// Permite ver de un vistazo quién está más fuerte y quién más rápido.
+var _vbtPosFilter='';
+function vbtSetPos(v){ _vbtPosFilter=v||''; tstRender(); }
+window.vbtSetPos=vbtSetPos;
+
+// Posición del jugador (reutiliza el perfil ya cargado en la app)
+function vbtPosOf(name){
+  try{ return (typeof tstPosOf==='function')?tstPosOf(name):''; }catch(e){ return ''; }
+}
+window.vbtPosOf=vbtPosOf;
+
+function vbtViewPlantel(){
+  var sets=vbtAllSets();
+  var pls=vbtPlayers(_vbtEx).filter(function(p){
+    return !_vbtPosFilter || vbtPosOf(p)===_vbtPosFilter;
+  });
+  if(!pls.length) return '<div style="padding:24px;text-align:center;color:#999;font-size:12px">Ningún jugador de esta posición tiene series en '+vbtEsc(_vbtEx)+'.</div>';
+
+  var perfiles=pls.map(function(p){
+    var pr=vbtProfile(sets,p,_vbtEx);
+    var op=vbtOptimal(sets,p,_vbtEx);
+    return {name:p, pos:vbtPosOf(p), prof:pr, opt:op};
+  }).filter(function(x){ return x.prof.ok; });
+
+  if(!perfiles.length) return '<div style="padding:24px;text-align:center;color:#999;font-size:12px">Todavía ningún jugador tiene 2 pesos distintos en '+vbtEsc(_vbtEx)+'.</div>';
+
+  // Posiciones presentes, para el filtro
+  var posSet={};
+  vbtPlayers(_vbtEx).forEach(function(p){ var po=vbtPosOf(p); if(po)posSet[po]=true; });
+  var posList=Object.keys(posSet).sort();
+
+  var html='';
+  if(posList.length){
+    html+='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:11px;align-items:center">'+
+      '<span style="font-size:10.5px;color:#8a93a5;font-weight:700">Posición</span>'+
+      '<button onclick="vbtSetPos(\'\')" style="padding:4px 11px;border:1px solid '+(_vbtPosFilter===''?'#3B4D88':'#dde2ea')+';background:'+(_vbtPosFilter===''?'#3B4D88':'#fff')+';color:'+(_vbtPosFilter===''?'#fff':'#777')+';border-radius:14px;font-size:10.5px;font-weight:700;cursor:pointer">Todas</button>'+
+      posList.map(function(po){
+        var on=_vbtPosFilter===po;
+        return '<button onclick="vbtSetPos(\''+po+'\')" style="padding:4px 11px;border:1px solid '+(on?'#3B4D88':'#dde2ea')+';background:'+(on?'#3B4D88':'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:14px;font-size:10.5px;font-weight:700;cursor:pointer">'+po+'</button>';
+      }).join('')+'</div>';
+  }
+
+  // ── Gráfico: todas las rectas superpuestas ──
+  var W=700,H=270,PL=52,PR=90,PT=16,PB=34;
+  var iw=W-PL-PR, ih=H-PT-PB;
+  var allW=[], allV=[];
+  perfiles.forEach(function(x){
+    x.prof.pts.forEach(function(p){ allW.push(p.w); allV.push(p.mpv); });
+  });
+  var xmin=Math.min.apply(null,allW)*0.92, xmax=Math.max.apply(null,allW)*1.08;
+  var ymin=Math.max(0,Math.min.apply(null,allV)*0.85), ymax=Math.max.apply(null,allV)*1.1;
+  var X=function(v){ return PL+(v-xmin)/(xmax-xmin)*iw; };
+  var Y=function(v){ return PT+ih-(v-ymin)/(ymax-ymin)*ih; };
+  var COLS=['#3B4D88','#1D9E75','#E8772E','#9C59D1','#2E9BB5','#D9534F','#8a6d3b','#5B6DA8','#47A96B','#C77B3E'];
+
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">';
+  // Bandas de zona (horizontales, porque el eje Y es velocidad)
+  VBT_ZONES.forEach(function(z){
+    var a=Math.max(ymin,z.min), b=Math.min(ymax,z.max);
+    if(b<=a)return;
+    svg+='<rect x="'+PL+'" y="'+Y(b).toFixed(1)+'" width="'+iw+'" height="'+(Y(a)-Y(b)).toFixed(1)+'" fill="'+z.col+'" opacity="0.06"/>';
+    svg+='<text x="'+(W-PR+5)+'" y="'+((Y(a)+Y(b))/2+3).toFixed(1)+'" font-size="8.5" fill="'+z.col+'" font-weight="700" font-family="system-ui,sans-serif">'+z.lbl+'</text>';
+  });
+  for(var i=0;i<=4;i++){
+    var yv=ymin+(ymax-ymin)*i/4, yy=Y(yv);
+    svg+='<line x1="'+PL+'" y1="'+yy.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+yy.toFixed(1)+'" stroke="#eef0f4" stroke-width="1"/>';
+    svg+='<text x="'+(PL-7)+'" y="'+(yy+3.5).toFixed(1)+'" text-anchor="end" font-size="9.5" fill="#a3a9b6" font-family="system-ui,sans-serif">'+yv.toFixed(2)+'</text>';
+  }
+  for(var j=0;j<=4;j++){
+    var xv=xmin+(xmax-xmin)*j/4, xx=X(xv);
+    svg+='<text x="'+xx.toFixed(1)+'" y="'+(PT+ih+16)+'" text-anchor="middle" font-size="9.5" fill="#a3a9b6" font-family="system-ui,sans-serif">'+Math.round(xv)+'kg</text>';
+  }
+  perfiles.forEach(function(x,k){
+    var col=COLS[k%COLS.length];
+    var pr=x.prof;
+    var w1=Math.max(xmin,pr.minW*0.95), w2=Math.min(xmax,pr.maxW*1.05);
+    var v1=pr.a+pr.b*w1, v2=pr.a+pr.b*w2;
+    svg+='<line x1="'+X(w1).toFixed(1)+'" y1="'+Y(v1).toFixed(1)+'" x2="'+X(w2).toFixed(1)+'" y2="'+Y(v2).toFixed(1)+
+      '" stroke="'+col+'" stroke-width="2.2" stroke-opacity="0.8"><title>'+vbtEsc(x.name)+'</title></line>';
+    pr.pts.forEach(function(p){
+      svg+='<circle cx="'+X(p.w).toFixed(1)+'" cy="'+Y(p.mpv).toFixed(1)+'" r="3.4" fill="'+col+'" fill-opacity="0.85" stroke="#fff" stroke-width="1.2"><title>'+vbtEsc(x.name)+': '+p.w+'kg → '+p.mpv.toFixed(2)+'</title></circle>';
+    });
+  });
+  svg+='</svg>';
+  html+='<div style="font-size:10.5px;color:#8a93a5;margin-bottom:4px">Cada línea es un jugador. Más a la derecha = mueve más peso; más arriba = más rápido.</div>'+svg;
+
+  // Leyenda
+  html+='<div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:8px">'+
+    perfiles.map(function(x,k){
+      var col=COLS[k%COLS.length];
+      return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#4a5568">'+
+        '<span style="width:12px;height:3px;background:'+col+';border-radius:2px;display:inline-block"></span>'+vbtEsc(x.name)+
+        (x.pos?' <span style="color:#a3a9b6">('+x.pos+')</span>':'')+'</span>';
+    }).join('')+'</div>';
+
+  // ── Ranking ──
+  var orden=perfiles.slice().sort(function(a,b){ return (b.prof.oneRM||0)-(a.prof.oneRM||0); });
+  var maxRM=Math.max.apply(null,orden.map(function(x){return x.prof.oneRM||0;}));
+  html+='<div style="margin-top:14px;font-size:11px;font-weight:800;color:#0D1B2A;margin-bottom:6px">Ranking por 1RM estimado</div>';
+  html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">'+
+    '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
+      '<th style="padding:7px 10px;text-align:left;color:#555">Jugador</th>'+
+      '<th style="padding:7px 8px;color:#555">Pos.</th>'+
+      '<th style="padding:7px 8px;color:#0D1B2A;font-weight:800">1RM est.</th>'+
+      '<th style="padding:7px 8px;color:#555">Pico potencia</th>'+
+      '<th style="padding:7px 8px;color:#555">Pico fuerza</th>'+
+      '<th style="padding:7px 8px;color:#555">R²</th></tr></thead><tbody>';
+  orden.forEach(function(x,k){
+    var pr=x.prof, op=x.opt||{};
+    var pct=maxRM?((pr.oneRM/maxRM)*100):0;
+    var rc=pr.r2>=0.95?'#1D9E75':(pr.r2>=0.85?'#EF9F27':'#D9534F');
+    html+='<tr style="border-bottom:1px solid #f0f2f6">'+
+      '<td style="padding:6px 10px;font-weight:600;color:#0D1B2A;white-space:nowrap">'+
+        (k<3?['🥇','🥈','🥉'][k]+' ':'')+vbtEsc(x.name)+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;color:#8a93a5;font-size:10px">'+(x.pos||'—')+'</td>'+
+      '<td style="padding:6px 8px;text-align:center">'+
+        '<div style="display:flex;align-items:center;gap:6px;justify-content:center">'+
+          '<span style="font-weight:800;color:'+(vbtRMConfianza(pr).nivel==='alta'?'#0D1B2A':'#EF9F27')+'" '+
+            (vbtRMConfianza(pr).nivel!=='alta'?'title="Estimación poco confiable: '+vbtRMConfianza(pr).problemas.join(' · ')+'"':'')+'>'+
+            Math.round(pr.oneRM)+(vbtRMConfianza(pr).nivel!=='alta'?' ⚠':'')+'</span>'+
+          '<span style="width:44px;height:5px;background:#eef0f4;border-radius:3px;overflow:hidden;display:inline-block">'+
+            '<span style="display:block;height:100%;width:'+pct.toFixed(0)+'%;background:#3B4D88"></span></span></div></td>'+
+      '<td style="padding:6px 8px;text-align:center;color:#1D9E75;font-weight:700">'+(op.ppMpv?op.ppMpv.toFixed(2):'—')+
+        (op.ppVal?'<span style="color:#a3a9b6;font-weight:400;font-size:9.5px"> · '+Math.round(op.ppVal)+'W</span>':'')+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;color:#D9534F;font-weight:700">'+(op.pfMpv?op.pfMpv.toFixed(2):'—')+
+        (op.pfVal?'<span style="color:#a3a9b6;font-weight:400;font-size:9.5px"> · '+Math.round(op.pfVal)+'N</span>':'')+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;color:'+rc+';font-weight:700">'+pr.r2.toFixed(2)+'</td>'+
+    '</tr>';
+  });
+  html+='</tbody></table></div>';
+  html+='<div style="font-size:10px;color:#a3a9b6;margin-top:8px">Las columnas de pico muestran a qué velocidad cada jugador produjo más potencia y más fuerza. Si difieren mucho de las zonas de referencia, conviene ajustarlas con tu criterio.</div>';
+  return html;
+}
+window.vbtViewPlantel=vbtViewPlantel;
+
+// ═══ PLANILLA DE SESIÓN (uso práctico) ══════════════════════════════════
+// Genera una hoja imprimible con el peso de cada jugador para la velocidad
+// elegida, lista para llevar al gimnasio.
+function vbtPrintSession(){
+  var sets=vbtAllSets();
+  var pls=vbtPlayers(_vbtEx).filter(function(p){ return !_vbtPosFilter || vbtPosOf(p)===_vbtPosFilter; });
+  var z=vbtZoneOf(_vbtCalcMpv);
+  var filas=pls.map(function(p){
+    var pr=vbtProfile(sets,p,_vbtEx);
+    if(!pr.ok) return null;
+    var w=vbtWeightForVelocity(pr,_vbtCalcMpv);
+    if(w==null)return null;
+    return {name:p, pos:vbtPosOf(p), w:Math.round(w/2.5)*2.5, pct:pr.oneRM?Math.round(w/pr.oneRM*100):null,
+            oneRM:Math.round(pr.oneRM), extrap:(w<pr.minW*0.75||w>pr.maxW*1.25)};
+  }).filter(Boolean);
+  if(!filas.length){ alert('No hay jugadores con perfil calculado para este ejercicio.'); return; }
+  var hoy=new Date().toISOString().slice(0,10);
+  var html='<html><head><meta charset="utf-8"><title>Sesión VBT — '+vbtEsc(_vbtEx)+'</title>'+
+    '<style>body{font-family:system-ui,-apple-system,sans-serif;padding:22px;color:#0D1B2A}'+
+    'h1{font-size:19px;margin:0 0 3px}h2{font-size:12px;font-weight:400;color:#6b7a90;margin:0 0 16px}'+
+    'table{width:100%;border-collapse:collapse;font-size:13px}'+
+    'th{background:#0D1B2A;color:#fff;padding:8px 10px;text-align:left;font-size:11px}'+
+    'td{padding:8px 10px;border-bottom:1px solid #e8e8e8}'+
+    '.w{font-size:17px;font-weight:800}.chk{width:26px;height:26px;border:2px solid #ccc;border-radius:4px;display:inline-block}'+
+    '.nota{font-size:10px;color:#8a93a5;margin-top:14px}'+
+    '@media print{body{padding:10px}}</style></head><body>'+
+    '<h1>'+vbtEsc(_vbtEx)+' — velocidad objetivo '+_vbtCalcMpv.toFixed(2)+' m/s</h1>'+
+    '<h2>'+(z?z.lbl+' · ':'')+hoy+(_vbtPosFilter?' · '+_vbtPosFilter:'')+' · '+filas.length+' jugadores</h2>'+
+    '<table><thead><tr><th>Jugador</th><th>Pos.</th><th>Peso</th><th>% 1RM</th><th>Series realizadas</th></tr></thead><tbody>'+
+    filas.map(function(f){
+      return '<tr><td><b>'+vbtEsc(f.name)+'</b></td>'+
+        '<td>'+(f.pos||'—')+'</td>'+
+        '<td class="w">'+f.w+' kg'+(f.extrap?' <span style="color:#EF9F27;font-size:11px">⚠</span>':'')+'</td>'+
+        '<td>'+(f.pct?f.pct+'%':'—')+'</td>'+
+        '<td><span class="chk"></span> <span class="chk"></span> <span class="chk"></span> <span class="chk"></span></td></tr>';
+    }).join('')+
+    '</tbody></table>'+
+    '<div class="nota">Pesos calculados con el perfil carga-velocidad individual de cada jugador. '+
+    'El símbolo ⚠ marca extrapolaciones fuera del rango medido: verificar en la primera serie y ajustar si la velocidad real difiere.</div>'+
+    '</body></html>';
+  var w=window.open('','_blank');
+  if(!w){ alert('El navegador bloqueó la ventana. Permití las ventanas emergentes para imprimir la planilla.'); return; }
+  w.document.write(html); w.document.close();
+  setTimeout(function(){ try{ w.print(); }catch(e){} }, 400);
+}
+window.vbtPrintSession=vbtPrintSession;
+
+
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -36998,7 +37870,7 @@ function tstAsym(rec){
 function tstRender(){
   var out=document.getElementById('tst-container'); if(!out)return;
   var tabs='<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center">'+
-    [['load','📋 Cargar jornada'],['resi','🫁 Resistencia'],['indiv','📈 Individual'],['team','👥 Plantel'],['jor','🗂 Jornadas'],['cat','⚙ Tests']].map(function(t){
+    [['load','📋 Cargar jornada'],['resi','🫁 Resistencia'],['vbt','⚡ VBT'],['indiv','📈 Individual'],['team','👥 Plantel'],['jor','🗂 Jornadas'],['cat','⚙ Tests']].map(function(t){
       var on=_tstView===t[0];
       return '<button onclick="tstSetView(\''+t[0]+'\')" style="padding:7px 15px;border:1px solid '+(on?'#3B4D88':'#ddd')+';background:'+(on?'#3B4D88':'#fff')+';color:'+(on?'#fff':'#555')+';border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'+t[1]+'</button>';
     }).join('')+
@@ -37010,6 +37882,10 @@ function tstRender(){
     '</span>'+
     '</div>';
   var body='';
+  if(_tstView==='vbt'){
+    out.innerHTML=tabs+(typeof vbtRender==='function'?vbtRender():'');
+    return;
+  }
   if(_tstView==='resi'){
     // v155: Resistencia dejó de ser subpestaña aparte y vive acá dentro.
     out.innerHTML=tabs+'<div id="resi-container"></div>';
