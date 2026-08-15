@@ -35092,6 +35092,7 @@ var SB_SETTINGS_KEYS = [
   // bajaban nunca. Por eso los pendientes del CT no se guardaban: quedaban
   // sólo en el dispositivo donde se escribían.
   'VBT_SESSIONS',
+  'RESI_NAME_MAP',
   'VBT_EX_MAP',
   'VBT_NAME_MAP',
   'VBT_ZONES',
@@ -39409,6 +39410,331 @@ function resiMergeTests(cloud){
 }
 window.resiMergeTests=resiMergeTests;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// RESISTENCIA (v170) — importación de sesión y calculadora
+// La importación es PROPIA del módulo (no la del catálogo de tests): acá una
+// sesión es un test aplicado a todo el plantel en una fecha.
+// ═══════════════════════════════════════════════════════════════════════════
+var _resiImp={rows:[], type:'3015', date:'', name:'', file:''};
+var RESI_NAME_MAP={};
+try{ RESI_NAME_MAP=JSON.parse(localStorage.getItem('resiNameMap_v1')||'{}')||{}; }catch(e){}
+function resiNameMapSave(){ try{ localStorage.setItem('resiNameMap_v1',JSON.stringify(RESI_NAME_MAP)); }catch(e){} }
+
+function resiEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+function resiImpOpen(){
+  _resiImp={rows:[], type:'3015', date:new Date().toISOString().slice(0,10), name:'', file:''};
+  var old=document.getElementById('resiimp'); if(old)old.remove();
+  var d=document.createElement('div');
+  d.id='resiimp';
+  d.style.cssText='position:fixed;inset:0;background:rgba(10,16,28,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:#fff;border-radius:12px;width:min(97vw,700px);max-height:93vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.4)" onclick="event.stopPropagation()">'+
+    '<div style="background:#0D1B2A;padding:13px 16px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;gap:10px">'+
+      '<div><div style="color:#fff;font-size:14px;font-weight:800">🫁 Importar sesión de resistencia</div>'+
+      '<div style="color:#9fb3c8;font-size:11px;margin-top:2px">Planilla con una fila por jugador y su resultado.</div></div>'+
+      '<button onclick="resiImpClose()" style="border:none;background:none;color:#9fb3c8;font-size:20px;cursor:pointer;padding:0">✕</button></div>'+
+    '<div id="resiimp-body" style="padding:15px 16px;overflow-y:auto;flex:1"></div>'+
+    '<div id="resiimp-foot" style="padding:11px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end"></div></div>';
+  d.onclick=resiImpClose;
+  document.body.appendChild(d);
+  resiImpRender();
+}
+window.resiImpOpen=resiImpOpen;
+function resiImpClose(){ var m=document.getElementById('resiimp'); if(m)m.remove(); }
+window.resiImpClose=resiImpClose;
+
+function resiImpRender(){
+  var b=document.getElementById('resiimp-body'), f=document.getElementById('resiimp-foot');
+  if(!b)return;
+  var h='';
+  if(!_resiImp.rows.length){
+    h='<div style="margin-bottom:13px">'+
+      '<div style="font-size:11px;font-weight:700;color:#555;margin-bottom:5px">Tipo de test</div>'+
+      '<div style="display:flex;gap:5px;flex-wrap:wrap">'+
+        Object.keys(RESI_TYPES).map(function(k){
+          var t=RESI_TYPES[k], on=_resiImp.type===k;
+          return '<button onclick="_resiImp.type=\''+k+'\';resiImpRender()" style="padding:6px 12px;border:1px solid '+(on?t.color:'#dde2ea')+';background:'+(on?t.color:'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:16px;font-size:11px;font-weight:700;cursor:pointer">'+resiEsc(t.short)+'</button>';
+        }).join('')+'</div></div>';
+    h+='<div ondragover="event.preventDefault()" ondrop="resiImpDrop(event)" style="border:2px dashed #ccc;border-radius:10px;padding:24px;text-align:center;background:#fafbfd">'+
+      '<div style="font-size:28px;margin-bottom:6px">📂</div>'+
+      '<div style="font-size:12.5px;color:#555;font-weight:600;margin-bottom:9px">Arrastrá la planilla</div>'+
+      '<label style="display:inline-block;background:#3B4D88;color:#fff;font-size:12px;padding:7px 18px;border-radius:7px;cursor:pointer;font-weight:700">Elegir archivo'+
+        '<input type="file" accept=".xlsx,.xls,.csv" onchange="resiImpFile(event)" style="display:none"></label>'+
+      '<div style="font-size:10.5px;color:#aaa;margin-top:9px">Se espera una columna con el apellido y otra con el resultado ('+
+        resiEsc(RESI_TYPES[_resiImp.type].metricLabel+' en '+RESI_TYPES[_resiImp.type].metricUnit)+').</div></div>'+
+      '<div id="resiimp-msg" style="font-size:11.5px;margin-top:10px"></div>';
+    f.innerHTML='';
+  } else {
+    var t=RESI_TYPES[_resiImp.type];
+    h='<div style="background:#eef3fb;border:1px solid #d5e0f0;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:11px">'+
+      '<b>'+resiEsc(_resiImp.file)+'</b> · '+_resiImp.rows.length+' jugadores · '+resiEsc(t.short)+'</div>';
+    h+='<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:13px">'+
+      '<label style="font-size:11px;font-weight:700;color:#555">Fecha<br>'+
+        '<input type="date" id="resiimp-date" value="'+_resiImp.date+'" style="margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px"></label>'+
+      '<label style="flex:1;min-width:170px;font-size:11px;font-weight:700;color:#555">Nombre<br>'+
+        '<input type="text" id="resiimp-name" placeholder="ej: 30-15 pretemporada" value="'+resiEsc(_resiImp.name)+'" style="width:100%;box-sizing:border-box;margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px"></label></div>';
+    h+='<div style="font-size:11.5px;font-weight:700;color:#0D1B2A;margin-bottom:6px">Jugadores detectados</div>';
+    var roster=(typeof tstRoster==='function')?tstRoster():[];
+    h+='<div style="max-height:300px;overflow-y:auto;border:1px solid #e8ebf2;border-radius:8px">';
+    _resiImp.rows.forEach(function(r,i){
+      var k=String(r.name).toLowerCase();
+      var cur=RESI_NAME_MAP[k];
+      if(cur===undefined){
+        var best=null,bs=0.45;
+        roster.forEach(function(n){
+          var s=(typeof _timpSim==='function')?_timpSim(r.name,n):0;
+          if(s>bs){bs=s;best=n;}
+        });
+        cur=best||r.name; RESI_NAME_MAP[k]=cur;
+      }
+      var opts='<option value="'+resiEsc(r.name)+'"'+(cur===r.name?' selected':'')+'>'+resiEsc(r.name)+' (tal cual)</option>'+
+        roster.map(function(n){return '<option value="'+resiEsc(n)+'"'+(cur===n?' selected':'')+'>'+resiEsc(n)+'</option>';}).join('')+
+        '<option value="__skip__"'+(cur==='__skip__'?' selected':'')+'>✕ No importar</option>';
+      h+='<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #f2f4f8;flex-wrap:wrap">'+
+        '<b style="font-size:11.5px;color:#0D1B2A;min-width:110px">'+resiEsc(r.name)+'</b>'+
+        '<span style="font-size:12px;font-weight:800;color:'+t.color+';min-width:60px">'+r.value+' '+resiEsc(t.metricUnit)+'</span>'+
+        '<span style="color:#c3c9d4">→</span>'+
+        '<select onchange="RESI_NAME_MAP[\''+k.replace(/'/g,"\\'")+'\']=this.value;resiNameMapSave()" style="flex:1;min-width:150px;padding:4px 8px;border:1px solid #ccd3de;border-radius:6px;font-size:11px">'+opts+'</select></div>';
+    });
+    h+='</div>';
+    f.innerHTML='<button onclick="_resiImp.rows=[];resiImpRender()" style="margin-right:auto;padding:7px 14px;border:1px solid #ddd;background:#fff;border-radius:7px;font-size:11px;cursor:pointer">← Otro archivo</button>'+
+      '<button onclick="resiImpDo()" style="padding:7px 20px;border:none;background:#1D9E75;color:#fff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">✓ Importar</button>';
+  }
+  b.innerHTML=h;
+}
+window.resiImpRender=resiImpRender;
+function resiImpDrop(ev){ ev.preventDefault(); var f=ev.dataTransfer.files&&ev.dataTransfer.files[0]; if(f)resiImpRead(f); }
+window.resiImpDrop=resiImpDrop;
+function resiImpFile(ev){ var f=ev.target.files&&ev.target.files[0]; ev.target.value=''; if(f)resiImpRead(f); }
+window.resiImpFile=resiImpFile;
+
+function resiImpRead(file){
+  _resiImp.file=file.name;
+  var msg=document.getElementById('resiimp-msg');
+  if(msg){msg.textContent='Leyendo…';msg.style.color='#666';}
+  var isX=/\.(xlsx|xls)$/i.test(file.name);
+  var fr=new FileReader();
+  fr.onload=function(e){
+    try{
+      var aoa=[];
+      if(isX){
+        if(typeof XLSX==='undefined'){ if(msg){msg.textContent='No se pudo leer el Excel. Guardalo como CSV.';msg.style.color='#E24B4A';} return; }
+        var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+        aoa=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+      } else {
+        var lines=String(e.target.result||'').replace(/^\uFEFF/,'').split(/\r?\n/).filter(function(l){return l.trim();});
+        var sp=function(l){ return (typeof parseRow==='function')?parseRow(l):l.split(/[;,\t]/); };
+        aoa=lines.map(sp);
+      }
+      var res=resiImpParse(aoa);
+      if(res.err){ if(msg){msg.textContent=res.err;msg.style.color='#E24B4A';} return; }
+      _resiImp.rows=res.rows;
+      resiImpRender();
+    }catch(err){ if(msg){msg.textContent='Error: '+(err.message||err);msg.style.color='#E24B4A';} }
+  };
+  if(isX)fr.readAsArrayBuffer(file); else fr.readAsText(file);
+}
+
+// Detecta columna de nombre y de resultado
+function resiImpParse(aoa){
+  if(!aoa||aoa.length<2) return {err:'El archivo necesita encabezados y al menos una fila.'};
+  var hdr=(aoa[0]||[]).map(function(h){return String(h||'').toLowerCase().trim();});
+  var cName=-1, cVal=-1;
+  hdr.forEach(function(h,i){
+    if(cName<0 && /(apellido|nombre|name|jugador|player|atleta)/.test(h)) cName=i;
+    // Preferir la unidad principal del tipo elegido
+    var u=String(RESI_TYPES[_resiImp.type].metricUnit||'').toLowerCase();
+    if(cVal<0 && u && h.indexOf(u)>=0) cVal=i;
+  });
+  if(cName<0) cName=0;
+  if(cVal<0){
+    // Primera columna numérica que no sea la del nombre
+    for(var i=0;i<hdr.length;i++){
+      if(i===cName)continue;
+      var nums=aoa.slice(1,20).map(function(r){return parseFloat(String(r[i]||'').replace(',','.'));}).filter(function(v){return !isNaN(v);});
+      if(nums.length>=Math.min(3,aoa.length-1)){ cVal=i; break; }
+    }
+  }
+  if(cVal<0) return {err:'No se encontró una columna con el resultado numérico.'};
+  var rows=[];
+  aoa.slice(1).forEach(function(r){
+    var nm=String(r[cName]||'').trim();
+    if(!nm)return;
+    var v=parseFloat(String(r[cVal]||'').replace(',','.'));
+    if(isNaN(v))return;
+    rows.push({name:nm, value:v});
+  });
+  if(!rows.length) return {err:'No se encontraron filas con jugador y resultado.'};
+  return {rows:rows};
+}
+window.resiImpParse=resiImpParse;
+
+function resiImpDo(){
+  var d=document.getElementById('resiimp-date'), n=document.getElementById('resiimp-name');
+  if(d&&d.value)_resiImp.date=d.value;
+  if(n)_resiImp.name=n.value;
+  var t=RESI_TYPES[_resiImp.type];
+  var players=[];
+  _resiImp.rows.forEach(function(r){
+    var nm=RESI_NAME_MAP[String(r.name).toLowerCase()];
+    if(nm==='__skip__')return;
+    if(!nm)nm=r.name;
+    var p={name:nm, value:r.value};
+    // Segunda métrica automática (VIFT m/s = km/h ÷ 3.6)
+    if(t.metric2Auto) p.value2=Math.round(r.value/3.6*100)/100;
+    players.push(p);
+  });
+  if(!players.length){ alert('No quedó ningún jugador para importar.'); return; }
+  var test={
+    id:'resi'+Date.now(),
+    type:_resiImp.type,
+    name:_resiImp.name||(t.short+' '+_resiImp.date),
+    date:_resiImp.date,
+    players:players,
+    _upd:Date.now()
+  };
+  RESI_TESTS.push(test);
+  resiSave();
+  resiNameMapSave();
+  resiImpClose();
+  if(typeof resiRender==='function') resiRender();
+  alert('Sesión importada: '+players.length+' jugadores.');
+}
+window.resiImpDo=resiImpDo;
+
+// ═══ CALCULADORA DE METROS POR PASADA ═══════════════════════════════════
+// A partir de la VIFT de cada jugador calcula la distancia a recorrer en un
+// tiempo dado, para diagramar series intermitentes individualizadas.
+var _resiCalc={testId:'', pct:100, seg:15};
+function resiCalcOpen(){
+  var conVift=(RESI_TESTS||[]).filter(function(t){ return t.type==='3015' && (t.players||[]).length; });
+  if(!conVift.length){ alert('Todavía no hay ningún test 30-15 cargado.\n\nLa calculadora usa la VIFT para individualizar las distancias.'); return; }
+  _resiCalc.testId=conVift[conVift.length-1].id;
+  var old=document.getElementById('resicalc'); if(old)old.remove();
+  var d=document.createElement('div');
+  d.id='resicalc';
+  d.style.cssText='position:fixed;inset:0;background:rgba(10,16,28,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:#fff;border-radius:12px;width:min(97vw,760px);max-height:93vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.4)" onclick="event.stopPropagation()">'+
+    '<div style="background:#0D1B2A;padding:13px 16px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;gap:10px">'+
+      '<div><div style="color:#fff;font-size:14px;font-weight:800">🧮 Metros por pasada</div>'+
+      '<div style="color:#9fb3c8;font-size:11px;margin-top:2px">Distancia individualizada a partir de la VIFT de cada jugador.</div></div>'+
+      '<button onclick="resiCalcClose()" style="border:none;background:none;color:#9fb3c8;font-size:20px;cursor:pointer;padding:0">✕</button></div>'+
+    '<div id="resicalc-body" style="padding:15px 16px;overflow-y:auto;flex:1"></div>'+
+    '<div style="padding:11px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end">'+
+      '<button onclick="resiCalcPrint()" style="padding:7px 16px;border:none;background:#0D1B2A;color:#fff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🖨 Planilla</button>'+
+      '<button onclick="resiCalcClose()" style="padding:7px 16px;border:1px solid #ddd;background:#fff;border-radius:7px;font-size:11px;cursor:pointer">Cerrar</button></div></div>';
+  d.onclick=resiCalcClose;
+  document.body.appendChild(d);
+  resiCalcRender();
+}
+window.resiCalcOpen=resiCalcOpen;
+function resiCalcClose(){ var m=document.getElementById('resicalc'); if(m)m.remove(); }
+window.resiCalcClose=resiCalcClose;
+
+function resiCalcRows(){
+  var t=(RESI_TESTS||[]).find(function(x){return String(x.id)===String(_resiCalc.testId);});
+  if(!t) return [];
+  return (t.players||[]).filter(function(p){ return p.value>0; }).map(function(p){
+    var viftKmh=Number(p.value);
+    var viftMs=viftKmh/3.6;
+    var vel=viftMs*(_resiCalc.pct/100);        // velocidad de trabajo
+    var m=vel*_resiCalc.seg;                   // metros en el tiempo elegido
+    return {name:p.name, vift:viftKmh, vel:vel, m:m, mRound:Math.round(m/0.5)*0.5};
+  }).sort(function(a,b){ return b.vift-a.vift; });
+}
+window.resiCalcRows=resiCalcRows;
+
+function resiCalcRender(){
+  var b=document.getElementById('resicalc-body');
+  if(!b)return;
+  var tests=(RESI_TESTS||[]).filter(function(t){ return t.type==='3015' && (t.players||[]).length; });
+  var rows=resiCalcRows();
+  var h='<div style="background:#eef3fb;border:1px solid #d5e0f0;border-radius:8px;padding:11px 13px;margin-bottom:12px">'+
+    '<div style="display:flex;gap:11px;align-items:flex-end;flex-wrap:wrap">'+
+      '<label style="font-size:10.5px;font-weight:700;color:#555">Test de referencia<br>'+
+        '<select onchange="_resiCalc.testId=this.value;resiCalcRender()" style="margin-top:4px;padding:5px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:11.5px;min-width:170px">'+
+          tests.map(function(t){ return '<option value="'+t.id+'"'+(String(t.id)===String(_resiCalc.testId)?' selected':'')+'>'+resiEsc(t.date||'')+' · '+resiEsc(t.name||'30-15')+'</option>'; }).join('')+
+        '</select></label>'+
+      '<label style="font-size:10.5px;font-weight:700;color:#555">% de la VIFT<br>'+
+        '<input type="number" min="50" max="130" step="5" value="'+_resiCalc.pct+'" onchange="_resiCalc.pct=parseFloat(this.value)||100;resiCalcRender()" '+
+        'style="width:72px;margin-top:4px;padding:5px 8px;border:1px solid #ccd3de;border-radius:6px;font-size:13px;font-weight:800;text-align:center;color:#0D1B2A"></label>'+
+      '<label style="font-size:10.5px;font-weight:700;color:#555">Segundos de trabajo<br>'+
+        '<input type="number" min="5" max="120" step="5" value="'+_resiCalc.seg+'" onchange="_resiCalc.seg=parseFloat(this.value)||15;resiCalcRender()" '+
+        'style="width:72px;margin-top:4px;padding:5px 8px;border:1px solid #ccd3de;border-radius:6px;font-size:13px;font-weight:800;text-align:center;color:#0D1B2A"></label>'+
+    '</div>'+
+    '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:9px">'+
+      [[15,'15"'],[20,'20"'],[30,'30"'],[45,'45"'],[60,'60"']].map(function(x){
+        var on=_resiCalc.seg===x[0];
+        return '<button onclick="_resiCalc.seg='+x[0]+';resiCalcRender()" style="padding:3px 10px;border:1px solid '+(on?'#3B4D88':'#dde2ea')+';background:'+(on?'#3B4D88':'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:12px;font-size:10px;font-weight:700;cursor:pointer">'+x[1]+'</button>';
+      }).join('')+
+      '<span style="width:10px"></span>'+
+      [[90,'90%'],[100,'100%'],[110,'110%'],[120,'120%']].map(function(x){
+        var on=_resiCalc.pct===x[0];
+        return '<button onclick="_resiCalc.pct='+x[0]+';resiCalcRender()" style="padding:3px 10px;border:1px solid '+(on?'#1D9E75':'#dde2ea')+';background:'+(on?'#1D9E75':'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:12px;font-size:10px;font-weight:700;cursor:pointer">'+x[1]+'</button>';
+      }).join('')+
+    '</div></div>';
+  if(!rows.length) return void(b.innerHTML=h+'<div style="padding:18px;text-align:center;color:#999;font-size:12px">Este test no tiene jugadores con VIFT.</div>');
+  // Agrupar por distancia, para armar los grupos de trabajo
+  var grupos={};
+  rows.forEach(function(r){ var k=r.mRound.toFixed(1); (grupos[k]=grupos[k]||[]).push(r); });
+  var claves=Object.keys(grupos).sort(function(a,b){ return Number(b)-Number(a); });
+  h+='<div style="font-size:11px;color:#8a93a5;margin-bottom:7px">A <b>'+_resiCalc.pct+'%</b> de la VIFT durante <b>'+_resiCalc.seg+' segundos</b>. '+
+    'Los jugadores con la misma distancia pueden trabajar juntos: son <b>'+claves.length+' grupo(s)</b>.</div>';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'+
+    '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
+      '<th style="padding:7px 10px;text-align:left;color:#555">Jugador</th>'+
+      '<th style="padding:7px 8px;color:#555">VIFT</th>'+
+      '<th style="padding:7px 8px;color:#555">Vel. trabajo</th>'+
+      '<th style="padding:7px 8px;color:#0D1B2A;font-weight:800">Metros</th></tr></thead><tbody>';
+  var COLS=['#3B4D88','#1D9E75','#E8772E','#9C59D1','#2E9BB5','#D9534F','#8a6d3b'];
+  claves.forEach(function(k,gi){
+    var col=COLS[gi%COLS.length];
+    grupos[k].forEach(function(r,ri){
+      h+='<tr style="border-bottom:1px solid #f0f2f6">'+
+        '<td style="padding:6px 10px;font-weight:600;color:#0D1B2A;border-left:3px solid '+(ri===0?col:'transparent')+'">'+
+          (ri===0?'<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:'+col+';color:#fff;font-size:9px;font-weight:800;text-align:center;line-height:16px;margin-right:6px">'+(gi+1)+'</span>':'<span style="display:inline-block;width:22px"></span>')+
+          resiEsc(r.name)+'</td>'+
+        '<td style="padding:6px 8px;text-align:center;color:#8a93a5">'+r.vift.toFixed(1)+'</td>'+
+        '<td style="padding:6px 8px;text-align:center;color:#8a93a5">'+r.vel.toFixed(2)+' m/s</td>'+
+        '<td style="padding:6px 8px;text-align:center"><span style="font-size:15px;font-weight:800;color:'+col+'">'+r.mRound.toFixed(1)+'</span><span style="font-size:10px;color:#aaa"> m</span></td>'+
+      '</tr>';
+    });
+  });
+  h+='</tbody></table></div>';
+  b.innerHTML=h;
+}
+window.resiCalcRender=resiCalcRender;
+
+function resiCalcPrint(){
+  var rows=resiCalcRows();
+  if(!rows.length){ alert('Sin datos para imprimir.'); return; }
+  var t=(RESI_TESTS||[]).find(function(x){return String(x.id)===String(_resiCalc.testId);});
+  var grupos={};
+  rows.forEach(function(r){ var k=r.mRound.toFixed(1); (grupos[k]=grupos[k]||[]).push(r); });
+  var claves=Object.keys(grupos).sort(function(a,b){ return Number(b)-Number(a); });
+  var html='<html><head><meta charset="utf-8"><title>Metros por pasada</title>'+
+    '<style>body{font-family:system-ui,sans-serif;padding:22px;color:#0D1B2A}'+
+    'h1{font-size:19px;margin:0 0 3px}h2{font-size:12px;font-weight:400;color:#6b7a90;margin:0 0 16px}'+
+    '.g{border:1px solid #ddd;border-radius:8px;padding:10px 13px;margin-bottom:11px;page-break-inside:avoid}'+
+    '.gh{font-size:15px;font-weight:800;margin-bottom:5px}'+
+    '.j{display:inline-block;font-size:12px;padding:2px 9px;background:#f2f4f8;border-radius:11px;margin:2px}'+
+    '@media print{body{padding:10px}}</style></head><body>'+
+    '<h1>Metros por pasada — '+_resiCalc.pct+'% VIFT · '+_resiCalc.seg+'"</h1>'+
+    '<h2>'+(t?resiEsc(t.name||'')+' · '+resiEsc(t.date||''):'')+' · '+rows.length+' jugadores · '+claves.length+' grupos</h2>'+
+    claves.map(function(k,i){
+      return '<div class="g"><div class="gh">Grupo '+(i+1)+' — '+Number(k).toFixed(1)+' m</div>'+
+        grupos[k].map(function(r){ return '<span class="j">'+resiEsc(r.name)+' <b style="color:#8a93a5">'+r.vift.toFixed(1)+'</b></span>'; }).join('')+
+      '</div>';
+    }).join('')+
+    '</body></html>';
+  var w=window.open('','_blank');
+  if(!w){ alert('El navegador bloqueó la ventana. Permití las ventanas emergentes.'); return; }
+  w.document.write(html); w.document.close();
+  setTimeout(function(){ try{ w.print(); }catch(e){} }, 400);
+}
+window.resiCalcPrint=resiCalcPrint;
+
+
 // Estado: qué test está siendo editado (mostrar formulario) — null = mostrar lista
 var _resiEditingId = null;
 // Estado: tipo seleccionado en el formulario nuevo
@@ -39425,7 +39751,12 @@ function resiRender(){
       '<div style="font-size:14px;font-weight:800;color:#0D1B2A">🏃 Tests de Resistencia</div>'+
       '<div style="font-size:11px;color:#666;margin-top:2px">Registrá los resultados de los tests aeróbicos del plantel (30-15, Yo-Yo, Matsudo, etc.)</div>'+
     '</div>'+
-    '<button onclick="resiStartNew()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer">➕ Nuevo test</button>'+
+    '<span style="display:flex;gap:7px;flex-wrap:wrap">'+
+      // v170: importar sesión propio de resistencia (no el de tests)
+      '<button onclick="resiImpOpen()" style="background:#fff;color:var(--club-c2,#3B4D88);border:1px solid #3B4D8855;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer">📥 Importar sesión</button>'+
+      '<button onclick="resiCalcOpen()" style="background:#fff;color:#1D9E75;border:1px solid #1D9E7555;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer">🧮 Calculadora</button>'+
+      '<button onclick="resiStartNew()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer">➕ Nuevo test</button>'+
+    '</span>'+
     '</div>';
 
   // Formulario de nuevo/edición si corresponde
@@ -39946,18 +40277,42 @@ function resiBuildViewer(id){
       '<th style="padding:7px 10px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #ddd">'+(def.metric2Label||'-')+(def.metric2Unit?' ('+def.metric2Unit+')':'')+'</th>'+
       '<th style="padding:7px 10px;text-align:center;font-weight:700;color:#0C447C;border-bottom:1px solid #ddd">vs. promedio</th>'+
     '</tr></thead><tbody>';
+  // v170: agrupar por nivel para diferenciar los grupos de trabajo. El corte
+  // se hace por valor: los que comparten VIFT (o quedan muy cerca) entrenan
+  // juntos, así que se marcan con el mismo color y número de grupo.
+  var _grpCol=['#3B4D88','#1D9E75','#E8772E','#9C59D1','#2E9BB5','#D9534F','#8a6d3b','#5B6DA8'];
+  var _grpDe={}, _gi=-1, _prevVal=null;
+  sortedPlayers.forEach(function(p){
+    var v=(p.value!=null)?Math.round(p.value*2)/2 : null;   // agrupa por 0.5
+    if(v===null){ _grpDe[p.name]=null; return; }
+    if(_prevVal===null || v!==_prevVal){ _gi++; _prevVal=v; }
+    _grpDe[p.name]=_gi;
+  });
+  var _nGrupos=_gi+1;
   sortedPlayers.forEach(function(p, i){
     var diff = (p.value!=null && avg) ? p.value - avg : null;
     var diffPct = (p.value!=null && avg) ? ((p.value/avg-1)*100) : null;
     var diffColor = diff>0 ? '#1D9E75' : (diff<0 ? '#E24B4A' : '#888');
     var diffTxt = diff==null ? '—' : (diff>0?'+':'')+diff.toFixed(1)+' ('+(diffPct>0?'+':'')+diffPct.toFixed(0)+'%)';
-    html += '<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:5px 10px;color:#888;font-size:10px">'+(i+1)+'</td><td style="padding:5px 10px;font-weight:600">'+p.name+'</td>'+
+    var _g=_grpDe[p.name];
+    var _gc=(_g!=null)?_grpCol[_g%_grpCol.length]:'#ddd';
+    var _esPrimero=(_g!=null) && (i===0 || _grpDe[sortedPlayers[i-1].name]!==_g);
+    html += '<tr style="border-bottom:1px solid #f0f0f0'+(_esPrimero&&i>0?';border-top:2px solid '+_gc+'33':'')+'">'+
+      '<td style="padding:5px 10px;color:#888;font-size:10px;border-left:3px solid '+(_esPrimero?_gc:'transparent')+'">'+
+        (_esPrimero?'<span title="Grupo '+(_g+1)+'" style="display:inline-block;width:15px;height:15px;border-radius:50%;background:'+_gc+';color:#fff;font-size:8.5px;font-weight:800;text-align:center;line-height:15px">'+(_g+1)+'</span>':(i+1))+
+      '</td><td style="padding:5px 10px;font-weight:600">'+p.name+'</td>'+
       '<td style="padding:5px 10px;text-align:center;font-weight:700">'+(p.value!=null?p.value.toFixed(1):'—')+'</td>'+
       '<td style="padding:5px 10px;text-align:center">'+(p.value2!=null?p.value2.toFixed(1):'—')+'</td>'+
       '<td style="padding:5px 10px;text-align:center;font-size:10px;color:'+diffColor+';font-weight:600">'+diffTxt+'</td>'+
       '</tr>';
   });
   html += '</tbody></table></div>';
+  if(_nGrupos>1){
+    html += '<div style="font-size:10px;color:#8a93a5;margin-top:6px">'+
+      'Los jugadores están agrupados por nivel: <b>'+_nGrupos+' grupos</b>. Los que comparten color pueden trabajar juntos.'+
+      (t.type==='3015'?' <button onclick="resiCalcOpen()" style="border:none;background:none;color:#1D9E75;font-weight:700;font-size:10px;cursor:pointer;padding:0">🧮 calcular metros por pasada</button>':'')+
+      '</div>';
+  }
 
   // Tablas auxiliares específicas del 30-15
   if(t.type === '3015'){
