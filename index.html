@@ -18020,9 +18020,10 @@ document.addEventListener('DOMContentLoaded',function(){
 <!-- ═══════════════════════════════════════════════════ -->
 <!-- WRAPPER PESTAÑA RESISTENCIA -->
 <!-- ═══════════════════════════════════════════════════ -->
-<div id="pf-tab-resistencia" style="display:none">
-  <div id="resi-container"></div>
-</div>
+<!-- v171: el panel viejo de Resistencia se eliminó. Tenía un div con el mismo
+     id="resi-container" y, al estar ANTES en el documento, getElementById lo
+     devolvía a él: todo el contenido se dibujaba dentro de este contenedor
+     oculto y la subpestaña quedaba en blanco. -->
 
 <div id="pf-tab-tests" style="display:none">
   <div id="tst-container"></div>
