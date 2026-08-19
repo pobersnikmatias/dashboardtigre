@@ -35144,6 +35144,7 @@ var SB_SETTINGS_KEYS = [
   // bajaban nunca. Por eso los pendientes del CT no se guardaban: quedaban
   // sólo en el dispositivo donde se escribían.
   'VBT_SESSIONS',
+  'TST_COND',
   'RESI_NAME_MAP',
   'VBT_EX_MAP',
   'VBT_NAME_MAP',
@@ -35314,6 +35315,11 @@ function _sbApplySettingRow(row){
         localStorage.setItem('vbtZones_v1', JSON.stringify(VBT_ZONES));
       }
     }catch(e){}
+    return;
+  }
+  // v173: las condiciones de jornada se FUSIONAN, nunca se reemplazan
+  if(row.key==='TST_COND'){
+    try{ if(typeof tstCondMerge==='function') tstCondMerge(row.value||{}); }catch(e){ console.warn('[Tests] cond merge:',e); }
     return;
   }
   if(row.key==='TST_CATALOG'){
@@ -37978,7 +37984,8 @@ function tstRenderLoad(){
       '<div style="display:flex;gap:5px;flex-wrap:wrap">'+
         sec.tests.map(function(t){
           var on=_tstSelTests.indexOf(t.id)>=0;
-          return '<button onclick="tstToggleTest(\''+t.id+'\')" style="padding:5px 11px;border:1px solid '+(on?g.col:'#dde2ea')+';background:'+(on?g.col:'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+(on?'✓ ':'')+tstEsc(t.name)+'</button>';
+          // v173: si el test tiene protocolo, se puede consultar desde acá
+          return '<button onclick="tstToggleTest(\''+t.id+'\')" title="'+(t.proto?String(t.proto).slice(0,300).replace(/"/g,'&quot;'):'')+'" style="padding:5px 11px;border:1px solid '+(on?g.col:'#dde2ea')+';background:'+(on?g.col:'#fff')+';color:'+(on?'#fff':'#777')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+(on?'✓ ':'')+tstEsc(t.name)+(t.proto?' 📋':'')+'</button>';
         }).join('')+
       '</div>'+
     '</div>';
@@ -38066,7 +38073,10 @@ function tstRenderLoad(){
   var th='<th style="position:sticky;left:0;background:#0D1B2A;color:#fff;padding:8px 10px;text-align:left;font-size:11px;min-width:130px;z-index:2">Jugador</th>'+
     active.map(function(t,i){
       var sub=t.unit+(t.lat==='uni'?' · I/D':'')+(t.mode==='multi'?' · xn':'');
-      return '<th style="background:#1E2A52;color:#fff;padding:7px 8px;font-size:11px;min-width:'+(t.lat==='uni'?'150':'90')+'px;'+bordeDe(i)+'">'+tstEsc(t.name)+'<br><span style="font-size:8.5px;color:#9FB0D0;font-weight:400">'+sub+'</span></th>';
+      // v173: lápiz de condiciones de la jornada junto al nombre del test
+      return '<th style="background:#1E2A52;color:#fff;padding:7px 8px;font-size:11px;min-width:'+(t.lat==='uni'?'150':'90')+'px;'+bordeDe(i)+'">'+
+        tstEsc(t.name)+' '+tstCondBtn(t.id,_tstDate)+
+        '<br><span style="font-size:8.5px;color:#9FB0D0;font-weight:400">'+sub+'</span></th>';
     }).join('');
   var rows=roster.map(function(name,ri){
     var zebra=(ri%2===1)?'background:#fafbfd;':'';
@@ -38076,7 +38086,33 @@ function tstRenderLoad(){
     }).join('');
     return '<tr><td style="position:sticky;left:0;background:'+(ri%2===1?'#fafbfd':'#fff')+';padding:6px 10px;font-size:11.5px;font-weight:600;border-bottom:1px solid #eef0f4;border-right:2px solid #e4e6ec;z-index:1">'+tstEsc(name)+'</td>'+cells+'</tr>';
   }).join('');
-  return head+'<div style="overflow-x:auto;background:#fff;border:1px solid #e4e6ec;border-radius:10px"><table style="border-collapse:collapse;width:100%"><thead>'+grupoRow+'<tr>'+th+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+  // v173: resumen de las condiciones ya registradas para esta jornada
+  var condHtml='';
+  var conCond=active.filter(function(t){ return tstCondGet(t.id,_tstDate); });
+  if(conCond.length){
+    condHtml='<div style="background:#f2f8ff;border:1px solid #d5e3f7;border-radius:8px;padding:8px 12px;margin-bottom:10px">'+
+      '<div style="font-size:10px;font-weight:800;color:#0C447C;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">🌤 Condiciones de la jornada</div>'+
+      conCond.map(function(t){
+        var c=tstCondGet(t.id,_tstDate);
+        return '<div style="font-size:10.5px;color:#40546e;margin:2px 0"><b>'+tstEsc(t.name)+'</b> · '+
+          tstEsc(tstCondResumen(c))+(c.nota?(' <span style="color:#7a8ba0">— '+tstEsc(c.nota)+'</span>'):'')+'</div>';
+      }).join('')+
+    '</div>';
+  }
+  // v173: protocolos de los tests elegidos, desplegables antes de evaluar
+  var protoHtml='';
+  var conProto=active.filter(function(t){ return t.proto; });
+  if(conProto.length){
+    protoHtml='<details style="margin-bottom:10px;background:#f7fbf9;border:1px solid #cfe8dc;border-radius:8px;padding:8px 12px">'+
+      '<summary style="font-size:11px;font-weight:800;color:#1D6B4F;cursor:pointer;outline:none">📋 Protocolos de esta jornada ('+conProto.length+')</summary>'+
+      conProto.map(function(t){
+        return '<div style="margin-top:9px"><b style="font-size:11.5px;color:#0D1B2A">'+tstEsc(t.name)+'</b>'+
+          '<div style="white-space:pre-wrap;font-size:11px;color:#4a5568;border-left:3px solid #1D9E75;padding:5px 10px;margin-top:3px;line-height:1.5">'+
+          tstEsc(t.proto)+'</div></div>';
+      }).join('')+
+    '</details>';
+  }
+  return head+protoHtml+condHtml+'<div style="overflow-x:auto;background:#fff;border:1px solid #e4e6ec;border-radius:10px"><table style="border-collapse:collapse;width:100%"><thead>'+grupoRow+'<tr>'+th+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div style="font-size:10px;color:#aaa;margin-top:8px">Escribí el valor y salí de la celda para guardar. En tests unilaterales cargás Izq/Der y la asimetría se calcula sola. En modo múltiple cargás varios intentos separados por espacio o coma y se promedia.</div>';
 }
 function tstCellInput(t,name,rec){
@@ -38160,6 +38196,151 @@ function tstNoteBtn(testId, name, rec, dateIso){
     (tiene?'':'opacity:.3')+'">'+(tiene?'📝':'✎')+'</button>';
 }
 window.tstNoteBtn=tstNoteBtn;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONDICIONES DE LA JORNADA Y PROTOCOLOS (v173)
+// · Condiciones: nota por test + fecha (temperatura, viento, superficie…).
+//   Es de la JORNADA, no de un jugador: aplica a todos los evaluados ese día.
+// · Protocolo: descripción fija de cómo se toma cada test, en el catálogo.
+// ═══════════════════════════════════════════════════════════════════════════
+var TST_COND={};
+try{
+  var _tc=JSON.parse(localStorage.getItem('tstCond_v1')||'null');
+  if(_tc&&typeof _tc==='object'&&!Array.isArray(_tc)) TST_COND=_tc;
+}catch(e){}
+
+function tstCondKey(testId,date){ return String(testId||'')+'||'+String(date||''); }
+window.tstCondKey=tstCondKey;
+
+function tstCondGet(testId,date){
+  var c=TST_COND[tstCondKey(testId,date)];
+  return (c&&typeof c==='object')?c:null;
+}
+window.tstCondGet=tstCondGet;
+
+function tstCondSave(){
+  try{ localStorage.setItem('tstCond_v1', JSON.stringify(TST_COND)); }catch(e){}
+  try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync(); }catch(e){}
+}
+window.tstCondSave=tstCondSave;
+
+// Unión entre dispositivos: gana la más nueva, nada se borra
+function tstCondMerge(remoto){
+  if(!remoto||typeof remoto!=='object')return;
+  Object.keys(remoto).forEach(function(k){
+    var r=remoto[k], m=TST_COND[k];
+    if(!m){ TST_COND[k]=r; return; }
+    if(Number(r._upd||0) > Number(m._upd||0)) TST_COND[k]=r;
+  });
+  try{ localStorage.setItem('tstCond_v1', JSON.stringify(TST_COND)); }catch(e){}
+}
+window.tstCondMerge=tstCondMerge;
+
+// Editor de condiciones de la jornada
+function tstEditCond(testId, date){
+  date=date||_tstDate;
+  var t=tstById(testId);
+  var c=tstCondGet(testId,date)||{};
+  var old=document.getElementById('tstcond'); if(old)old.remove();
+  var esc=function(s){ return String(s==null?'':s).replace(/"/g,'&quot;').replace(/</g,'&lt;'); };
+  var d=document.createElement('div');
+  d.id='tstcond';
+  d.style.cssText='position:fixed;inset:0;background:rgba(10,16,28,.55);z-index:15500;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:#fff;border-radius:12px;width:min(96vw,540px);max-height:92vh;overflow-y:auto;box-shadow:0 18px 60px rgba(0,0,0,.35)" onclick="event.stopPropagation()">'+
+    '<div style="background:#0D1B2A;padding:13px 16px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;gap:10px">'+
+      '<div><div style="color:#fff;font-size:14px;font-weight:800">🌤 Condiciones de la jornada</div>'+
+      '<div style="color:#9fb3c8;font-size:11px;margin-top:2px">'+esc(t?t.name:testId)+' · '+esc(tstFmtDateLong(date))+'</div></div>'+
+      '<button onclick="tstCondClose()" style="border:none;background:none;color:#9fb3c8;font-size:20px;cursor:pointer;padding:0">✕</button></div>'+
+    '<div style="padding:15px 16px">'+
+      '<div style="font-size:10.5px;color:#8a93a5;margin-bottom:11px">Se guardan para <b>todos</b> los jugadores evaluados este día en este test.</div>'+
+      '<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:11px">'+
+        '<label style="flex:1;min-width:110px;font-size:10.5px;font-weight:700;color:#555">🌡 Temperatura (°C)<br>'+
+          '<input type="number" id="tc-temp" step="0.5" value="'+esc(c.temp!=null?c.temp:'')+'" placeholder="ej: 18" style="width:100%;box-sizing:border-box;margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px"></label>'+
+        '<label style="flex:1;min-width:110px;font-size:10.5px;font-weight:700;color:#555">💨 Viento (km/h)<br>'+
+          '<input type="number" id="tc-viento" step="1" value="'+esc(c.viento!=null?c.viento:'')+'" placeholder="ej: 12" style="width:100%;box-sizing:border-box;margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px"></label>'+
+        '<label style="flex:1;min-width:110px;font-size:10.5px;font-weight:700;color:#555">💧 Humedad (%)<br>'+
+          '<input type="number" id="tc-hum" step="1" value="'+esc(c.humedad!=null?c.humedad:'')+'" placeholder="ej: 65" style="width:100%;box-sizing:border-box;margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px"></label>'+
+      '</div>'+
+      '<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:11px">'+
+        '<label style="flex:1;min-width:150px;font-size:10.5px;font-weight:700;color:#555">🌱 Superficie<br>'+
+          '<select id="tc-sup" style="width:100%;box-sizing:border-box;margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px">'+
+            ['','Césped natural','Césped sintético','Gimnasio','Pista','Otra'].map(function(o){
+              return '<option value="'+esc(o)+'"'+(String(c.superficie||'')===o?' selected':'')+'>'+(o||'—')+'</option>';
+            }).join('')+'</select></label>'+
+        '<label style="flex:1;min-width:150px;font-size:10.5px;font-weight:700;color:#555">🕐 Momento del día<br>'+
+          '<select id="tc-momento" style="width:100%;box-sizing:border-box;margin-top:4px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px">'+
+            ['','Mañana','Mediodía','Tarde','Noche'].map(function(o){
+              return '<option value="'+esc(o)+'"'+(String(c.momento||'')===o?' selected':'')+'>'+(o||'—')+'</option>';
+            }).join('')+'</select></label>'+
+      '</div>'+
+      '<label style="font-size:10.5px;font-weight:700;color:#555">📝 Observaciones<br>'+
+        '<textarea id="tc-nota" rows="3" placeholder="ej: piso húmedo por lluvia de la noche anterior; se tomó tras 10 min de entrada en calor" '+
+        'style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical">'+esc(c.nota||'')+'</textarea></label>'+
+    '</div>'+
+    '<div style="padding:11px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'+
+      (tstCondGet(testId,date)?'<button onclick="tstCondDelete(\''+testId+'\',\''+date+'\')" style="margin-right:auto;padding:7px 14px;border:1px solid #f0d0d0;background:#fff;color:#D9534F;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Borrar</button>':'')+
+      '<button onclick="tstCondClose()" style="padding:7px 14px;border:1px solid #ddd;background:#fff;border-radius:7px;font-size:11px;cursor:pointer">Cancelar</button>'+
+      '<button onclick="tstCondApply(\''+testId+'\',\''+date+'\')" style="padding:7px 18px;border:none;background:#1D9E75;color:#fff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">✓ Guardar</button>'+
+    '</div></div>';
+  d.onclick=tstCondClose;
+  document.body.appendChild(d);
+}
+window.tstEditCond=tstEditCond;
+function tstCondClose(){ var m=document.getElementById('tstcond'); if(m)m.remove(); }
+window.tstCondClose=tstCondClose;
+
+function tstCondApply(testId,date){
+  var g=function(i){ var e=document.getElementById(i); return e?String(e.value).trim():''; };
+  var num=function(v){ if(v==='')return null; var n=parseFloat(v.replace(',','.')); return isNaN(n)?null:n; };
+  var c={
+    temp:num(g('tc-temp')), viento:num(g('tc-viento')), humedad:num(g('tc-hum')),
+    superficie:g('tc-sup')||null, momento:g('tc-momento')||null, nota:g('tc-nota')||null,
+    _upd:Date.now()
+  };
+  var vacio=(c.temp==null&&c.viento==null&&c.humedad==null&&!c.superficie&&!c.momento&&!c.nota);
+  var k=tstCondKey(testId,date);
+  if(vacio) delete TST_COND[k]; else TST_COND[k]=c;
+  tstCondSave();
+  tstCondClose();
+  tstRender();
+}
+window.tstCondApply=tstCondApply;
+
+function tstCondDelete(testId,date){
+  if(!confirm('¿Borrar las condiciones de esta jornada?'))return;
+  delete TST_COND[tstCondKey(testId,date)];
+  tstCondSave();
+  tstCondClose();
+  tstRender();
+}
+window.tstCondDelete=tstCondDelete;
+
+// Resumen en una línea, para mostrar junto al test
+function tstCondResumen(c){
+  if(!c)return '';
+  var p=[];
+  if(c.temp!=null)p.push(c.temp+'°');
+  if(c.viento!=null)p.push('💨'+c.viento);
+  if(c.humedad!=null)p.push('💧'+c.humedad+'%');
+  if(c.superficie)p.push(c.superficie);
+  if(c.momento)p.push(c.momento);
+  return p.join(' · ');
+}
+window.tstCondResumen=tstCondResumen;
+
+// Botón de condiciones para el encabezado de cada test en la grilla
+function tstCondBtn(testId,date){
+  date=date||_tstDate;
+  var c=tstCondGet(testId,date);
+  var tiene=!!c;
+  var tip=tiene?(tstCondResumen(c)+(c.nota?(' — '+c.nota):'')):'Registrar condiciones (temperatura, viento, superficie…)';
+  return '<button onclick="event.stopPropagation();tstEditCond(\''+testId+'\',\''+date+'\')" title="'+
+    String(tip).replace(/"/g,'&quot;')+'" style="border:none;background:none;cursor:pointer;font-size:11px;padding:0 2px;line-height:1;'+
+    (tiene?'':'opacity:.35')+'">'+(tiene?'🌤':'✎')+'</button>';
+}
+window.tstCondBtn=tstCondBtn;
+
 
 function tstSaveCell(testId,nameL,nameEnc,side,rawVal){
   var name=decodeURIComponent(nameEnc);
@@ -38907,11 +39088,18 @@ function tstRenderCat(){
   var groups=TST_CAT_GROUPS.filter(function(g){return byGroup[g.k];}).map(function(g){
     var items=byGroup[g.k].map(function(t){
       var usos=TST_DATA.filter(function(r){return r.testId===t.id;}).length;
-      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #f2f2f2">'+
-        '<div style="flex:1"><b style="font-size:12.5px">'+tstEsc(t.name)+'</b>'+
-        '<div style="font-size:10px;color:#999">'+t.unit+' · '+(t.lat==='uni'?'unilateral (I/D)':'bilateral')+' · '+(t.mode==='multi'?'multiple->promedio':'unico')+' · '+(t.better==='down'?'menos = mejor':'mas = mejor')+(usos?' · '+usos+' registros':'')+'</div></div>'+
-        '<button onclick="tstEditTest(\''+t.id+'\')" style="background:#eef1f8;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;color:#3B4D88;font-weight:600">Editar</button>'+
-        '<button onclick="tstDelTest(\''+t.id+'\')" style="background:none;border:none;color:#ccc;font-size:14px;cursor:pointer" title="Eliminar">X</button>'+
+      // v173: el protocolo se puede desplegar desde la propia lista
+      return '<div style="border-bottom:1px solid #f2f2f2">'+
+        '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px">'+
+          '<div style="flex:1"><b style="font-size:12.5px">'+tstEsc(t.name)+'</b>'+
+          (t.proto?' <span title="Tiene protocolo definido" style="font-size:10px;color:#1D9E75">📋</span>':'')+
+          '<div style="font-size:10px;color:#999">'+t.unit+' · '+(t.lat==='uni'?'unilateral (I/D)':'bilateral')+' · '+(t.mode==='multi'?'multiple->promedio':'unico')+' · '+(t.better==='down'?'menos = mejor':'mas = mejor')+(usos?' · '+usos+' registros':'')+'</div></div>'+
+          '<button onclick="tstEditTest(\''+t.id+'\')" style="background:#eef1f8;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;color:#3B4D88;font-weight:600">Editar</button>'+
+          '<button onclick="tstDelTest(\''+t.id+'\')" style="background:none;border:none;color:#ccc;font-size:14px;cursor:pointer" title="Eliminar">X</button>'+
+        '</div>'+
+        (t.proto?('<details style="padding:0 10px 8px 10px"><summary style="font-size:10.5px;color:#1D9E75;font-weight:700;cursor:pointer;outline:none">📋 Ver protocolo</summary>'+
+          '<div style="white-space:pre-wrap;font-size:11px;color:#4a5568;background:#f7fbf9;border-left:3px solid #1D9E75;border-radius:0 6px 6px 0;padding:8px 11px;margin-top:6px;line-height:1.5">'+
+          tstEsc(t.proto)+'</div></details>'):'')+
       '</div>';
     }).join('');
     // v155: encabezado de categoría con sus controles (renombrar, ordenar, borrar)
@@ -38985,6 +39173,12 @@ function tstEditTest(id){
         '<select id="tst-f-mode" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+
           opt('single',t?t.mode:'single','Unico')+opt('multi',t?t.mode:'single','Multiple -> promedio')+'</select></label>'+
     '</div>'+
+    // v173: protocolo de evaluación — cómo se toma este test
+    '<label style="display:block;font-size:11px;font-weight:700;color:#555;margin-top:12px">📋 Protocolo de evaluación'+
+      '<div style="font-size:10px;font-weight:400;color:#8a93a5;margin:2px 0 4px">Cómo se toma el test: posición inicial, número de intentos, descanso entre ellos, criterios de validez, material necesario.</div>'+
+      '<textarea id="tst-f-proto" rows="5" placeholder="ej:\n· Entrada en calor estandarizada de 10 min\n· 3 intentos con 60 s de descanso\n· Se registra el mejor\n· Manos en la cintura durante todo el salto\n· Se anula si hay flexión de rodillas en el aire" '+
+      'style="width:100%;box-sizing:border-box;padding:9px;border:1px solid #ddd;border-radius:7px;font-size:12px;font-family:inherit;resize:vertical;line-height:1.45">'+
+      ((t&&t.proto)?String(t.proto).replace(/</g,'&lt;'):'')+'</textarea></label>'+
     // v160: decimales con los que se muestra este test
     '<div style="display:flex;gap:10px;margin-top:10px">'+
       '<label style="flex:1;font-size:11px;font-weight:700;color:#555">Decimales'+
@@ -39010,6 +39204,9 @@ function tstSaveTest(id){
   var obj={name:name.slice(0,40),group:g('tst-f-group'),unit:g('tst-f-unit'),better:g('tst-f-better'),lat:g('tst-f-lat'),mode:g('tst-f-mode')};
   var _dec=g('tst-f-dec');
   if(_dec==='') delete obj.dec; else obj.dec=parseInt(_dec);
+  // v173: protocolo de evaluación
+  var _pr=g('tst-f-proto').trim();
+  if(_pr) obj.proto=_pr; else obj.proto=null;
   if(id){ var t=tstById(id); if(t)Object.assign(t,obj); }
   else{
     var base=tstNorm(name).replace(/[^a-z0-9]+/g,'_').slice(0,20)||'test';
