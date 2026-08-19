@@ -20288,7 +20288,11 @@ function gymSaveExercise(){
     var ex = GYM_EXERCISES.find(function(e){return e.id===editId;});
     if(ex){
       ex.name=name; ex.cat=cat; ex.muscle=muscle; ex.inttype=inttype; ex.notes=notes; ex.videoUrl=videoUrl;
+      // v172: sellar y SUBIR. Antes sólo hacía saveData(): el cambio quedaba en
+      // el dispositivo y la carga desde la nube (que no lo tenía) lo borraba.
+      ex._upd=Date.now();
       saveData();
+      if(typeof sbScheduleTanda2aSync==='function'){ try{ sbScheduleTanda2aSync(); }catch(e){} }
       msg.style.color='#1D9E75'; msg.textContent='"'+name+'" actualizado.';
       setTimeout(function(){msg.textContent='';},3000);
       setTimeout(_gymFormPanelClose, 700);
@@ -20299,8 +20303,9 @@ function gymSaveExercise(){
     }
   } else {
     var newId = GYM_EXERCISES.length ? Math.max.apply(null,GYM_EXERCISES.map(function(e){return e.id;}))+1 : 1;
-    GYM_EXERCISES.push({id:newId, name:name, cat:cat, muscle:muscle, inttype:inttype, notes:notes, videoUrl:videoUrl});
+    GYM_EXERCISES.push({id:newId, name:name, cat:cat, muscle:muscle, inttype:inttype, notes:notes, videoUrl:videoUrl, _upd:Date.now()});
     saveData();
+    if(typeof sbScheduleTanda2aSync==='function'){ try{ sbScheduleTanda2aSync(); }catch(e){} }
     msg.style.color='#1D9E75'; msg.textContent='"'+name+'" agregado.'; setTimeout(function(){msg.textContent='';},3000);
     setTimeout(_gymFormPanelClose, 700);
     document.getElementById('gym-ex-name').value='';
@@ -33399,12 +33404,21 @@ sbLoadInitialData = function(){
   }).then(function(rows){
     if(typeof WELLNESS_DATA!=='undefined' && rows && rows.length){
       // Supabase es fuente de verdad; preservar locales que no estén en la nube
+      // v172: mismo merge por fecha que en PSE
       var keys = {};
       rows.forEach(function(row){ keys[row.name+'||'+row.date] = _sbWellnessFromRow(row); });
-      var localOnly = WELLNESS_DATA.filter(function(r){ return !keys[r.name+'||'+(_sbValidDate(r.date)||r.date)]; });
+      var kOfW=function(r){ return r.name+'||'+(_sbValidDate(r.date)||r.date); };
+      var localOnly = WELLNESS_DATA.filter(function(r){ return !keys[kOfW(r)]; });
+      var wMisMasNuevos=0;
+      WELLNESS_DATA.forEach(function(r){
+        var c=keys[kOfW(r)];
+        if(!c)return;
+        if(Number(r._upd||0) > Number(c._upd||0)){ keys[kOfW(r)]=r; wMisMasNuevos++; }
+      });
       WELLNESS_DATA.length = 0;
       Object.values(keys).forEach(function(r){ WELLNESS_DATA.push(r); });
       localOnly.forEach(function(r){ WELLNESS_DATA.push(r); });
+      if(wMisMasNuevos){ window._wellPseNeedsPush = true; }
       console.log('[Supabase] Cargados ' + rows.length + ' registros de wellness.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
       if(localOnly.length){ window._wellPseNeedsPush = true; }
     } else {
@@ -33414,12 +33428,24 @@ sbLoadInitialData = function(){
     return sbPseFetchAll();
   }).then(function(rows){
     if(typeof PSE_DATA!=='undefined' && rows && rows.length){
+      // v172: MERGE POR FECHA también en la carga inicial. Acá se perdían los
+      // minutos: la fila de la nube (sin minutos) reemplazaba a la local que
+      // sí los tenía, sin comparar cuál era más nueva.
       var keys = {};
       rows.forEach(function(row){ keys[row.name+'||'+row.date+'||'+(row.week||'')+'||'+(row.day||'')] = _sbPseFromRow(row); });
-      var localOnly = PSE_DATA.filter(function(r){ return !keys[r.name+'||'+(_sbValidDate(r.date)||r.date)+'||'+(r.week||'')+'||'+(r.day||'')]; });
+      var kOf=function(r){ return r.name+'||'+(_sbValidDate(r.date)||r.date)+'||'+(r.week||'')+'||'+(r.day||''); };
+      var localOnly = PSE_DATA.filter(function(r){ return !keys[kOf(r)]; });
+      var pseMisMasNuevos = 0;
+      PSE_DATA.forEach(function(r){
+        var c = keys[kOf(r)];
+        if(!c) return;
+        if(Number(r._upd||0) > Number(c._upd||0)){ keys[kOf(r)] = r; pseMisMasNuevos++; }
+      });
       PSE_DATA.length = 0;
       Object.values(keys).forEach(function(r){ PSE_DATA.push(r); });
       localOnly.forEach(function(r){ PSE_DATA.push(r); });
+      if(pseMisMasNuevos){ window._wellPseNeedsPush = true;
+        console.log('[Supabase] '+pseMisMasNuevos+' registro(s) de PSE locales más nuevos conservados.'); }
       console.log('[Supabase] Cargados ' + rows.length + ' registros de PSE.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
       if(localOnly.length){ window._wellPseNeedsPush = true; }
     } else {
@@ -33972,12 +33998,27 @@ function sbScheduleTanda2aSync(){
     _sbTanda2aSyncTimer = null;
     // GYM_EXERCISES
     if(typeof GYM_EXERCISES!=='undefined' && Array.isArray(GYM_EXERCISES) && GYM_EXERCISES.length){
+      // v172: leer la nube y subir SÓLO lo igual o más nuevo, para que un
+      // dispositivo con copia vieja no borre lo que el otro acaba de cargar.
+      var _gymCloudUpd={};
       var ePayload = GYM_EXERCISES.map(_sbGymExerciseToPayload).filter(function(p){return p.id;});
       if(ePayload.length){
-        console.log('[Supabase] Sync gym_exercises (' + ePayload.length + ')');
-        sbClient.from('gym_exercises').upsert(ePayload, { onConflict: 'id' }).then(function(res){
-          if(res.error) console.error('[Supabase] Sync gym_exercises error:', res.error);
-          else console.log('[Supabase] Sync gym_exercises OK');
+        // v172: comparar contra la nube antes de subir
+        sbClient.from('gym_exercises').select('*').eq('categoria', SB_CATEGORIA).then(function(ce){
+          if(ce && ce.data) ce.data.forEach(function(row){
+            _gymCloudUpd[String(row.id)] = Number((row.data&&row.data._upd)||0);
+          });
+          var envío = ePayload.filter(function(p){
+            var k=String(p.id);
+            if(!(k in _gymCloudUpd)) return true;                       // no está: subir
+            return Number((p.data&&p.data._upd)||0) >= _gymCloudUpd[k];  // sólo si soy igual o más nuevo
+          });
+          if(!envío.length){ console.log('[Supabase] gym_exercises sin cambios para subir.'); return; }
+          console.log('[Supabase] Sync gym_exercises (' + envío.length + ' de ' + ePayload.length + ')');
+          sbClient.from('gym_exercises').upsert(envío, { onConflict: 'id' }).then(function(res){
+            if(res.error) console.error('[Supabase] Sync gym_exercises error:', res.error);
+            else console.log('[Supabase] Sync gym_exercises OK');
+          });
         });
       }
     }
@@ -34053,12 +34094,22 @@ sbLoadInitialData = function(){
     return sbGymExercisesFetchAll();
   }).then(function(rows){
     if(typeof GYM_EXERCISES!=='undefined' && rows && rows.length){
+      // v172: MERGE POR FECHA. Antes la versión de la nube reemplazaba a la
+      // local sin comparar: si acá se había agregado un video y todavía no
+      // había subido, se perdía al recargar.
       var keys = {};
       rows.forEach(function(row){ keys[String(row.id)] = _sbGymExerciseFromRow(row); });
       var localOnly = GYM_EXERCISES.filter(function(e){ return !keys[String(e.id)]; });
+      var míosMasNuevos = 0;
+      GYM_EXERCISES.forEach(function(e){
+        var c = keys[String(e.id)];
+        if(!c) return;
+        if(Number(e._upd||0) > Number(c._upd||0)){ keys[String(e.id)] = e; míosMasNuevos++; }
+      });
       GYM_EXERCISES.length = 0;
       Object.values(keys).forEach(function(e){ GYM_EXERCISES.push(e); });
       localOnly.forEach(function(e){ GYM_EXERCISES.push(e); });
+      if(míosMasNuevos||localOnly.length){ window._gymExNeedsPush = true; }
       console.log('[Supabase] Cargados ' + rows.length + ' gym_exercises.' + (localOnly.length?' ('+localOnly.length+' locales preservados)':''));
     } else {
       console.log('[Supabase] No hay gym_exercises en Supabase todavía.');
@@ -38764,7 +38815,18 @@ function tstRenderTeam(){
       '<td style="padding:7px 8px;font-size:13px;font-weight:800;color:#0D1B2A;white-space:nowrap">'+valCell+'</td>'+
       '<td style="padding:7px 8px;width:110px"><div style="background:#f0f2f6;border-radius:3px;height:6px"><div style="background:'+zc+';width:'+bar.toFixed(0)+'%;height:100%;border-radius:3px"></div></div></td>'+
       '<td style="padding:7px 8px;font-size:11px;color:'+zc+';font-weight:700;white-space:nowrap">'+(z>0?'+':'')+z.toFixed(2)+' z</td>'+
-      '<td style="padding:7px 8px;font-size:10px;color:#a3a9b6;white-space:nowrap">'+tstFmtDate(x.date)+(x.asy!=null?' · D'+(x.asy>0?'+':'')+x.asy.toFixed(0)+'%':'')+'</td>'+
+      // v172: la asimetría con semáforo. ≤10% verde · 10-15% amarillo · >15% rojo.
+      '<td style="padding:7px 8px;font-size:10px;color:#a3a9b6;white-space:nowrap">'+tstFmtDate(x.date)+
+        (x.asy!=null?(function(){
+          var a=Math.abs(x.asy);
+          var c=a<=10?'#1D9E75':(a<=15?'#E8A13C':'#D9534F');
+          var bg=a<=10?'#e8f8f0':(a<=15?'#fff6e5':'#fdeaea');
+          var lado=(x.asy>0?'D':'I');
+          return ' <span title="Asimetría: '+(a<=10?'dentro de lo normal':(a<=15?'a vigilar':'elevada'))+
+            ' — más fuerte la pierna '+(x.asy>0?'derecha':'izquierda')+'" '+
+            'style="display:inline-block;background:'+bg+';color:'+c+';font-weight:800;border-radius:9px;padding:1px 7px;font-size:9.5px">'+
+            lado+' '+a.toFixed(0)+'%</span>';
+        })():'')+'</td>'+
       '<td style="padding:4px 10px 4px 4px;text-align:right"><button onclick="tstDelRecord(\''+x.id+'\')" title="Borrar este registro" style="background:#fff;border:1px solid #f0d0d0;color:#D9534F;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">🗑</button></td>'+
     '</tr>';
   }).join('');
