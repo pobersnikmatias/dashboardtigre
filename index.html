@@ -35698,6 +35698,7 @@ function tstMergeCatalog(cloud){
   order.forEach(function(id){ TST_CATALOG.push(by[id]); });
   tstNormalizeCatalog();
   tstSeedStrength();
+  tstSeedSpeed();
   try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
   return TST_CATALOG.length;
 }
@@ -35714,6 +35715,25 @@ function tstMigrateGroups(){
 window.tstMigrateGroups=tstMigrateGroups;
 
 // Tests de fuerza que faltaban (press banca, sentadilla y compañía)
+// v174: distancias de sprint habituales, para que el mapeo automático las
+// encuentre sin tener que crearlas a mano.
+var TST_SPEED_SEED=[
+  {id:'spr5',  name:'Sprint 5 m',  group:'velocidad', unit:'s', better:'down', lat:'bi', mode:'single', dec:3},
+  {id:'spr20', name:'Sprint 20 m', group:'velocidad', unit:'s', better:'down', lat:'bi', mode:'single', dec:3}
+];
+function tstSeedSpeed(){
+  var added=0;
+  TST_SPEED_SEED.forEach(function(t){
+    if(!TST_CATALOG.some(function(x){return x.id===t.id;})){ TST_CATALOG.push(Object.assign({},t)); added++; }
+  });
+  if(added){
+    try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+    console.log('[Tests] '+added+' test(s) de velocidad agregados al catálogo.');
+  }
+  return added;
+}
+window.tstSeedSpeed=tstSeedSpeed;
+
 var TST_STRENGTH_SEED=[
   {id:'rm_banca',    name:'Press banca (1RM)',      group:'fuerza', unit:'kg', better:'up', lat:'bi', mode:'single'},
   {id:'rm_sentadilla',name:'Sentadilla (1RM)',      group:'fuerza', unit:'kg', better:'up', lat:'bi', mode:'single'},
@@ -35835,7 +35855,7 @@ try{
   TST_CATALOG=(Array.isArray(_tc)&&_tc.length)?_tc:TST_CATALOG_SEED.map(function(t){return Object.assign({},t);});
 }catch(e){ TST_CATALOG=TST_CATALOG_SEED.map(function(t){return Object.assign({},t);}); }
 // v155: reasignar categorías viejas y sumar los tests de fuerza que faltaban
-try{ if(typeof tstMigrateGroups==='function'){ tstMigrateGroups(); tstSeedStrength(); } }catch(e){}
+try{ if(typeof tstMigrateGroups==='function'){ tstMigrateGroups(); tstSeedStrength(); tstSeedSpeed(); } }catch(e){}
 var TST_DATA=[];
 // ── TOMBSTONES DE TESTS (v129) ───────────────────────────────────────────
 // Borrar un registro del array no alcanza: tanto la recuperación del payload
@@ -37303,7 +37323,10 @@ function _timpEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;').replace(/
 // ── Detección de columnas ──
 // Reconoce por nombre de encabezado; si no, por el contenido de los datos.
 function tstImpDetect(headers, rows){
-  var c={date:-1, name:-1, exercise:-1, side:-1};
+  // v174: `dist` es el discriminador cuando el archivo no trae columna de
+  // ejercicio. Los cronómetros de velocidad exportan una fila por sprint y
+  // lo que distingue el test es la DISTANCIA (5, 10, 20, 30 m).
+  var c={date:-1, name:-1, exercise:-1, side:-1, dist:-1};
   var sample=rows.slice(0,40);
   // Cuántos valores de la columna parecen una fecha
   var pareceFecha=function(i){
@@ -37324,6 +37347,8 @@ function tstImpDetect(headers, rows){
     // contener valores que parezcan fechas.
     if(c.date<0 && /(date|fecha|timestamp|hora)/.test(n) && pareceFecha(i)>0.6) c.date=i;
     if(c.name<0 && /(name|nombre|apellido|player|athlete|surname|last)/.test(n)) c.name=i;
+    // v174: distancia del sprint
+    if(c.dist<0 && /(distancia total|total distance|distancia|^distance)/.test(n)) c.dist=i;
   });
   // Por contenido, para las columnas sin encabezado (habitual en estos exports)
   headers.forEach(function(h,i){
@@ -37334,10 +37359,19 @@ function tstImpDetect(headers, rows){
     if(c.date<0 && pareceFecha(i)>0.6) c.date=i;
     if(c.name<0 && c.exercise!==i && txt.every(function(v){return /^[a-zá-úñ .'-]+$/i.test(v);}) && new Set(txt).size<=Math.max(3,vals.length*0.7)) c.name=i;
   });
+  // v174: ¿la columna de ejercicio está vacía? Entonces manda la distancia.
+  var exVacia=true;
+  if(c.exercise>=0){
+    exVacia=sample.every(function(r){ var v=r[c.exercise]; return v==null||String(v).trim()===''||String(v)==='undefined'; });
+  }
+  c.usaDist = (c.exercise<0 || exVacia) && c.dist>=0;
+
   // Métricas: columnas numéricas que no son ninguna de las anteriores
   var mets=[];
   headers.forEach(function(h,i){
     if(i===c.date||i===c.name||i===c.exercise||i===c.side)return;
+    // La distancia es el discriminador, no una métrica a promediar
+    if(c.usaDist && i===c.dist)return;
     var vals=sample.map(function(r){return r[i];}).filter(function(v){return v!=null&&String(v).trim()!=='';});
     if(!vals.length)return;
     var nums=vals.filter(function(v){return !isNaN(parseFloat(String(v).replace(',','.')));});
@@ -37366,6 +37400,15 @@ function tstImpParseDate(v){
   }
   return '';
 }
+// v174: nombre del test derivado de la distancia (5 m → "Sprint 5 m")
+function tstImpExDeDist(v){
+  var n=parseFloat(String(v==null?'':v).replace(',','.'));
+  if(isNaN(n)||n<=0)return '';
+  var d=(Math.round(n*10)/10);
+  return 'Sprint '+(d%1===0?d.toFixed(0):d.toFixed(1))+' m';
+}
+window.tstImpExDeDist=tstImpExDeDist;
+
 function tstImpSide(v){
   var s=_timpNorm(v);
   if(/^(l|left|i|izq|izquierda)$/.test(s))return 'I';
@@ -37398,7 +37441,8 @@ function tstImpBuild(){
   // metodológicamente incorrecto: el RFD del mejor pico de fuerza, no el mejor
   // RFD de cualquier intento.
   _tstImp.rows.forEach(function(r){
-    var exRaw=c.exercise>=0?String(r[c.exercise]||'').trim():'';
+    var exRaw=c.usaDist ? tstImpExDeDist(r[c.dist])
+                        : (c.exercise>=0?String(r[c.exercise]||'').trim():'');
     var testId=TST_EX_MAP[_timpNorm(exRaw)];
     if(!testId||testId==='__skip__')return;                  // sin mapear: se ignora
     var nmRaw=c.name>=0?String(r[c.name]||'').trim():'';
@@ -37638,19 +37682,42 @@ function tstImpRead(file){
       }
       if(!rows.length){ tstImpMsg('No se encontraron filas de datos.','#E24B4A'); return; }
       var det=tstImpDetect(headers, rows);
+      // v174: métrica DERIVADA — velocidad en km/h a partir de la de m/s.
+      // Se calcula al vuelo y se agrega como una columna más, para poder
+      // elegirla igual que las nativas.
+      (function(){
+        var ms=det.metrics.filter(function(m){ return /m\/s/i.test(m.name); });
+        ms.forEach(function(m){
+          var nueva=m.name.replace(/\(?\s*m\/s\s*\)?/i,'(km/h)').trim();
+          if(nueva===m.name) nueva=m.name+' (km/h)';
+          if(det.metrics.some(function(x){return x.name===nueva;}))return;
+          var col=headers.length;
+          headers.push(nueva);
+          rows.forEach(function(r){
+            var v=parseFloat(String(r[m.idx]==null?'':r[m.idx]).replace(',','.'));
+            r[col]=isNaN(v)?'':(Math.round(v*3.6*100)/100);
+          });
+          det.metrics.push({idx:col, name:nueva, derivada:true});
+        });
+      })();
       _tstImp.headers=headers; _tstImp.rows=rows;
       _tstImp.cols=det.cols; _tstImp.metrics=det.metrics;
       // Ejercicios y jugadores presentes
       var exs={}, pls={};
       rows.forEach(function(r){
-        if(det.cols.exercise>=0){ var e2=String(r[det.cols.exercise]||'').trim(); if(e2)exs[e2]=(exs[e2]||0)+1; }
+        // v174: si el archivo no trae ejercicio, se deriva de la distancia
+        var e2 = det.cols.usaDist ? tstImpExDeDist(r[det.cols.dist])
+                                  : (det.cols.exercise>=0?String(r[det.cols.exercise]||'').trim():'');
+        if(e2)exs[e2]=(exs[e2]||0)+1;
         if(det.cols.name>=0){ var p=String(r[det.cols.name]||'').trim(); if(p)pls[p]=(pls[p]||0)+1; }
       });
       _tstImp.exercises=Object.keys(exs);
       _tstImp.players=Object.keys(pls);
       _tstImp.exCount=exs; _tstImp.plCount=pls;
       // Preseleccionar métrica sugerida (la de fuerza relativa, si está)
-      var pref=det.metrics.find(function(m){return /relative peak force|rel.*peak|peak force rel/i.test(m.name);})
+      // v174: en tests de velocidad la métrica principal es el TIEMPO TOTAL
+      var pref=det.metrics.find(function(m){return /tiempo total|total time/i.test(m.name);})
+            || det.metrics.find(function(m){return /relative peak force|rel.*peak|peak force rel/i.test(m.name);})
             || det.metrics.find(function(m){return /peak force/i.test(m.name);})
             || det.metrics[0];
       _tstImp.metricSel=pref?[pref.idx]:[];
@@ -37693,7 +37760,8 @@ function tstImpStepTests(){
     html+='<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid #e8ebf2;border-radius:8px;margin-bottom:7px;flex-wrap:wrap">'+
       '<div style="flex:1;min-width:180px">'+
         '<div style="font-size:12.5px;font-weight:700;color:#0D1B2A">'+_timpEsc(ex)+'</div>'+
-        '<div style="font-size:10px;color:#8a93a5">'+(_tstImp.exCount[ex]||0)+' intento(s) en el archivo</div>'+
+        '<div style="font-size:10px;color:#8a93a5">'+(_tstImp.exCount[ex]||0)+' intento(s) en el archivo'+
+          (_tstImp.cols.usaDist?' · detectado por la distancia':'')+'</div>'+
       '</div>'+
       '<span style="color:#c3c9d4">→</span>'+
       '<select onchange="tstImpSetEx(\''+_timpEsc(k).replace(/'/g,"\\'")+'\',this.value)" style="flex:1;min-width:200px;padding:6px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:11.5px">'+opts+'</select>'+
