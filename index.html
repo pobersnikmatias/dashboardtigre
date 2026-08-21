@@ -35759,6 +35759,62 @@ function tstSeedStrength(){
 window.tstSeedStrength=tstSeedStrength;
 
 // Devuelve el catálogo agrupado por categoría, en el orden de TST_CAT_GROUPS
+// v176: ORDEN de los tests dentro de cada categoría. Se usa en el selector de
+// jornada, en Plantel y en Individual, para que se vean en un orden lógico
+// (por ejemplo sprint de 5, 10, 20 y 30 m, no alfabético ni por antigüedad).
+// Catálogo completo, ordenado por categoría y por el orden interno de cada una
+function tstOrderedCatalog(){
+  var out=[];
+  (TST_CAT_GROUPS||[]).forEach(function(g){
+    out=out.concat(tstSortInGroup((TST_CATALOG||[]).filter(function(t){return (t.group||'otro')===g.k;})));
+  });
+  (TST_CATALOG||[]).forEach(function(t){ if(out.indexOf(t)<0) out.push(t); });
+  return out;
+}
+window.tstOrderedCatalog=tstOrderedCatalog;
+
+function tstSortInGroup(arr){
+  return arr.slice().sort(function(a,b){
+    var oa=(a._ord!=null)?Number(a._ord):9999;
+    var ob=(b._ord!=null)?Number(b._ord):9999;
+    if(oa!==ob) return oa-ob;
+    // Sin orden explícito: por número dentro del nombre (5 m antes que 10 m)
+    var na=(String(a.name).match(/(\d+(?:[.,]\d+)?)/)||[])[1];
+    var nb=(String(b.name).match(/(\d+(?:[.,]\d+)?)/)||[])[1];
+    if(na!=null&&nb!=null){
+      var d=parseFloat(String(na).replace(',','.'))-parseFloat(String(nb).replace(',','.'));
+      if(d) return d;
+    }
+    return String(a.name).localeCompare(String(b.name),'es');
+  });
+}
+window.tstSortInGroup=tstSortInGroup;
+
+// Reindexa el orden de una categoría según cómo está hoy en el catálogo
+function tstReindexGroup(k){
+  var enGrupo=tstSortInGroup((TST_CATALOG||[]).filter(function(t){return (t.group||'otro')===k;}));
+  enGrupo.forEach(function(t,i){ t._ord=i; });
+  try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync(); }catch(e){}
+}
+window.tstReindexGroup=tstReindexGroup;
+
+// Mueve un test dentro de su categoría
+function tstMoveTest(id, dir){
+  var t=tstById(id); if(!t)return;
+  var k=t.group||'otro';
+  var enGrupo=tstSortInGroup((TST_CATALOG||[]).filter(function(x){return (x.group||'otro')===k;}));
+  var i=enGrupo.findIndex(function(x){return x.id===id;});
+  var j=i+dir;
+  if(i<0||j<0||j>=enGrupo.length)return;
+  var tmp=enGrupo[i]; enGrupo[i]=enGrupo[j]; enGrupo[j]=tmp;
+  enGrupo.forEach(function(x,n){ x._ord=n; });
+  try{ localStorage.setItem('tstCatalog_v1',JSON.stringify(TST_CATALOG)); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync(); }catch(e){}
+  tstRender();
+}
+window.tstMoveTest=tstMoveTest;
+
 function tstCatalogByGroup(){
   var by={};
   (TST_CATALOG||[]).forEach(function(t){
@@ -35768,7 +35824,7 @@ function tstCatalogByGroup(){
     (by[k]=by[k]||[]).push(t);
   });
   return TST_CAT_GROUPS.filter(function(g){return by[g.k]&&by[g.k].length;})
-    .map(function(g){ return {group:g, tests:by[g.k]}; });
+    .map(function(g){ return {group:g, tests:tstSortInGroup(by[g.k])}; });
 }
 window.tstCatalogByGroup=tstCatalogByGroup;
 
@@ -38094,13 +38150,28 @@ function tstRenderLoad(){
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+
         '<span style="font-size:11.5px;font-weight:800;color:#0D1B2A;text-transform:uppercase;letter-spacing:.3px">🧪 Tests de esta jornada</span>'+
         '<span style="font-size:10.5px;color:#8a93a5">'+(nTot?(nTot+' seleccionado'+(nTot===1?'':'s')):'ninguno seleccionado')+'</span>'+
-        (nTot?'<button onclick="tstClearSel()" style="margin-left:auto;border:1px solid #e6dada;background:#fff;color:#c47c7c;font-size:9.5px;font-weight:700;cursor:pointer;padding:3px 10px;border-radius:12px">limpiar selección</button>':'')+
+        // v176: el selector completo queda plegado; se abre con el "+"
+        '<button onclick="tstToggleChips()" style="margin-left:auto;border:1px solid '+(_tstChipsOpen?'#3B4D88':'#cdd6e6')+';background:'+(_tstChipsOpen?'#3B4D88':'#fff')+';color:'+(_tstChipsOpen?'#fff':'#3B4D88')+';font-size:11px;font-weight:800;cursor:pointer;padding:4px 13px;border-radius:14px">'+
+          (_tstChipsOpen?'− Ocultar tests':'+ Agregar test')+'</button>'+
+        (nTot?'<button onclick="tstClearSel()" style="border:1px solid #e6dada;background:#fff;color:#c47c7c;font-size:9.5px;font-weight:700;cursor:pointer;padding:3px 10px;border-radius:12px">limpiar</button>':'')+
       '</div>'+
-      chips+
+      (_tstChipsOpen?chips:'')+
+      // Resumen de lo elegido cuando el selector está plegado
+      (!_tstChipsOpen&&nTot?('<div style="display:flex;gap:5px;flex-wrap:wrap">'+
+        _tstSelTests.map(function(id){
+          var t=tstById(id); if(!t)return '';
+          var g=tstGroupBy(t.group);
+          return '<span style="display:inline-flex;align-items:center;gap:5px;background:'+g.col+'14;border:1px solid '+g.col+'44;color:'+g.col+';border-radius:16px;padding:4px 10px;font-size:11px;font-weight:700">'+
+            tstEsc(t.name)+
+            '<button onclick="tstToggleTest(\''+id+'\')" title="Quitar de la jornada" style="border:none;background:none;color:'+g.col+';cursor:pointer;font-size:12px;padding:0;line-height:1;opacity:.6">✕</button></span>';
+        }).join('')+'</div>'):'')+
     '</div>'+
   '</div>';
   var active=_tstSelTests.map(tstById).filter(Boolean);
-  if(!active.length)return head+'<div style="padding:20px;text-align:center;color:#999;font-size:12px">Elegí al menos un test para armar la grilla.</div>';
+  if(!active.length){
+    if(!_tstChipsOpen){ _tstChipsOpen=true; return tstRenderLoad(); }   // abrir solo
+    return head+'<div style="padding:20px;text-align:center;color:#999;font-size:12px">Elegí al menos un test para armar la grilla.</div>';
+  }
   var roster=tstRoster();
   if(!roster.length)return head+'<div style="padding:20px;text-align:center;color:#999;font-size:12px">No hay jugadores en el plantel. Cargá perfiles primero.</div>';
   var existing={};
@@ -38201,10 +38272,31 @@ function tstCellInput(t,name,rec){
     '<div><input value="'+raw+'" placeholder="'+ph+'" onchange="tstSaveCell(\''+t.id+'\',\''+tstNorm(name).replace(/'/g,"\\'")+'\',\''+encodeURIComponent(name)+'\',\'B\',this.value)" style="width:72px;padding:5px 4px;border:1px solid #ddd;border-radius:5px;font-size:11px;text-align:center">'+avg+'</div>'+
     tstNoteBtn(t.id,name,rec)+'</div>';
 }
-function tstDateChange(v){ _tstDate=v||tstToday(); tstRender(); }
+function tstDateChange(v){
+  _tstDate=v||tstToday();
+  // v176: al abrir una jornada anterior, seleccionar SÓLO los tests que
+  // realmente se tomaron ese día. Antes quedaban marcados los de la sesión
+  // previa y la grilla mostraba columnas vacías.
+  try{
+    var delDia={};
+    (TST_DATA||[]).forEach(function(r){ if(r&&r.date===_tstDate) delDia[r.testId]=true; });
+    var ids=Object.keys(delDia);
+    if(ids.length){
+      // Respetar el orden configurado (categoría + orden interno)
+      var cat=(typeof tstOrderedCatalog==='function')?tstOrderedCatalog():(TST_CATALOG||[]);
+      _tstSelTests=cat.filter(function(t){return delDia[t.id];}).map(function(t){return t.id;});
+      ids.forEach(function(id){ if(_tstSelTests.indexOf(id)<0)_tstSelTests.push(id); });
+    }
+  }catch(e){}
+  tstRender();
+}
 window.tstDateChange=tstDateChange;
 // v155: elegir o quitar todos los tests de una categoría de una vez
-function tstClearSel(){ _tstSelTests=[]; tstRender(); }
+var _tstChipsOpen=false;   // v176: selector de tests plegado por defecto
+function tstToggleChips(){ _tstChipsOpen=!_tstChipsOpen; tstRender(); }
+window.tstToggleChips=tstToggleChips;
+
+function tstClearSel(){ _tstSelTests=[]; _tstChipsOpen=true; tstRender(); }
 window.tstClearSel=tstClearSel;
 
 function tstToggleGroup(k){
@@ -38688,6 +38780,15 @@ function tstRenderIndiv(){
   recs.forEach(function(r){ (byTest[r.testId]=byTest[r.testId]||[]).push(r); });
   var orderAll=TST_CATALOG.filter(function(t){return byTest[t.id];});
   Object.keys(byTest).forEach(function(id){ if(!orderAll.some(function(t){return t.id===id;})){ var t=tstById(id); if(t)orderAll.push(t); } });
+  // v176: respetar el orden por categoría y, dentro, el orden configurado
+  orderAll=(function(){
+    var out=[];
+    TST_CAT_GROUPS.forEach(function(g){
+      out=out.concat(tstSortInGroup(orderAll.filter(function(t){return (t.group||'otro')===g.k;})));
+    });
+    orderAll.forEach(function(t){ if(out.indexOf(t)<0) out.push(t); });
+    return out;
+  })();
 
   // v175: filtro por categoría, para no ver todos los tests juntos.
   // Sólo se ofrecen las categorías que este jugador tiene con datos.
@@ -38989,7 +39090,8 @@ function tstPosSelector(testId){
 window.tstPosSelector=tstPosSelector;
 
 function tstRenderTeam(){
-  var testsWithData=TST_CATALOG.filter(function(t){ return TST_DATA.some(function(r){return r.testId===t.id;}); });
+  // v176: en el orden configurado (categoría + orden interno)
+  var testsWithData=tstOrderedCatalog().filter(function(t){ return TST_DATA.some(function(r){return r.testId===t.id;}); });
   if(!testsWithData.length)return '<div style="padding:26px;text-align:center;color:#999;font-size:12px;background:#fff;border:1px solid #e4e6ec;border-radius:10px">Sin registros todavía.</div>';
   if(!_tstTeamTest||!testsWithData.some(function(t){return t.id===_tstTeamTest;}))_tstTeamTest=testsWithData[0].id;
   var t=tstById(_tstTeamTest);
@@ -39211,6 +39313,11 @@ function tstRenderCat(){
           '<div style="flex:1"><b style="font-size:12.5px">'+tstEsc(t.name)+'</b>'+
           (t.proto?' <span title="Tiene protocolo definido" style="font-size:10px;color:#1D9E75">📋</span>':'')+
           '<div style="font-size:10px;color:#999">'+t.unit+' · '+(t.lat==='uni'?'unilateral (I/D)':'bilateral')+' · '+(t.mode==='multi'?'multiple->promedio':'unico')+' · '+(t.better==='down'?'menos = mejor':'mas = mejor')+(usos?' · '+usos+' registros':'')+'</div></div>'+
+          // v176: flechas para ordenar dentro de la categoría
+          '<span style="display:inline-flex;flex-direction:column;line-height:.8;margin-right:2px">'+
+            '<button onclick="tstMoveTest(\''+t.id+'\',-1)" title="Subir" style="border:none;background:none;cursor:pointer;color:#bbb;font-size:10px;padding:0 3px">▲</button>'+
+            '<button onclick="tstMoveTest(\''+t.id+'\',1)" title="Bajar" style="border:none;background:none;cursor:pointer;color:#bbb;font-size:10px;padding:0 3px">▼</button>'+
+          '</span>'+
           '<button onclick="tstEditTest(\''+t.id+'\')" style="background:#eef1f8;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;color:#3B4D88;font-weight:600">Editar</button>'+
           '<button onclick="tstDelTest(\''+t.id+'\')" style="background:none;border:none;color:#ccc;font-size:14px;cursor:pointer" title="Eliminar">X</button>'+
         '</div>'+
