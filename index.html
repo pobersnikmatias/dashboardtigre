@@ -38143,7 +38143,7 @@ function tstRenderLoad(){
       var sub=t.unit+(t.lat==='uni'?' · I/D':'')+(t.mode==='multi'?' · xn':'');
       // v173: lápiz de condiciones de la jornada junto al nombre del test
       return '<th style="background:#1E2A52;color:#fff;padding:7px 8px;font-size:11px;min-width:'+(t.lat==='uni'?'150':'90')+'px;'+bordeDe(i)+'">'+
-        tstEsc(t.name)+' '+tstCondBtn(t.id,_tstDate)+
+        tstEsc(t.name)+' '+tstCondBtn(t.id,_tstDate,true)+
         '<br><span style="font-size:8.5px;color:#9FB0D0;font-weight:400">'+sub+'</span></th>';
     }).join('');
   var rows=roster.map(function(name,ri){
@@ -38398,14 +38398,17 @@ function tstCondResumen(c){
 window.tstCondResumen=tstCondResumen;
 
 // Botón de condiciones para el encabezado de cada test en la grilla
-function tstCondBtn(testId,date){
+// v175: `claro` = true cuando el botón va sobre fondo oscuro (encabezado de
+// la grilla). El lápiz se dibujaba en azul sobre azul y no se veía.
+function tstCondBtn(testId,date,claro){
   date=date||_tstDate;
   var c=tstCondGet(testId,date);
   var tiene=!!c;
   var tip=tiene?(tstCondResumen(c)+(c.nota?(' — '+c.nota):'')):'Registrar condiciones (temperatura, viento, superficie…)';
+  var col=claro?'#fff':'#3B4D88';
   return '<button onclick="event.stopPropagation();tstEditCond(\''+testId+'\',\''+date+'\')" title="'+
-    String(tip).replace(/"/g,'&quot;')+'" style="border:none;background:none;cursor:pointer;font-size:11px;padding:0 2px;line-height:1;'+
-    (tiene?'':'opacity:.35')+'">'+(tiene?'🌤':'✎')+'</button>';
+    String(tip).replace(/"/g,'&quot;')+'" style="border:none;background:none;cursor:pointer;font-size:12px;padding:0 3px;line-height:1;'+
+    'color:'+col+';'+(tiene?'':'opacity:'+(claro?'.65':'.4'))+'">'+(tiene?'🌤':'✎')+'</button>';
 }
 window.tstCondBtn=tstCondBtn;
 
@@ -38657,6 +38660,10 @@ function tstLegend(items){
 // ═══════════════════════════════════════════════════════════════════════════
 // VISTA INDIVIDUAL
 // ═══════════════════════════════════════════════════════════════════════════
+var _tstIndivCat='';   // v175: categoría filtrada en la vista individual
+function tstSetIndivCat(k){ _tstIndivCat=k||''; tstRender(); }
+window.tstSetIndivCat=tstSetIndivCat;
+
 function tstRenderIndiv(){
   var rosterAll=tstRoster().filter(function(n){ return TST_DATA.some(function(r){return tstNorm(r.name)===tstNorm(n);}); });
   if(!rosterAll.length)return '<div style="padding:26px;text-align:center;color:#999;font-size:12px;background:#fff;border:1px solid #e4e6ec;border-radius:10px">Sin registros todavía. Cargá una jornada primero.</div>';
@@ -38679,8 +38686,34 @@ function tstRenderIndiv(){
 
   var byTest={};
   recs.forEach(function(r){ (byTest[r.testId]=byTest[r.testId]||[]).push(r); });
-  var order=TST_CATALOG.filter(function(t){return byTest[t.id];});
-  Object.keys(byTest).forEach(function(id){ if(!order.some(function(t){return t.id===id;})){ var t=tstById(id); if(t)order.push(t); } });
+  var orderAll=TST_CATALOG.filter(function(t){return byTest[t.id];});
+  Object.keys(byTest).forEach(function(id){ if(!orderAll.some(function(t){return t.id===id;})){ var t=tstById(id); if(t)orderAll.push(t); } });
+
+  // v175: filtro por categoría, para no ver todos los tests juntos.
+  // Sólo se ofrecen las categorías que este jugador tiene con datos.
+  var catsConDatos=TST_CAT_GROUPS.filter(function(g){
+    return orderAll.some(function(t){ return (t.group||'otro')===g.k; });
+  });
+  if(_tstIndivCat && !catsConDatos.some(function(g){return g.k===_tstIndivCat;})) _tstIndivCat='';
+  var order=_tstIndivCat ? orderAll.filter(function(t){ return (t.group||'otro')===_tstIndivCat; }) : orderAll;
+
+  var catBar='';
+  if(catsConDatos.length>1){
+    var chip=function(k,lbl,ico,col,n){
+      var on=(_tstIndivCat===k);
+      return '<button onclick="tstSetIndivCat(\''+k+'\')" style="padding:5px 13px;border:1px solid '+(on?(col||'#3B4D88'):'#dde2ea')+
+        ';background:'+(on?(col||'#3B4D88'):'#fff')+';color:'+(on?'#fff':'#6b7a90')+
+        ';border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">'+
+        (ico?ico+' ':'')+lbl+' <span style="opacity:.65;font-weight:600">'+n+'</span></button>';
+    };
+    catBar='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center">'+
+      chip('','Todos','',null,orderAll.length)+
+      catsConDatos.map(function(g){
+        var n=orderAll.filter(function(t){return (t.group||'otro')===g.k;}).length;
+        return chip(g.k,g.lbl,g.ico,g.col,n);
+      }).join('')+
+    '</div>';
+  }
 
   var cards=order.map(function(t){
     var series=byTest[t.id].slice().sort(function(a,b){return a.date<b.date?-1:1;});
@@ -38840,6 +38873,7 @@ function tstRenderIndiv(){
   }).join('');
   // Rejilla: dos columnas en pantallas anchas, una en móvil
   if(cards) cards='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:12px">'+cards+'</div>';
+  cards=catBar+(cards||'<div style="padding:22px;text-align:center;color:#999;font-size:12px">Sin tests con datos en esta categoría.</div>');
 
   return '<div style="margin-bottom:12px">'+head+
     '<div style="background:#f8faff;border:1px solid #e4e6ec;border-top:none;border-radius:0 0 10px 10px;padding:10px 16px;font-size:11px;color:#666">'+
@@ -39119,7 +39153,10 @@ function tstRenderJornadas(){
   var names=Object.keys(byName).sort(function(a,b){return byName[a].name.localeCompare(byName[b].name,'es');});
 
   var th='<th style="padding:8px 12px;text-align:left;font-size:11px;color:#555;background:#f5f7fa;position:sticky;left:0;z-index:1">Jugador</th>'+
-    tests.map(function(t){return '<th style="padding:8px 10px;font-size:11px;color:#555;background:#f5f7fa;white-space:nowrap">'+tstEsc(t.name)+'<br><span style="font-size:8.5px;color:#a3a9b6;font-weight:400">'+t.unit+'</span></th>';}).join('')+
+    // v175: lápiz de condiciones también acá, para jornadas importadas
+    tests.map(function(t){return '<th style="padding:8px 10px;font-size:11px;color:#555;background:#f5f7fa;white-space:nowrap">'+
+      tstEsc(t.name)+' '+tstCondBtn(t.id,_tstJorDate)+
+      '<br><span style="font-size:8.5px;color:#a3a9b6;font-weight:400">'+t.unit+'</span></th>';}).join('')+
     '<th style="padding:8px 10px;background:#f5f7fa"></th>';
 
   var rows=names.map(function(k){
@@ -39145,6 +39182,18 @@ function tstRenderJornadas(){
       '<button onclick="tstSetView(\'load\');tstDateChange(\''+_tstJorDate+'\')" style="margin-left:auto;background:#fff;border:1px solid #3B4D88;color:#3B4D88;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">✏️ Editar jornada</button>'+
       '<button onclick="tstDelJornada(\''+_tstJorDate+'\')" style="background:#fff;border:1px solid #E24B4A;color:#D9534F;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">🗑 Borrar jornada</button>'+
     '</div>'+
+    // v175: condiciones ya registradas para esta jornada
+    (function(){
+      var cc=tests.filter(function(t){ return tstCondGet(t.id,_tstJorDate); });
+      if(!cc.length)return '';
+      return '<div style="background:#f2f8ff;border:1px solid #d5e3f7;border-top:none;padding:8px 16px">'+
+        '<div style="font-size:10px;font-weight:800;color:#0C447C;text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px">🌤 Condiciones</div>'+
+        cc.map(function(t){
+          var c=tstCondGet(t.id,_tstJorDate);
+          return '<div style="font-size:10.5px;color:#40546e;margin:2px 0"><b>'+tstEsc(t.name)+'</b> · '+
+            tstEsc(tstCondResumen(c))+(c.nota?(' <span style="color:#7a8ba0">— '+tstEsc(c.nota)+'</span>'):'')+'</div>';
+        }).join('')+'</div>';
+    })()+
     '<div style="background:#fff;border:1px solid #e4e6ec;border-top:none;border-radius:0 0 10px 10px;overflow-x:auto">'+
       '<table style="border-collapse:collapse;width:100%"><thead><tr>'+th+'</tr></thead><tbody>'+rows+'</tbody></table>'+
     '</div>';
