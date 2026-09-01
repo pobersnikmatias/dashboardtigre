@@ -18204,9 +18204,9 @@ document.addEventListener('DOMContentLoaded',function(){
 <!-- Controls bar -->
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
   <label style="font-size:11px;font-weight:600;color:#333;display:flex;align-items:center;gap:6px">
-    Semana:
-    <select id="carga-week-sel" onchange="cargaWeekChange()" style="font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;min-width:160px">
-      <option value="">— elegir semana —</option>
+    📅 Microciclo:
+    <select id="carga-week-sel" onchange="cargaWeekChange()" style="font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;min-width:170px">
+      <option value="">— elegir microciclo —</option>
     </select>
   </label>
 
@@ -25309,6 +25309,13 @@ window.cargaToggleDolor=cargaToggleDolor;
 // Devuelve la lista de microciclos disponibles (todos los `week` únicos en MICROCICLO),
 // y un slot adicional "Sin asignar" si el usuario prefiere asociar solo por fecha.
 function _cargaListMicrociclos(){
+  // v177: una sola fuente para todos los selectores de microciclo
+  if(typeof cargaWeekOptions==='function'){
+    try{ var u=cargaWeekOptions(); if(u.length) return u; }catch(e){}
+  }
+  return _cargaListMicrociclosLegacy();
+}
+function _cargaListMicrociclosLegacy(){
   var weeks=[], seen={};
   // 1) Semanas que ya tienen sesiones de GPS cargadas
   if(typeof MICROCICLO!=='undefined' && MICROCICLO.length){
@@ -25809,22 +25816,72 @@ function cargaClearData(type){
 window.cargaClearData=cargaClearData;
 
 // ── Week selector ──
+// v177: UN SOLO listado de microciclos para toda la pestaña.
+// Antes cada vista armaba el suyo con criterios distintos, y el mismo
+// microciclo aparecía como "33", "Microciclo 33" y "Sem 25/08".
+// Ahora todas toman esta lista, que se arma con los nombres de PLANIFICACIÓN
+// (donde el CT define el microciclo y sus fechas) y se deduplica por número.
+function cargaWeekOptions(){
+  var byKey={};
+  var reg=function(name){
+    if(!name)return;
+    var k=cargaWeekKey(name);
+    (byKey[k]=byKey[k]||[]).push(name);
+  };
+  // 1) Planificación: la fuente de verdad de los nombres
+  try{ (typeof PLAN_WEEKS!=='undefined'?PLAN_WEEKS:[]).forEach(function(w){ if(w&&w.name)reg(w.name); }); }catch(e){}
+  // 2) Lo que ya existe en los datos
+  try{ (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){ reg(s&&s.week); }); }catch(e){}
+  try{ (typeof PSE_DATA!=='undefined'?PSE_DATA:[]).forEach(function(r){ reg(r&&r.week); }); }catch(e){}
+  try{ (typeof WELLNESS_DATA!=='undefined'?WELLNESS_DATA:[]).forEach(function(r){ reg(r&&r.week); }); }catch(e){}
+  try{ Object.keys(CARGA_WEEK_CTX||{}).forEach(function(f){ var c=CARGA_WEEK_CTX[f]; reg(c&&c.week); }); }catch(e){}
+  // 3) Microciclos creados a mano en los selectores de importación
+  try{ JSON.parse(localStorage.getItem('cargaCustomWeeks_v1')||'[]').forEach(reg); }catch(e){}
+  // Un rótulo por clave, priorizando el de Planificación
+  var out=Object.keys(byKey).map(function(k){ return cargaWeekLabel(k, byKey[k]); });
+  // Orden natural por número
+  out.sort(function(a,b){
+    var na=cargaWeekNum(a), nb=cargaWeekNum(b);
+    if(na!=null&&nb!=null) return na-nb;
+    if(na!=null) return -1;
+    if(nb!=null) return 1;
+    return String(a).localeCompare(String(b),'es');
+  });
+  return out;
+}
+window.cargaWeekOptions=cargaWeekOptions;
+
 function cargaRebuildWeekSel(){
   var sel=document.getElementById('carga-week-sel');
   if(!sel)return;
-  var weekSet={};
-  MICROCICLO.forEach(function(s){if(s.week)weekSet[s.week]=true;});
-  // Incluir también semanas que aparecen solo en PSE_DATA o WELLNESS_DATA
-  if(typeof PSE_DATA!=='undefined')PSE_DATA.forEach(function(r){if(r.week)weekSet[r.week]=true;});
-  if(typeof WELLNESS_DATA!=='undefined')WELLNESS_DATA.forEach(function(r){if(r.week)weekSet[r.week]=true;});
-  var weeks=(typeof _sortWeeksNatural==='function')?_sortWeeksNatural(Object.keys(weekSet)):Object.keys(weekSet);
+  var weeks=cargaWeekOptions();
   var cur=sel.value;
-  sel.innerHTML='<option value="">— elegir semana —</option>'+weeks.map(function(w){return'<option value="'+w+'"'+(w===cur?' selected':'')+'>'+w+'</option>';}).join('');
-  if(!sel.value&&weeks.length)sel.value=weeks[weeks.length-1];
+  // Si el valor actual es un alias del mismo microciclo, conservar la selección
+  if(cur && weeks.indexOf(cur)<0){
+    var k=cargaWeekKey(cur);
+    var eq=weeks.find(function(w){ return cargaWeekKey(w)===k; });
+    if(eq) cur=eq;
+  }
+  sel.innerHTML='<option value="">— elegir microciclo —</option>'+weeks.map(function(w){return'<option value="'+w+'"'+(w===cur?' selected':'')+'>'+w+'</option>';}).join('');
+  if(cur && weeks.indexOf(cur)>=0) sel.value=cur;
+  else if(weeks.length) sel.value=weeks[weeks.length-1];
 }
 window.cargaRebuildWeekSel=cargaRebuildWeekSel;
 
-function cargaWeekChange(){cargaRender();}
+function cargaWeekChange(){
+  // v177: el selector de arriba y el del monitor son el mismo microciclo
+  try{
+    var sel=document.getElementById('carga-week-sel');
+    if(sel&&sel.value&&typeof _cargaEqWeek!=='undefined'){
+      var k=cargaWeekKey(sel.value);
+      if(!_cargaEqWeek || cargaWeekKey(_cargaEqWeek)!==k){
+        _cargaEqWeek=sel.value;
+        if(typeof _cargaMonDay!=='undefined') _cargaMonDay='';
+      }
+    }
+  }catch(e){}
+  cargaRender();
+}
 window.cargaWeekChange=cargaWeekChange;
 
 // ── View switcher ──
@@ -26331,6 +26388,16 @@ var _cargaMonDay = '';   // '' = semana completa · ISO = día puntual
 function cargaMonSetWeek(w){
   _cargaEqWeek = w;
   _cargaMonDay = '';     // al cambiar de microciclo, volver a la vista semanal
+  // v177: mantener sincronizado el selector de la barra superior, para que
+  // los dos desplegables se comporten como uno solo.
+  try{
+    var sel=document.getElementById('carga-week-sel');
+    if(sel){
+      var k=cargaWeekKey(w);
+      var op=Array.prototype.find.call(sel.options,function(o){ return o.value && cargaWeekKey(o.value)===k; });
+      if(op) sel.value=op.value;
+    }
+  }catch(e){}
   cargaRender();
 }
 window.cargaMonSetWeek = cargaMonSetWeek;
@@ -26638,10 +26705,13 @@ function cargaRenderMonitor(){
     out.innerHTML=switchHtml+(ds.length?cargaMonRenderDay(ds[0]):'');
     return;
   }
-  if(!_cargaEqWeek || !periods.some(function(p){return p.week===_cargaEqWeek;})){
+  // v177: comparar por clave normalizada, así "33" y "Microciclo 33" son el mismo
+  if(!_cargaEqWeek || !periods.some(function(p){return cargaWeekKey(p.week)===cargaWeekKey(_cargaEqWeek);})){
     _cargaEqWeek=periods[periods.length-1].week;
   }
-  var pi=periods.findIndex(function(p){return p.week===_cargaEqWeek;});
+  var pi=periods.findIndex(function(p){return cargaWeekKey(p.week)===cargaWeekKey(_cargaEqWeek);});
+  if(pi<0) pi=periods.length-1;
+  _cargaEqWeek=periods[pi].week;
   var per=periods[pi];
   // Si el día seleccionado no pertenece a este microciclo, volver a la semana
   if(_cargaMonDay && per.dates.indexOf(_cargaMonDay)<0) _cargaMonDay='';
@@ -28040,28 +28110,78 @@ function cargaCtxDel(date){
 }
 window.cargaCtxDel=cargaCtxDel;
 
+// v177: NORMALIZACIÓN de nombres de microciclo.
+// El GPS puede traer "33", la planificación "Microciclo 33" y el contexto
+// manual "MC 33". Son el mismo microciclo, pero al agruparse por el texto
+// exacto aparecían tres veces, con días y semanas mezclados.
+// Ahora todas se resuelven al MISMO número y se muestra un único nombre,
+// tomando como referencia el de la Planificación (que es donde el CT define
+// el microciclo y sus fechas).
+function cargaWeekNum(name){
+  var m=String(name==null?'':name).match(/(\d+)/);
+  return m?parseInt(m[1],10):null;
+}
+window.cargaWeekNum=cargaWeekNum;
+
+// Clave de agrupación: el número si lo tiene; si no, el texto normalizado.
+function cargaWeekKey(name){
+  var n=cargaWeekNum(name);
+  if(n!=null) return 'n:'+n;
+  return 't:'+String(name==null?'':name).toLowerCase().trim().replace(/\s+/g,' ');
+}
+window.cargaWeekKey=cargaWeekKey;
+
+// Nombre a mostrar. Manda el de Planificación; si no está, el más descriptivo.
+function cargaWeekLabel(key, candidatos){
+  var planNames=[];
+  try{
+    (typeof PLAN_WEEKS!=='undefined'?PLAN_WEEKS:[]).forEach(function(w){
+      if(w&&w.name&&cargaWeekKey(w.name)===key) planNames.push(w.name);
+    });
+  }catch(e){}
+  if(planNames.length) return planNames[0];
+  var c=(candidatos||[]).filter(Boolean);
+  if(!c.length)return key;
+  // El más descriptivo: el que tiene texto además del número
+  c.sort(function(a,b){
+    var la=/[a-záéíóúñ]/i.test(a)?1:0, lb=/[a-záéíóúñ]/i.test(b)?1:0;
+    if(la!==lb) return lb-la;
+    return String(b).length-String(a).length;
+  });
+  return c[0];
+}
+window.cargaWeekLabel=cargaWeekLabel;
+
 function cargaMicroWeeksByDate(){
   var byW={};
+  var _alias={};   // clave → nombres vistos, para elegir el rótulo final
+  var _reg=function(name){
+    var k=cargaWeekKey(name);
+    (_alias[k]=_alias[k]||[]).push(name);
+    return k;
+  };
   (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){
     if(!s||!s.week||!s.fecha)return;
     var f=String(s.fecha).slice(0,10);
-    if(!byW[s.week]){byW[s.week]={week:s.week,start:f,end:f,dateToDay:{}};}
+    var k=_reg(s.week);
+    if(!byW[k]){byW[k]={week:s.week,start:f,end:f,dateToDay:{}};}
     else{
-      if(f<byW[s.week].start)byW[s.week].start=f;
-      if(f>byW[s.week].end)byW[s.week].end=f;
+      if(f<byW[k].start)byW[k].start=f;
+      if(f>byW[k].end)byW[k].end=f;
     }
-    if(s.day)byW[s.week].dateToDay[f]=s.day;
+    if(s.day)byW[k].dateToDay[f]=s.day;
   });
   // Fusionar el contexto manual del CT: crea/extiende semanas sin GPS.
   // Las sesiones GPS tienen prioridad en el rótulo del día si coinciden.
   Object.keys(CARGA_WEEK_CTX||{}).forEach(function(f){
     var c=CARGA_WEEK_CTX[f]; if(!c||!c.week)return;
-    if(!byW[c.week]){ byW[c.week]={week:c.week,start:f,end:f,dateToDay:{}}; }
+    var k=_reg(c.week);
+    if(!byW[k]){ byW[k]={week:c.week,start:f,end:f,dateToDay:{}}; }
     else{
-      if(f<byW[c.week].start)byW[c.week].start=f;
-      if(f>byW[c.week].end)byW[c.week].end=f;
+      if(f<byW[k].start)byW[k].start=f;
+      if(f>byW[k].end)byW[k].end=f;
     }
-    if(c.day && !byW[c.week].dateToDay[f])byW[c.week].dateToDay[f]=c.day;
+    if(c.day && !byW[k].dateToDay[f])byW[k].dateToDay[f]=c.day;
   });
   // v142 (C): semanas de PLANIFICACIÓN con fecha de inicio. Es la fuente más
   // exacta y la que resuelve el caso real: los chicos cargan wellness/PSE
@@ -28071,13 +28191,17 @@ function cargaMicroWeeksByDate(){
   try{
     if(typeof planWeeksWithDates==='function'){
       planWeeksWithDates().forEach(function(pw){
-        if(!byW[pw.week]){
-          byW[pw.week]={week:pw.week,start:pw.start,end:pw.end,dateToDay:{},_fromPlan:true,_len:pw.len};
+        var k=_reg(pw.week);
+        if(!byW[k]){
+          byW[k]={week:pw.week,start:pw.start,end:pw.end,dateToDay:{},_fromPlan:true,_len:pw.len};
         } else {
-          // Ya existe por GPS/contexto: ampliar el rango con lo planificado
-          if(pw.start<byW[pw.week].start)byW[pw.week].start=pw.start;
-          if(pw.end>byW[pw.week].end)byW[pw.week].end=pw.end;
-          byW[pw.week]._len=pw.len;
+          // v177: la PLANIFICACIÓN manda sobre el rango. Ahí el CT define
+          // cuándo arranca el microciclo y cuánto dura; el GPS sólo aporta
+          // los días efectivamente entrenados.
+          byW[k].start=pw.start;
+          byW[k].end=pw.end;
+          byW[k]._len=pw.len;
+          byW[k]._fromPlan=true;
         }
         // Rótulos MD-N de la planificación, sin pisar los del GPS
         var w=(typeof PLAN_WEEKS!=='undefined'?PLAN_WEEKS:[]).find(function(x){return x&&x.name===pw.week&&x.startDate;});
@@ -28086,12 +28210,17 @@ function cargaMicroWeeksByDate(){
             if(!d||!d.mdLabel)return;
             var iso=planShiftISO(pw.start,di);
             if(iso>pw.end)return;
-            if(!byW[pw.week].dateToDay[iso])byW[pw.week].dateToDay[iso]=d.mdLabel;
+            if(!byW[k].dateToDay[iso])byW[k].dateToDay[iso]=d.mdLabel;
           });
         }
       });
     }
   }catch(e){ console.warn('planWeeksWithDates:',e); }
+  // v177: un solo rótulo por microciclo, tomando el de Planificación si existe
+  Object.keys(byW).forEach(function(k){
+    byW[k].week = cargaWeekLabel(k, _alias[k]||[byW[k].week]);
+    byW[k]._key = k;
+  });
   // Ordenar por start
   var wks = Object.values(byW).sort(function(a,b){return a.start<b.start?-1:1;});
   // Expandir rangos: cada semana cubre del día siguiente al fin de la anterior
