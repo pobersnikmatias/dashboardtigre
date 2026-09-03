@@ -2950,6 +2950,83 @@ function csvMapToggle(){
 }
 window.csvMapToggle=csvMapToggle;
 
+// ═══ PAREO DE NOMBRES EN CARGA EXTERNA (v178) ════════════════════════════
+// El GPS exporta los nombres con tildes, mayúsculas o espacios distintos a
+// como están en Perfiles, y cada variante se tomaba como un jugador nuevo.
+// Ahora se resuelven contra el plantel antes de guardar, con la misma lógica
+// que ya usa la importación de tests.
+function csvNormName(s){
+  return String(s||'').toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[.,_\-]/g,' ')
+    .replace(/\s+/g,' ');
+}
+window.csvNormName=csvNormName;
+
+// Similitud tolerante al orden ("Moyano Jerónimo" ≡ "Jerónimo Moyano")
+function csvNameSim(a,b){
+  var x=csvNormName(a), y=csvNormName(b);
+  if(!x||!y)return 0;
+  if(x===y)return 1;
+  var wx=x.split(' ').filter(Boolean).slice().sort().join(' ');
+  var wy=y.split(' ').filter(Boolean).slice().sort().join(' ');
+  if(wx===wy)return 0.97;                       // mismas palabras, otro orden
+  if(x.indexOf(y)>=0||y.indexOf(x)>=0)return 0.85;
+  var ax=x.split(' ').filter(Boolean), ay=y.split(' ').filter(Boolean);
+  var comunes=ax.filter(function(w){ return w.length>2 && ay.indexOf(w)>=0; }).length;
+  if(!comunes)return 0;
+  return Math.min(0.8, comunes/Math.max(ax.length,ay.length));
+}
+window.csvNameSim=csvNameSim;
+
+// Lista de nombres del plantel (perfiles + los ya usados en datos)
+function csvRosterNames(){
+  var out={}, add=function(n){ if(n&&String(n).trim())out[String(n).trim()]=true; };
+  try{ Object.keys(PLAYER_PROFILES||{}).forEach(function(k){ var p=PLAYER_PROFILES[k]; if(p&&p.name)add(p.name); }); }catch(e){}
+  return Object.keys(out);
+}
+window.csvRosterNames=csvRosterNames;
+
+// Resuelve un nombre del archivo contra el plantel.
+// Devuelve {name, match:'exacto'|'alias'|'similar'|'nuevo', score, sugerido}
+function csvResolveName(raw){
+  var n=String(raw||'').trim();
+  if(!n)return {name:n, match:'nuevo', score:0};
+  // 1) Alias ya aprendido
+  try{
+    var al=CARGA_NAME_ALIASES[csvNormName(n)] || CARGA_NAME_ALIASES[n.toLowerCase()];
+    if(al) return {name:al, match:'alias', score:1};
+  }catch(e){}
+  var roster=csvRosterNames();
+  // 2) Coincidencia exacta tras normalizar
+  var exacto=roster.find(function(r){ return csvNormName(r)===csvNormName(n); });
+  if(exacto) return {name:exacto, match:'exacto', score:1};
+  // 3) El más parecido
+  var best=null, bs=0;
+  roster.forEach(function(r){ var sc=csvNameSim(n,r); if(sc>bs){ bs=sc; best=r; } });
+  if(best && bs>=0.7) return {name:best, match:'similar', score:bs, sugerido:best};
+  return {name:n, match:'nuevo', score:bs, sugerido:best||null};
+}
+window.csvResolveName=csvResolveName;
+
+// Registra la equivalencia para que la próxima importación la resuelva sola
+// Une un nombre del archivo con uno del plantel y vuelve a procesar
+function csvFixName(raw, canonical){
+  csvLearnAlias(raw, canonical);
+  if(typeof parseCSV==='function') parseCSV(true);
+}
+window.csvFixName=csvFixName;
+
+function csvLearnAlias(raw, canonical){
+  if(!raw||!canonical)return;
+  try{
+    CARGA_NAME_ALIASES[csvNormName(raw)]=canonical;
+    if(typeof saveData==='function')saveData();
+    if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync();
+  }catch(e){}
+}
+window.csvLearnAlias=csvLearnAlias;
+
 function csvProcessRows(){
   var byField={};
   Object.keys(csvMapping).forEach(function(idx){byField[csvMapping[idx]]=parseInt(idx);});
@@ -2978,9 +3055,13 @@ function csvProcessRows(){
   csvParsed=[];
   for(var i=0;i<csvDataRows.length;i++){
     var cols=csvDataRows[i];
-    var n=(get(cols,'n')||'').toString().trim();
-    if(!n||n==='NaN'||n.startsWith('#'))continue;
-    if(/^(total|promedio|average|prom)/i.test(n))continue;
+    var nRaw=(get(cols,'n')||'').toString().trim();
+    if(!nRaw||nRaw==='NaN'||nRaw.startsWith('#'))continue;
+    if(/^(total|promedio|average|prom)/i.test(nRaw))continue;
+    // v178: resolver contra el plantel — una tilde o una mayúscula de más
+    // ya no crean un jugador nuevo.
+    var _res=csvResolveName(nRaw);
+    var n=_res.name;
     var dateRaw=(get(cols,'date')||'').toString().trim();
     var minVal=Math.round(toMin(get(cols,'min')))||1;
     var mtsMin=pn(get(cols,'mts'));
@@ -3012,7 +3093,7 @@ function csvProcessRows(){
       }
       extra[m.key]={raw:raw, vol:vol};
     });
-    csvParsed.push({_l:i+2,n:n,min:minVal,date:dateRaw,
+    csvParsed.push({_l:i+2,n:n,_nRaw:nRaw,_nMatch:_res.match,_nScore:_res.score,_nSug:_res.sugerido,min:minVal,date:dateRaw,
       _rawVol:{hsr:hsr,h2:h2,h25:h25,acc:acc,dcc:dcc,rhie:rhie,pl:pl},
       mts:mtsMin,
       hsr:minVal>0?hsr/minVal:0,
@@ -3062,6 +3143,36 @@ function parseCSV(skipMappingInit){
 
   const dups=csvParsed.filter(r=>D.some(x=>x.n.toLowerCase()===r.n.toLowerCase())).length;
   stat.textContent=`${csvParsed.length} ejercicio(s) encontrados${dups?` (${dups} duplicado${dups>1?'s':''})`:''}.`;
+  // v178: aviso del pareo de nombres contra el plantel
+  try{
+    var _h=function(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); };
+    var corregidos={}, nuevos={};
+    csvParsed.forEach(function(r){
+      if(r._nMatch==='similar'||r._nMatch==='alias'){ if(r._nRaw!==r.n) corregidos[r._nRaw]=r.n; }
+      else if(r._nMatch==='nuevo'){ nuevos[r._nRaw]=r._nSug||null; }
+    });
+    var nC=Object.keys(corregidos).length, nN=Object.keys(nuevos).length;
+    if(nC||nN){
+      var h='<div style="font-size:10.5px;padding:7px 9px;background:#f2f8ff;border:1px solid #d5e3f7;border-radius:6px;margin-top:7px">';
+      if(nC){
+        h+='<div style="font-weight:800;color:#0C447C;margin-bottom:3px">✓ '+nC+' nombre(s) reconocidos del plantel</div>'+
+          Object.keys(corregidos).slice(0,6).map(function(k){
+            return '<div style="color:#40546e">«'+_h(k)+'» → <b>'+_h(corregidos[k])+'</b></div>';
+          }).join('')+(nC>6?'<div style="color:#7a8ba0">y '+(nC-6)+' más</div>':'');
+      }
+      if(nN){
+        h+='<div style="font-weight:800;color:#B26A00;margin:5px 0 3px">⚠ '+nN+' nombre(s) sin coincidencia en Perfiles</div>'+
+          Object.keys(nuevos).slice(0,6).map(function(k){
+            var sug=nuevos[k];
+            return '<div style="color:#7a6338">«'+_h(k)+'»'+
+              (sug?(' · ¿es <b>'+_h(sug)+'</b>? <button onclick="csvFixName(\''+_h(k).replace(/'/g,"\\'")+'\',\''+_h(sug).replace(/'/g,"\\'")+'\')" style="border:1px solid #1D9E75;background:#fff;color:#1D9E75;border-radius:10px;padding:1px 8px;font-size:9.5px;font-weight:700;cursor:pointer;margin-left:4px">sí, unificar</button>'):
+                   ' <span style="color:#a89878">se cargará como jugador nuevo</span>')+'</div>';
+          }).join('')+(nN>6?'<div style="color:#a89878">y '+(nN-6)+' más</div>':'');
+      }
+      h+='</div>';
+      stat.insertAdjacentHTML('afterend', h);
+    }
+  }catch(e){ console.warn('[CSV] aviso de nombres:',e); }
   stat.style.color=dups?'#EF9F27':'#1D9E75';
   pw.style.display='';
   const catF=document.getElementById('csv-cat').value;
