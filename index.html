@@ -14814,16 +14814,19 @@ window.planCmpResetRoles=planCmpResetRoles;
 // ── CARGA REAL por microciclo ──
 // Suma las sesiones de GPS del microciclo. El partido se cuenta UNA sola vez:
 // si hay sesión de GPS de ese día se usa esa; si no, el registro del fixture.
-var PLAN_CMP_METRICS=[
-  {k:'mts',   lbl:'Distancia',        unit:'m',  dec:0},
-  {k:'hsr',   lbl:'18–21 km/h',       unit:'m',  dec:0},
-  {k:'h2',    lbl:'21–25 km/h',       unit:'m',  dec:0},
-  {k:'h25',   lbl:'+25 km/h',         unit:'m',  dec:0},
-  {k:'acc',   lbl:'Aceleraciones',    unit:'',   dec:0},
-  {k:'dcc',   lbl:'Desaceleraciones', unit:'',   dec:0},
-  {k:'min',   lbl:'Minutos',          unit:'′',  dec:0}
+// v180: nombre propio, para no pisar PLAN_CMP_METRICS del comparativo por
+// planificación, que sigue existiendo y se usa en el gráfico de líneas.
+var PC_METRICS=[
+  {k:'mts',   lbl:'Distancia',        unit:'m',  dec:0, color:'#304483'},
+  {k:'hsr',   lbl:'18–21 km/h',       unit:'m',  dec:0, color:'#2E7D32'},
+  {k:'h2',    lbl:'21–25 km/h',       unit:'m',  dec:0, color:'#6A1B9A'},
+  {k:'h25',   lbl:'+25 km/h',         unit:'m',  dec:0, color:'#E65100'},
+  {k:'acc',   lbl:'Aceleraciones',    unit:'',   dec:0, color:'#BF360C'},
+  {k:'dcc',   lbl:'Desaceleraciones', unit:'',   dec:0, color:'#880E4F'},
+  {k:'rhie',  lbl:'RHIE',             unit:'',   dec:0, color:'#37474F'},
+  {k:'min',   lbl:'Minutos',          unit:'′',  dec:0, color:'#0277BD'}
 ];
-window.PLAN_CMP_METRICS=PLAN_CMP_METRICS;
+window.PC_METRICS=PC_METRICS;
 
 function _pcVal(p,k){
   if(!p)return 0;
@@ -14842,7 +14845,7 @@ function planCmpRealData(weekName){
     porJugador:{}, dias:[], roles:info.roles, origen:info.origen,
     match:info.match, ajustes:info.ajustes, fuentes:{gps:0,partido:0}
   };
-  PLAN_CMP_METRICS.forEach(function(m){
+  PC_METRICS.forEach(function(m){
     out.porRol.tit[m.k]=0; out.porRol.sup[m.k]=0; out.porRol.todos[m.k]=0;
   });
   var diasVistos={};
@@ -14852,11 +14855,2751 @@ function planCmpRealData(weekName){
     var rol=info.roles[nk]||'nc';
     if(!out.porJugador[nk]){
       out.porJugador[nk]={name:nombre, rol:rol, sesiones:0};
-      PLAN_CMP_METRICS.forEach(function(m){ out.porJugador[nk][m.k]=0; });
+      PC_METRICS.forEach(function(m){ out.porJugador[nk][m.k]=0; });
     }
     out.porJugador[nk].rol=rol;
     out.porJugador[nk].sesiones++;
+    PC_METRICS.forEach(function(m){
+      var v=_pcVal(p,m.k);
+      out.porJugador[nk][m.k]+=v;
+      out.porRol.todos[m.k]+=v;
+      if(rol==='tit') out.porRol.tit[m.k]+=v;
+      else if(rol==='sup') out.porRol.sup[m.k]+=v;
+    });
+    if(!diasVistos[fecha]) diasVistos[fecha]={fecha:fecha, dia:dia, esPartido:esPartido, n:0};
+    diasVistos[fecha].n++;
+    if(esPartido) diasVistos[fecha].esPartido=true;
+  };
+  // 1) Sesiones de GPS del microciclo
+  var fechasGps={};
+  (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){
+    if(!s||!s.week)return;
+    var mismoMc=(typeof cargaWeekKey==='function')
+      ? (cargaWeekKey(s.week)===info.key)
+      : (s.week===weekName);
+    if(!mismoMc)return;
+    var f=String(s.fecha||'').slice(0,10);
+    var esMD=/^MD$/i.test(String(s.day||'').trim());
+    if(f) fechasGps[f]=true;
+    (s.players||[]).forEach(function(p){ sumar(p.name, p, esMD, f, s.day); });
+    out.fuentes.gps++;
+  });
+  // 2) Partido DE ESTE microciclo (no el anterior, que sólo define los roles).
+  // Se suma únicamente si ese día no tiene sesión de GPS, para no contarlo dos veces.
+  try{
+    var rango=null;
+    if(typeof cargaMicroWeeksByDate==='function'){
+      var wk=cargaMicroWeeksByDate().find(function(w){
+        return (typeof cargaWeekKey==='function')?(cargaWeekKey(w.week)===info.key):(w.week===weekName);
+      });
+      // Rango REAL del microciclo, no el extendido: el extendido llega hasta
+      // la semana anterior y arrastraría el partido previo, que ya pertenece
+      // al microciclo pasado.
+      if(wk) rango={ini:wk.start, fin:wk.end};
+    }
+    if(!rango){
+      // Sin rango declarado: usar el que abarcan las propias sesiones de GPS
+      var fs=Object.keys(fechasGps).sort();
+      if(fs.length) rango={ini:fs[0], fin:fs[fs.length-1]};
+    }
+    // El partido suele cerrar el microciclo y puede no tener GPS, así que el
+    // rango se extiende hasta el día anterior al microciclo siguiente.
+    if(rango){
+      var sig=null;
+      try{
+        (typeof cargaMicroWeeksByDate==='function'?cargaMicroWeeksByDate():[]).forEach(function(w){
+          if(w.start>rango.ini && (!sig||w.start<sig)) sig=w.start;
+        });
+      }catch(e){}
+      var tope=(function(){
+        var dt=new Date(rango.fin+'T00:00:00');
+        dt.setDate(dt.getDate()+4);
+        return dt.toISOString().slice(0,10);
+      })();
+      if(sig){
+        var previo=(function(){
+          var dt=new Date(sig+'T00:00:00');
+          dt.setDate(dt.getDate()-1);
+          return dt.toISOString().slice(0,10);
+        })();
+        tope=(previo<tope)?previo:tope;
+      }
+      if(tope>rango.fin) rango.fin=tope;
+    }
+    if(rango){
+      (typeof MATCHES!=='undefined'?MATCHES:[]).forEach(function(m){
+        if(!m||!m.fecha)return;
+        var fm=String(m.fecha).slice(0,10);
+        if(fm<rango.ini||fm>rango.fin)return;     // fuera del microciclo
+        if(fechasGps[fm])return;                   // ya viene del GPS
+        (m.players||[]).forEach(function(p){ sumar(p.name, p, true, fm, 'MD'); });
+        out.fuentes.partido++;
+      });
+    }
+  }catch(e){}
+  // Contar jugadores por rol
+  Object.keys(out.porJugador).forEach(function(nk){
+    var r=out.porJugador[nk].rol;
+    out.porRol.todos.n++;
+    if(r==='tit') out.porRol.tit.n++;
+    else if(r==='sup') out.porRol.sup.n++;
+  });
+  out.dias=Object.values(diasVistos).sort(function(a,b){ return String(a.fecha).localeCompare(String(b.fecha)); });
+  return out;
+}
+window.planCmpRealData=planCmpRealData;
+
+// Promedio por jugador de un rol (lo comparable entre microciclos)
+function planCmpPromedio(datos, rol, metrica){
+  var b=datos.porRol[rol];
+  if(!b||!b.n)return null;
+  return b[metrica]/b.n;
+}
+window.planCmpPromedio=planCmpPromedio;
+
+// Serie de un jugador a lo largo de los microciclos, con el rol que tuvo en cada uno
+function planCmpJugadorSerie(nombre, weeks){
+  var nk=_pcNorm(nombre);
+  return (weeks||[]).map(function(w){
+    var d=planCmpRealData(w);
+    var j=d.porJugador[nk];
+    return {week:w, rol:j?j.rol:null, datos:j||null};
+  });
+}
+function planSwitchSubtab(tab){
+  var subtabs = ['weeks','compare','micro'];
+  subtabs.forEach(function(t){
+    var btn = document.getElementById('plan-subtab-'+t);
+    var pane = document.getElementById('plan-tab-'+t);
+    var isActive = (t===tab);
+    if(btn){
+      btn.style.borderBottom = '3px solid '+(isActive?'#0D1B2A':'transparent');
+      btn.style.color = isActive?'#0D1B2A':'#666';
+    }
+    if(pane) pane.style.display = isActive?'':'none';
+  });
+  // v179: dibujar la comparativa con datos reales al entrar
+  if(tab==='compare'){
+    try{ if(typeof planCmpRender==='function') planCmpRender(); }
+    catch(e){ console.warn('[Comparativo] ', e); }
+  }
+  // El botón "Microciclos anteriores" solo se muestra en la subpestaña de planificación semanal
+  var prevBtn = document.getElementById('plan-prev-toggle-btn');
+  if(prevBtn){
+    var hasPrev = (typeof PLAN_WEEKS!=='undefined' && PLAN_WEEKS.length > 1);
+    prevBtn.style.display = (tab==='weeks' && hasPrev) ? '' : 'none';
+  }
+  if(tab==='weeks'){
+    // Al entrar a "Planificación semanal", abrir directamente el editor de la última
+    // semana creada — si hay alguna y no se está editando ya otra
+    try{
+      if(typeof PLAN_WEEKS!=='undefined' && PLAN_WEEKS.length && !_planEditData){
+        // Encontrar la más reciente
+        var lastIdx = 0, lastCreated = '';
+        PLAN_WEEKS.forEach(function(w, i){
+          if((w.created||'') > lastCreated){ lastCreated = w.created||''; lastIdx = i; }
+        });
+        planEditWeek(lastIdx);
+      }
+    }catch(e){ console.warn('Auto-open last week error:', e); }
+  }
+  if(tab==='compare') planCmpRender();
+  if(tab==='micro'){
+    // Mover el contenido de view-micro al slot la primera vez, después refrescar
+    _planMoveMicroToSlot();
+    try{
+      if(typeof mcRebuildWeekSel==='function') mcRebuildWeekSel();
+      if(typeof mcRebuildLoadMetricSelector==='function') mcRebuildLoadMetricSelector();
+      if(typeof mcRenderWeek==='function') mcRenderWeek();
+      if(typeof mcRenderLoad==='function') mcRenderLoad();
+      if(typeof mcRenderBandConfig==='function') mcRenderBandConfig();
+      if(typeof mcEstInit==='function') mcEstInit();
+    }catch(e){ console.warn('Microciclo render error:', e); }
+  }
+}
+window.planSwitchSubtab = planSwitchSubtab;
+
+// Build the per-week reference (used to compute % vs match for each week)
+// Mirrors the saved week.ref mode, but doesn't depend on DOM (works outside editor)
+function planCmpGetWeekRef(week){
+  // Field is `refMode` (correct name); some old code/tests used `ref`. Accept both.
+  var mode = (week && (week.refMode || week.ref)) || 'current';
+  // 90-min normalization
+  if(!mode || mode==='current'){
+    return {mts:REF.mts*90, hsr:REF.hsr*90, h2:REF.h2*90, h25:REF.h25*90,
+            acc:REF.acc*90, dcc:REF.dcc*90, rhie:REF.rhie*90};
+  }
+  var sorted = [].concat(MATCHES||[]).sort(function(a,b){return (a.fecha||'').localeCompare(b.fecha||'');});
+  if(!sorted.length){
+    return {mts:REF.mts*90, hsr:REF.hsr*90, h2:REF.h2*90, h25:REF.h25*90,
+            acc:REF.acc*90, dcc:REF.dcc*90, rhie:REF.rhie*90};
+  }
+  var ms = mode==='last1' ? sorted.slice(-1)
+         : mode==='last3' ? sorted.slice(-3)
+         : sorted;
+  function avg(k){return ms.reduce(function(a,m){return a+(m[k]||0);},0)/ms.length;}
+  return {mts:avg('mts'), hsr:avg('hsr'), h2:avg('h2'), h25:avg('h25'),
+          acc:avg('acc'), dcc:avg('dcc'), rhie:avg('rhie')};
+}
+
+// Sum a full week's volumes split by group
+// Returns {Todos:{mts,hsr,...,totalMins,mts_min_avg}, <groupName>:{...}}
+function planCmpSumWeekByGroup(week){
+  if(!week || !week.days) return {};
+  var subGroups = ((week.groups||[]).filter(function(g){return g.id!=='todos';})
+                                    .map(function(g){return g.name;}));
+  var result = {Todos: _planCmpMkBucket()};
+  subGroups.forEach(function(g){result[g] = _planCmpMkBucket();});
+
+  week.days.forEach(function(day){
+    if(typeof planMigrateDay==='function') planMigrateDay(day);
+    var dgs = planSumDayByGroup(day, subGroups);
+    Object.keys(dgs).forEach(function(g){
+      if(!result[g]) result[g] = _planCmpMkBucket();
+      var src = dgs[g];
+      result[g].mts  += src.mts||0;
+      result[g].hsr  += src.hsr||0;
+      result[g].h2   += src.h2||0;
+      result[g].h25  += src.h25||0;
+      result[g].acc  += src.acc||0;
+      result[g].dcc  += src.dcc||0;
+      result[g].rhie += src.rhie||0;
+      result[g].totalMins += src.totalMins||0;
+    });
+  });
+
+  // Compute mts_min_avg = total mts / total mins per group
+  Object.keys(result).forEach(function(g){
+    var b = result[g];
+    b.mts_min = b.totalMins>0 ? b.mts/b.totalMins : 0;
+  });
+
+  return result;
+}
+function _planCmpMkBucket(){
+  return {mts:0,hsr:0,h2:0,h25:0,acc:0,dcc:0,rhie:0,totalMins:0,mts_min:0};
+}
+
+// Find groups that exist in at least 2 weeks (by exact name)
+function planCmpFindCommonGroups(){
+  var counts = {Todos: (PLAN_WEEKS||[]).length}; // Todos is always present
+  (PLAN_WEEKS||[]).forEach(function(w){
+    ((w.groups||[]).filter(function(g){return g.id!=='todos';}).forEach(function(g){
+      counts[g.name] = (counts[g.name]||0) + 1;
+    }));
+  });
+  // Filter: must be in ≥2 weeks
+  return Object.keys(counts).filter(function(g){return counts[g]>=2 || g==='Todos';})
+                            .sort(function(a,b){return a==='Todos'?-1:b==='Todos'?1:a.localeCompare(b,'es');});
+}
+
+// Group colors — use the saved color from the first week that has the group; fall back to defaults
+function planCmpGetGroupColor(groupName){
+  if(groupName==='Todos') return '#0C447C';
+  for(var i=0;i<(PLAN_WEEKS||[]).length;i++){
+    var g = (PLAN_WEEKS[i].groups||[]).find(function(gg){return gg.name===groupName;});
+    if(g && g.color) return g.color;
+  }
+  return '#666';
+}
+
+// State (persisted)
+function planCmpGetState(){
+  var s = JSON.parse(localStorage.getItem('plan_cmp_state')||'null');
+  if(!s) s = {mode:'abs', metric:'mts', selectedGroups:['Todos']};
+  if(!s.mode) s.mode = 'abs';
+  if(!s.metric) s.metric = 'mts';
+  if(!s.selectedGroups || !s.selectedGroups.length) s.selectedGroups = ['Todos'];
+  return s;
+}
+function planCmpSetState(s){ localStorage.setItem('plan_cmp_state', JSON.stringify(s)); }
+
+// ── MAIN RENDER ────────────────────────────────────────────────────────────
+function planCmpRender(){
+  var cont = document.getElementById('plan-cmp-container');
+  if(!cont) return;
+
+  if(!(PLAN_WEEKS||[]).length){
+    cont.innerHTML = '<div style="padding:30px;text-align:center;color:#888;font-size:11px;background:#fafafa;border:1px dashed #ccc;border-radius:8px">No hay semanas guardadas para comparar. Creá al menos 2 semanas en "📅 Semanas guardadas".</div>';
+    return;
+  }
+  if(PLAN_WEEKS.length < 2){
+    cont.innerHTML = '<div style="padding:30px;text-align:center;color:#888;font-size:11px;background:#fafafa;border:1px dashed #ccc;border-radius:8px">Solo hay <strong>1 semana guardada</strong>. Necesitás al menos 2 para comparar.</div>';
+    return;
+  }
+
+  var state = planCmpGetState();
+  var commonGroups = planCmpFindCommonGroups();
+  // Validate selected groups against current available
+  state.selectedGroups = state.selectedGroups.filter(function(g){return commonGroups.indexOf(g)>=0;});
+  if(!state.selectedGroups.length) state.selectedGroups = ['Todos'];
+  planCmpSetState(state);
+
+  // Toggle absolutos / % vs partido
+  var toggle =
+    '<div style="display:inline-flex;background:#f0f0f0;border-radius:6px;padding:2px;font-size:11px">'+
+      '<button onclick="planCmpSetMode(\'abs\')" style="border:none;background:'+(state.mode==='abs'?'#0D1B2A':'transparent')+';color:'+(state.mode==='abs'?'#fff':'#666')+';padding:5px 12px;border-radius:4px;cursor:pointer;font-weight:600">Valores absolutos</button>'+
+      '<button onclick="planCmpSetMode(\'pct\')" style="border:none;background:'+(state.mode==='pct'?'#0D1B2A':'transparent')+';color:'+(state.mode==='pct'?'#fff':'#666')+';padding:5px 12px;border-radius:4px;cursor:pointer;font-weight:600">% vs partido</button>'+
+    '</div>';
+
+  // Group selector (multi)
+  var groupChips = commonGroups.map(function(g){
+    var sel = state.selectedGroups.indexOf(g)>=0;
+    var col = planCmpGetGroupColor(g);
+    return '<button onclick="planCmpToggleGroup(\''+g.replace(/'/g,"\\'")+'\')" '+
+      'style="border:1.5px solid '+col+';background:'+(sel?col:'#fff')+';color:'+(sel?'#fff':col)+';'+
+      'padding:4px 11px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;margin:0 4px 4px 0">'+
+      (sel?'✓ ':'')+g+'</button>';
+  }).join('');
+
+  var groupsInfo = commonGroups.length < 2
+    ? '<span style="font-size:10px;color:#888;margin-left:6px">Solo "Todos" aparece en común. Para comparar otros grupos, usá el mismo nombre exacto en varias semanas.</span>'
+    : '<span style="font-size:10px;color:#888;margin-left:6px">'+commonGroups.length+' grupos comunes (en ≥2 semanas)</span>';
+
+  // Metric selector for the chart
+  var metricOpts = PLAN_CMP_METRICS.map(function(m){
+    return '<option value="'+m.k+'" '+(m.k===state.metric?'selected':'')+'>'+m.lbl+'</option>';
+  }).join('');
+
+  cont.innerHTML =
+    '<div style="background:#f0f5ff;border:1px solid #b3ccf5;border-radius:7px;padding:10px 14px;margin-bottom:12px;font-size:11px;color:#0C447C">'+
+      'Comparativa global de cargas semanales. Cambia entre <strong>valores absolutos</strong> y <strong>% vs partido</strong>. '+
+      'Los grupos que no estén en al menos 2 semanas con el mismo nombre no aparecen.'+
+    '</div>'+
+    '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
+      toggle+
+      '<div style="font-size:10px;color:#666">'+(PLAN_WEEKS||[]).length+' semanas guardadas</div>'+
+    '</div>'+
+    '<div style="margin-bottom:10px">'+
+      '<div style="font-size:11px;font-weight:700;color:#555;margin-bottom:4px">Grupos a comparar:</div>'+
+      '<div style="display:flex;flex-wrap:wrap;align-items:center">'+groupChips+groupsInfo+'</div>'+
+    '</div>'+
+    // Two columns: table + chart
+    '<div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:14px;align-items:start" id="plan-cmp-grid">'+
+      '<div id="plan-cmp-table-wrap" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px;overflow-x:auto;max-height:560px;overflow-y:auto"></div>'+
+      '<div id="plan-cmp-chart-wrap" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px;position:sticky;top:8px">'+
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">'+
+          '<label style="font-size:11px;font-weight:600;color:#333">Métrica gráfico:</label>'+
+          '<select id="plan-cmp-metric" onchange="planCmpChangeMetric()" style="font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;background:#fff">'+metricOpts+'</select>'+
+        '</div>'+
+        '<canvas id="plan-cmp-chart" style="max-height:420px"></canvas>'+
+        '<div id="plan-cmp-disim" style="margin-top:10px;font-size:10px;color:#666;background:#fafafa;border-radius:5px;padding:7px 9px"></div>'+
+      '</div>'+
+    '</div>'+
+    // Responsive: stack on narrow screens
+    '<style>@media (max-width:880px){#plan-cmp-grid{grid-template-columns:1fr !important;}#plan-cmp-chart-wrap{position:static !important;}}</style>';
+
+  planCmpRenderTable();
+  planCmpRenderChart();
+}
+window.planCmpRender = planCmpRender;
+
+function planCmpSetMode(mode){
+  var s = planCmpGetState();
+  s.mode = mode;
+  planCmpSetState(s);
+  planCmpRender();
+}
+window.planCmpSetMode = planCmpSetMode;
+
+function planCmpToggleGroup(group){
+  var s = planCmpGetState();
+  var idx = s.selectedGroups.indexOf(group);
+  if(idx>=0) s.selectedGroups.splice(idx,1);
+  else s.selectedGroups.push(group);
+  if(!s.selectedGroups.length) s.selectedGroups = ['Todos'];
+  planCmpSetState(s);
+  planCmpRender();
+}
+window.planCmpToggleGroup = planCmpToggleGroup;
+
+function planCmpChangeMetric(){
+  var sel = document.getElementById('plan-cmp-metric');
+  if(!sel) return;
+  var s = planCmpGetState();
+  s.metric = sel.value;
+  planCmpSetState(s);
+  planCmpRenderChart();
+}
+window.planCmpChangeMetric = planCmpChangeMetric;
+
+// ── Render the matrix table ───────────────────────────────────────────────
+function planCmpRenderTable(){
+  var wrap = document.getElementById('plan-cmp-table-wrap');
+  if(!wrap) return;
+  var state = planCmpGetState();
+  var isPct = state.mode==='pct';
+  var selectedGroups = state.selectedGroups;
+
+  // Sort weeks: by name (natural/numeric), tie-break by created date
+  var weeks = [].concat(PLAN_WEEKS).sort(planCmpCompareWeeks);
+
+  // Precompute sums + refs for each week
+  var weekData = weeks.map(function(w){
+    return {
+      week: w,
+      ref: planCmpGetWeekRef(w),
+      sums: planCmpSumWeekByGroup(w)
+    };
+  });
+
+  function fmt(v, k){
+    if(v==null||!isFinite(v)) return '<span style="color:#bbb">—</span>';
+    if(isPct) return Math.round(v)+'%';
+    if(k==='mts_min') return v.toFixed(1);
+    if(k==='rhie') return v.toFixed(1);
+    return Math.round(v).toLocaleString('es-AR');
+  }
+
+  function getCell(wd, groupName, metricK){
+    var bucket = wd.sums[groupName];
+    if(!bucket) return null; // group not present this week
+    var raw = bucket[metricK]||0;
+    if(!isPct) return raw;
+    // %: need ref. Special case mts_min: ref is REF.mts (per minute)
+    if(metricK==='mts_min'){
+      var refMtsMin = (wd.ref.mts||0)/90;
+      return refMtsMin>0 ? raw/refMtsMin*100 : null;
+    }
+    var refV = wd.ref[metricK]||0;
+    return refV>0 ? raw/refV*100 : null;
+  }
+
+  function deltaCell(prevV, curV){
+    if(prevV==null || curV==null || prevV===0) return '<span style="color:#bbb;font-size:9px">—</span>';
+    var d = (curV-prevV)/Math.abs(prevV)*100;
+    var col = Math.abs(d)<=15 ? '#1D9E75' : Math.abs(d)<=30 ? '#EF9F27' : '#E24B4A';
+    var sign = d>=0?'+':'';
+    return '<span style="color:'+col+';font-size:9px;font-weight:700">'+sign+d.toFixed(0)+'%</span>';
+  }
+
+  // Build one section per selected group
+  var html = '<div style="font-size:11px;font-weight:700;color:#333;margin-bottom:8px">📋 Tabla comparativa ('+(isPct?'% vs partido':'absolutos')+')</div>';
+
+  selectedGroups.forEach(function(groupName){
+    var col = planCmpGetGroupColor(groupName);
+    // Per-metric: collect values across weeks
+    var perMetric = {};
     PLAN_CMP_METRICS.forEach(function(m){
+      perMetric[m.k] = weekData.map(function(wd){return getCell(wd, groupName, m.k);});
+    });
+    // CV (coefficient of variation) per metric = stddev / mean × 100
+    function cv(arr){
+      var valid = arr.filter(function(v){return v!=null && isFinite(v);});
+      if(valid.length<2) return null;
+      var mean = valid.reduce(function(a,b){return a+b;},0)/valid.length;
+      if(mean===0) return null;
+      var variance = valid.reduce(function(a,v){return a+Math.pow(v-mean,2);},0)/valid.length;
+      var sd = Math.sqrt(variance);
+      return sd/Math.abs(mean)*100;
+    }
+
+    html +=
+      '<div style="margin:14px 0 6px;display:flex;align-items:center;gap:8px">'+
+        '<div style="width:6px;height:18px;background:'+col+';border-radius:3px"></div>'+
+        '<div style="font-size:12px;font-weight:700;color:'+col+'">'+groupName+'</div>'+
+        '<div style="font-size:9px;color:#888">'+weeks.length+' semanas</div>'+
+      '</div>'+
+      '<table style="width:100%;border-collapse:collapse;font-size:10.5px;background:#fff;border:1px solid #eee">'+
+        '<thead>'+
+          '<tr style="background:#f7f7f7">'+
+            '<th style="padding:5px 7px;text-align:left;border-bottom:1px solid #ddd;position:sticky;left:0;background:#f7f7f7;z-index:1">Métrica</th>'+
+            weeks.map(function(w,i){
+              return '<th style="padding:5px 7px;text-align:right;border-bottom:1px solid #ddd;min-width:80px;font-weight:600" title="'+(w.name||'').replace(/"/g,'&quot;')+'">'+
+                '<div style="font-size:9px;color:#888;font-weight:600">'+(i+1)+'</div>'+
+                '<div style="font-size:10px;color:#333;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(w.name||'sin nombre').slice(0,16)+'</div>'+
+              '</th>';
+            }).join('')+
+            '<th style="padding:5px 7px;text-align:center;border-bottom:1px solid #ddd;background:#eef5ff;color:#0C447C;font-weight:700" title="Coeficiente de Variación: qué tan disímiles fueron las semanas en esta métrica">CV%</th>'+
+          '</tr>'+
+        '</thead>'+
+        '<tbody>'+
+          PLAN_CMP_METRICS.map(function(m){
+            var arr = perMetric[m.k];
+            // skip metric row if all values are null/0
+            var hasData = arr.some(function(v){return v!=null && v!==0;});
+            if(!hasData) return '';
+            var cvVal = cv(arr);
+            var cvCol = cvVal==null?'#bbb':cvVal<15?'#1D9E75':cvVal<30?'#EF9F27':'#E24B4A';
+            return '<tr style="border-bottom:1px solid #f0f0f0">'+
+              '<td style="padding:5px 7px;font-weight:600;color:'+m.color+';position:sticky;left:0;background:#fff;border-right:1px solid #f0f0f0">'+m.lbl+'</td>'+
+              arr.map(function(v,wi){
+                var prev = wi>0 ? arr[wi-1] : null;
+                return '<td style="padding:5px 7px;text-align:right;vertical-align:top">'+
+                  '<div style="font-weight:600;color:#0D1B2A">'+fmt(v,m.k)+'</div>'+
+                  '<div style="margin-top:1px">'+deltaCell(prev,v)+'</div>'+
+                '</td>';
+              }).join('')+
+              '<td style="padding:5px 7px;text-align:center;background:#fafbff;color:'+cvCol+';font-weight:700">'+(cvVal==null?'—':cvVal.toFixed(0)+'%')+'</td>'+
+            '</tr>';
+          }).filter(Boolean).join('')+
+        '</tbody>'+
+      '</table>';
+  });
+
+  html += '<div style="margin-top:10px;font-size:9.5px;color:#888;line-height:1.6">'+
+    '<strong>Δ (delta verde/ámbar/rojo)</strong>: variación vs semana anterior. Verde ≤15%, ámbar 15-30%, rojo &gt;30%. '+
+    '<strong>CV%</strong>: coeficiente de variación entre todas las semanas para esa métrica — qué tan disímil fue el manejo de esa métrica a lo largo del macrociclo. CV bajo (verde) = consistencia.'+
+  '</div>';
+
+  // ── Ratio entre grupos (solo si hay 2+ grupos seleccionados) ────────────
+  if(selectedGroups.length >= 2){
+    // Use the first selected group as baseline (100%), express others as % of baseline
+    var baseline = selectedGroups[0];
+    var others = selectedGroups.slice(1);
+
+    html +=
+      '<div style="margin:18px 0 6px;display:flex;align-items:center;gap:8px;padding-top:10px;border-top:2px solid #ddd">'+
+        '<div style="width:6px;height:18px;background:#0D1B2A;border-radius:3px"></div>'+
+        '<div style="font-size:12px;font-weight:700;color:#0D1B2A">⚖️ Ratio entre grupos</div>'+
+        '<div style="font-size:10px;color:#666">Base: <strong style="color:'+planCmpGetGroupColor(baseline)+'">'+baseline+'</strong> = 100%. Otros grupos como % de la base.</div>'+
+      '</div>';
+
+    others.forEach(function(otherG){
+      var baseCol = planCmpGetGroupColor(baseline);
+      var otherCol = planCmpGetGroupColor(otherG);
+      html +=
+        '<div style="margin:8px 0 4px;display:flex;align-items:center;gap:6px;font-size:11px">'+
+          '<span style="color:'+otherCol+';font-weight:700">'+otherG+'</span>'+
+          '<span style="color:#888">vs</span>'+
+          '<span style="color:'+baseCol+';font-weight:600">'+baseline+'</span>'+
+        '</div>'+
+        '<table style="width:100%;border-collapse:collapse;font-size:10.5px;background:#fff;border:1px solid #eee">'+
+          '<thead>'+
+            '<tr style="background:#f7f7f7">'+
+              '<th style="padding:5px 7px;text-align:left;border-bottom:1px solid #ddd;position:sticky;left:0;background:#f7f7f7;z-index:1">Métrica</th>'+
+              weeks.map(function(w,i){
+                return '<th style="padding:5px 7px;text-align:right;border-bottom:1px solid #ddd;min-width:60px" title="'+(w.name||'').replace(/"/g,'&quot;')+'">'+
+                  '<div style="font-size:9px;color:#888">'+(i+1)+'</div>'+
+                '</th>';
+              }).join('')+
+              '<th style="padding:5px 7px;text-align:center;border-bottom:1px solid #ddd;background:#eef5ff;color:#0C447C;font-weight:700">Promedio</th>'+
+            '</tr>'+
+          '</thead>'+
+          '<tbody>'+
+            PLAN_CMP_METRICS.map(function(m){
+              var ratios = weekData.map(function(wd){
+                var base = getCell(wd, baseline, m.k);
+                var other = getCell(wd, otherG, m.k);
+                if(base==null || other==null || base===0) return null;
+                return other/base*100;
+              });
+              // Skip row if no data
+              if(!ratios.some(function(r){return r!=null;})) return '';
+              var validRatios = ratios.filter(function(r){return r!=null && isFinite(r);});
+              var avgRatio = validRatios.length>0
+                ? validRatios.reduce(function(a,b){return a+b;},0)/validRatios.length
+                : null;
+              var avgCol = avgRatio==null?'#bbb'
+                : Math.abs(avgRatio-100)<=15?'#1D9E75'
+                : Math.abs(avgRatio-100)<=35?'#EF9F27':'#E24B4A';
+              return '<tr style="border-bottom:1px solid #f0f0f0">'+
+                '<td style="padding:5px 7px;font-weight:600;color:'+m.color+';position:sticky;left:0;background:#fff;border-right:1px solid #f0f0f0">'+m.lbl+'</td>'+
+                ratios.map(function(r){
+                  if(r==null) return '<td style="padding:5px 7px;text-align:right;color:#bbb">—</td>';
+                  var col = Math.abs(r-100)<=15?'#1D9E75':Math.abs(r-100)<=35?'#EF9F27':'#E24B4A';
+                  return '<td style="padding:5px 7px;text-align:right;color:'+col+';font-weight:600">'+Math.round(r)+'%</td>';
+                }).join('')+
+                '<td style="padding:5px 7px;text-align:center;background:#fafbff;color:'+avgCol+';font-weight:700">'+(avgRatio==null?'—':Math.round(avgRatio)+'%')+'</td>'+
+              '</tr>';
+            }).filter(Boolean).join('')+
+          '</tbody>'+
+        '</table>';
+    });
+
+    html += '<div style="margin-top:6px;font-size:9.5px;color:#888;line-height:1.5">'+
+      'Cada celda = (valor del grupo / valor de '+baseline+') × 100. '+
+      'Verde si está ±15% de la base, ámbar ±35%, rojo más. '+
+      'Útil para ver si dos grupos recibieron cargas similares en cada métrica y semana.'+
+    '</div>';
+  }
+
+  wrap.innerHTML = html;
+}
+
+// ── Render the line chart ─────────────────────────────────────────────────
+function planCmpRenderChart(){
+  var canvas = document.getElementById('plan-cmp-chart');
+  if(!canvas || typeof Chart==='undefined') return;
+  // Destroy existing chart
+  if(window._planCmpChart){
+    try{window._planCmpChart.destroy();}catch(e){}
+    window._planCmpChart = null;
+  }
+
+  var state = planCmpGetState();
+  var metric = PLAN_CMP_METRICS.find(function(m){return m.k===state.metric;}) || PLAN_CMP_METRICS[0];
+  var isPct = state.mode==='pct';
+
+  var weeks = [].concat(PLAN_WEEKS).sort(planCmpCompareWeeks);
+  var weekData = weeks.map(function(w){
+    return {week:w, ref:planCmpGetWeekRef(w), sums:planCmpSumWeekByGroup(w)};
+  });
+
+  function getVal(wd, groupName, k){
+    var b = wd.sums[groupName];
+    if(!b) return null;
+    var raw = b[k]||0;
+    if(!isPct) return raw;
+    if(k==='mts_min'){
+      var refMtsMin = (wd.ref.mts||0)/90;
+      return refMtsMin>0 ? raw/refMtsMin*100 : null;
+    }
+    var refV = wd.ref[k]||0;
+    return refV>0 ? raw/refV*100 : null;
+  }
+
+  // One dataset per selected group
+  var datasets = state.selectedGroups.map(function(g){
+    var col = planCmpGetGroupColor(g);
+    return {
+      label: g,
+      data: weekData.map(function(wd){return getVal(wd, g, metric.k);}),
+      borderColor: col,
+      backgroundColor: col+'22',
+      borderWidth: 2.5,
+      tension: 0.25,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      fill: false,
+      spanGaps: true
+    };
+  });
+
+  var labels = weeks.map(function(w,i){
+    var n = (w.name||'Semana '+(i+1)).slice(0,20);
+    return n;
+  });
+
+  window._planCmpChart = new Chart(canvas.getContext('2d'), {
+    type:'line',
+    data:{labels:labels, datasets:datasets},
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'bottom', labels:{font:{size:10}, boxWidth:14, padding:8}},
+        title:{display:true, text:metric.lbl+(isPct?' — % vs partido':' — absoluto'), font:{size:11,weight:'bold'}, color:'#333'},
+        tooltip:{callbacks:{
+          label:function(ctx){
+            var v = ctx.parsed.y;
+            if(v==null) return ctx.dataset.label+': —';
+            var txt = ctx.dataset.label+': ';
+            if(isPct) txt += Math.round(v)+'%';
+            else if(metric.k==='mts_min'||metric.k==='rhie') txt += v.toFixed(1);
+            else txt += Math.round(v).toLocaleString('es-AR');
+            return txt;
+          },
+          afterLabel:function(ctx){
+            // delta vs previous week
+            var arr = ctx.dataset.data;
+            if(ctx.dataIndex===0) return '';
+            var prev = arr[ctx.dataIndex-1];
+            if(prev==null||prev===0||ctx.parsed.y==null) return '';
+            var d = (ctx.parsed.y-prev)/Math.abs(prev)*100;
+            return 'Δ vs sem. anterior: '+(d>=0?'+':'')+d.toFixed(0)+'%';
+          }
+        }}
+      },
+      scales:{
+        x:{ticks:{font:{size:9},maxRotation:35,minRotation:0}},
+        y:{
+          beginAtZero: !isPct,
+          ticks:{font:{size:10}, callback:function(v){
+            if(isPct) return v+'%';
+            if(v>=1000) return (v/1000).toFixed(1)+'k';
+            return v;
+          }}
+        }
+      }
+    }
+  });
+
+  // Build the "disimilitud global" summary below chart — two sections:
+  //   1) CV of the ACTIVE metric (varies as you change the chart metric)
+  //   2) CV total (average across all metrics, fixed regardless of active metric)
+  var disim = document.getElementById('plan-cmp-disim');
+  if(disim){
+    // Helper: CV of a single value array
+    function cvOfArr(arr){
+      var valid = arr.filter(function(v){return v!=null && isFinite(v);});
+      if(valid.length<2) return null;
+      var mean = valid.reduce(function(a,b){return a+b;},0)/valid.length;
+      if(mean===0) return null;
+      var variance = valid.reduce(function(a,v){return a+Math.pow(v-mean,2);},0)/valid.length;
+      return Math.sqrt(variance)/Math.abs(mean)*100;
+    }
+    function colorForCv(c){return c<15?'#1D9E75':c<30?'#EF9F27':'#E24B4A';}
+    function lblForCv(c){return c<15?'Muy consistente':c<30?'Variabilidad media':'Disímiles';}
+
+    // Active metric CV per group
+    var activeMetricLines = state.selectedGroups.map(function(g){
+      var vals = weekData.map(function(wd){return getVal(wd, g, metric.k);});
+      var cv = cvOfArr(vals);
+      if(cv==null) return null;
+      var col = colorForCv(cv);
+      var color = planCmpGetGroupColor(g);
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0">'+
+        '<span style="color:'+color+';font-weight:600;font-size:10px">'+g+'</span>'+
+        '<span style="font-size:10px"><strong style="color:'+col+'">'+cv.toFixed(0)+'%</strong> <span style="color:#888">'+lblForCv(cv)+'</span></span>'+
+      '</div>';
+    }).filter(Boolean).join('');
+
+    // Total CV (avg across all metrics) per group
+    var totalLines = state.selectedGroups.map(function(g){
+      var cvs = [];
+      PLAN_CMP_METRICS.forEach(function(m){
+        var vals = weekData.map(function(wd){return getVal(wd, g, m.k);});
+        var cv = cvOfArr(vals);
+        if(cv!=null) cvs.push(cv);
+      });
+      if(!cvs.length) return null;
+      var avgCv = cvs.reduce(function(a,b){return a+b;},0)/cvs.length;
+      var col = colorForCv(avgCv);
+      var color = planCmpGetGroupColor(g);
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0">'+
+        '<span style="color:'+color+';font-weight:600;font-size:10px">'+g+'</span>'+
+        '<span style="font-size:10px"><strong style="color:'+col+'">'+avgCv.toFixed(0)+'%</strong> <span style="color:#888">'+lblForCv(avgCv)+'</span></span>'+
+      '</div>';
+    }).filter(Boolean).join('');
+
+    disim.innerHTML =
+      '<div style="font-weight:700;color:#333;margin-bottom:4px;font-size:10.5px">📐 Disimilitud — métrica activa: '+metric.lbl+'</div>'+
+      (activeMetricLines || '<div style="color:#888;font-size:10px">Necesitás más semanas para calcular.</div>')+
+      '<div style="border-top:1px solid #ddd;margin:7px 0 5px"></div>'+
+      '<div style="font-weight:700;color:#666;margin-bottom:3px;font-size:10px">📊 Disimilitud total (promedio entre todas las métricas)</div>'+
+      (totalLines || '<div style="color:#888;font-size:10px">Necesitás más semanas.</div>');
+  }
+}
+window.planCmpRenderChart = planCmpRenderChart;
+
+// END Comparar semanas module
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+// Show a picker to assign parsed players to an existing match
+function plPdfAssign(players,filename,status){
+  // Store players in a window variable — avoids JSON serialization issues in onclick
+  window._plPendingPlayers=players;
+  window._plPendingFile=filename;
+
+  var sorted=getMatchesSorted();
+  var content=document.getElementById('pl-content');
+  var n=players.length;
+
+  var matchOpts=sorted.map(function(m){
+    var d=m.fecha?m.fecha.split('-').reverse().join('/'):'—';
+    var already=m.players&&m.players.length?' ✓':'';
+    return '<option value="'+m.id+'">'+m.rival+' ('+d+')'+(m.result?' '+m.result:'')+already+'</option>';
+  }).join('');
+
+  content.innerHTML=
+    '<div style="background:#fffbf0;border:1px solid #f0d080;border-radius:7px;padding:14px 16px;max-width:480px">'+
+    '<div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:6px">📄 '+filename+'</div>'+
+    '<div style="font-size:11px;color:#555;margin-bottom:8px"><strong>'+n+' jugadores</strong> leídos sin filtro de minutos.</div>'+
+    '<div style="font-size:10px;color:#888;margin-bottom:10px">'+
+      players.slice(0,6).map(function(p){return p.name.split(' ').slice(0,2).join(' ')+(p.pos?' ('+p.pos+')':'');}).join(' · ')+(n>6?' …':'')+
+    '</div>'+
+    '<label style="font-size:11px;font-weight:600;color:#333;display:block;margin-bottom:4px">¿A qué partido pertenece este PDF?</label>'+
+    '<select id="pl-assign-match" style="font-size:11px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;width:100%;margin-bottom:12px">'+
+      '<option value="">— elegir partido —</option>'+matchOpts+
+    '</select>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button class="btn bg" onclick="plPdfConfirmAssign()" style="font-size:11px;padding:6px 16px">✓ Guardar jugadores</button>'+
+      '<button class="btn bc" onclick="window._plPendingPlayers=null;plRebuild()" style="font-size:11px;padding:6px 10px">Cancelar</button>'+
+    '</div>'+
+    '<div id="pl-assign-msg" style="font-size:11px;margin-top:8px"></div>'+
+    '</div>';
+
+  status.style.color='#1D9E75';
+  status.textContent='✓ '+n+' jugadores leídos — elegí el partido y guardá.';
+}
+
+function plPdfConfirmAssign(){
+  var players=window._plPendingPlayers;
+  if(!players||!players.length){
+    var msg=document.getElementById('pl-assign-msg');
+    if(msg){msg.style.color='#E24B4A';msg.textContent='Error: no hay datos pendientes. Subí el PDF de nuevo.';}
+    return;
+  }
+  var sel=document.getElementById('pl-assign-match');
+  var msg=document.getElementById('pl-assign-msg');
+  if(!sel||!sel.value){
+    if(msg){msg.style.color='#E24B4A';msg.textContent='Elegí un partido de la lista primero.';}
+    return;
+  }
+  var matchId=parseInt(sel.value);
+  var match=MATCHES.find(function(m){return m.id===matchId;});
+  if(!match){
+    if(msg){msg.style.color='#E24B4A';msg.textContent='Partido no encontrado.';}
+    return;
+  }
+
+  // Save players to match
+  match.players=players;
+
+  // Update player profiles
+  players.forEach(function(p){
+    var key=p.name.trim().toLowerCase();
+    var ex=PLAYER_PROFILES[key]||{name:p.name.trim(),vmax:null,accmax:null,dccmax:null};
+    var locks=ex.locks||{};
+    if(!locks.vmax   && p.vmax  &&(!ex.vmax  ||p.vmax  >ex.vmax  ))ex.vmax=p.vmax;
+    if(!locks.accmax && p.accmax&&(!ex.accmax||p.accmax>ex.accmax))ex.accmax=p.accmax;
+    if(!locks.dccmax && p.dccmax&&(!ex.dccmax||p.dccmax>ex.dccmax))ex.dccmax=p.dccmax;
+    PLAYER_PROFILES[key]=ex;
+  });
+
+  saveData();
+  window._plPendingPlayers=null;
+
+  // Feedback
+  var status=document.getElementById('pl-pdf-status');
+  if(status){
+    status.style.color='#1D9E75';
+    status.textContent='✓ '+players.length+' jugadores guardados en "'+match.rival+'" ('+match.fecha.split('-').reverse().join('/')+')';
+  }
+
+  // Rebuild selectors and show the match players
+  plRebuild();
+
+  // Auto-select first player from this match
+  var pSel=document.getElementById('pl-player-sel');
+  if(pSel&&pSel.options.length>1){pSel.selectedIndex=1;plRender();}
+}
+window.plPdfConfirmAssign=plPdfConfirmAssign;
+
+function plRebuild(){
+  var all=plGetAllData();
+  var names={}, positions={};
+  all.forEach(function(r){
+    names[r.name.toLowerCase()]={display:r.name,key:r.name.toLowerCase()};
+    if(r.pos)positions[r.pos]=true;
+  });
+  var pSel=document.getElementById('pl-player-sel');
+  var posSel=document.getElementById('pl-pos-sel');
+  if(!pSel||!posSel)return;
+  // Preserve multi-select state
+  var curKeys={};
+  Array.from(pSel.selectedOptions||[]).forEach(function(o){curKeys[o.value]=true;});
+  var curPos=posSel.value;
+  pSel.innerHTML=Object.values(names).sort(function(a,b){return a.display.localeCompare(b.display);})
+    .map(function(n){return'<option value="'+n.key+'" '+(curKeys[n.key]?'selected':'')+'>'+n.display+'</option>';}).join('');
+  posSel.innerHTML='<option value="">— elegir puesto —</option>'+
+    Object.keys(positions).sort().map(function(p){return'<option value="'+p+'" '+(curPos===p?'selected':'')+'>'+p+'</option>';}).join('');
+  if(!all.length)document.getElementById('pl-content').innerHTML='<div style="color:#aaa;font-size:11px;text-align:center;padding:30px">Subí PDFs de partido para ver reportes individuales.</div>';
+}
+window.plRebuild=plRebuild;
+
+var _plCharts=[];
+function plDestroyCharts(){_plCharts.forEach(function(c){if(c)c.destroy();});_plCharts=[];}
+
+var PL_METRICS=[
+  {k:'mts',    lbl:'Distancia (m)',   color:'#304483'},
+  {k:'mts_min',lbl:'Mts/min',         color:'#0277BD'},
+  {k:'hsr',    lbl:'18-21 km/h (m)',  color:'#2E7D32'},
+  {k:'h2',     lbl:'21-25 km/h (m)',  color:'#6A1B9A'},
+  {k:'h25',    lbl:'+25 km/h (m)',    color:'#E65100'},
+  {k:'spr',    lbl:'Sprints',         color:'#F57F17'},
+  {k:'vmax',   lbl:'Vmax (km/h)',     color:'#B71C1C'},
+  {k:'acc',    lbl:'Acc +3',          color:'#BF360C'},
+  {k:'dcc',    lbl:'Dec +3',          color:'#880E4F'},
+  {k:'rhie',   lbl:'RHIE',            color:'#1B5E20'},
+];
+var PL_COLORS=['#304483','#2E7D32','#B71C1C','#6A1B9A','#E65100','#0277BD','#880E4F','#1B5E20','#F57F17','#795548'];
+
+// ── Vista por minuto / total ──────────────────────────────────────────────────
+var _plPerMin=false; // false = totales, true = por minuto
+
+function plGetProfiles(){
+  var m=_plPerMin;
+  return[
+    {id:'meta',title:'Perfil Metabólico',icon:'🔋',color:'#304483',
+     desc:m?'Intensidad de carrera normalizada por minuto jugado':'Volumen total de carrera e intensidad promedio por minuto',
+     metrics:[{k:'mts_min',lbl:'Metros por minuto',unit:'m/min',color:'#0277BD',isMin:true}]},
+    {id:'hsr',title:'Perfil HSR (High-Speed Running)',icon:'💨',color:'#2E7D32',
+     desc:m?'Metros a alta intensidad por minuto jugado':'Distancias recorridas a alta intensidad',
+     metrics:[
+       {k:m?'hsr_min':'hsr', lbl:m?'18-21 km/h /min':'18-21 km/h', unit:m?'m/min':'m', color:'#2E7D32'},
+       {k:m?'h2_min':'h2',   lbl:m?'21-25 km/h /min':'21-25 km/h', unit:m?'m/min':'m', color:'#6A1B9A'},
+       {k:m?'h25_min':'h25', lbl:m?'+25 km/h /min':'+25 km/h',     unit:m?'m/min':'m', color:'#E65100'},
+     ]},
+    {id:'vel',title:'Perfil Velocidad',icon:'⚡',color:'#B71C1C',
+     desc:m?'Velocidad máxima y sprints por minuto jugado':'Picos máximos de velocidad y cantidad de sprints',
+     metrics:[
+       {k:'vmax',              lbl:'Velocidad máxima', unit:'km/h', color:'#B71C1C',isMin:true},
+       {k:m?'spr_min':'spr',  lbl:m?'Sprints /min':'Sprints', unit:m?'/min':'', color:'#F57F17'},
+     ]},
+    {id:'neuro',title:'Perfil Neuromuscular',icon:'💥',color:'#880E4F',
+     desc:m?'Acc, Dec y RHIE por minuto jugado':'Demanda de aceleraciones, deceleraciones y esfuerzos repetidos',
+     metrics:[
+       {k:m?'acc_min':'acc',   lbl:m?'Acc +3 /min':'Aceleraciones +3', unit:m?'/min':'', color:'#BF360C'},
+       {k:m?'dcc_min':'dcc',   lbl:m?'Dec +3 /min':'Deceleraciones +3', unit:m?'/min':'', color:'#880E4F'},
+       {k:m?'rhie_min':'rhie', lbl:m?'RHIE /min':'RHIE', unit:m?'/min':'', color:'#1B5E20'},
+     ]},
+  ];
+}
+
+// PL_PROFILES ahora es dinámico — siempre llamar plGetProfiles() en lugar de PL_PROFILES
+var PL_PROFILES=null; // backward compat — se inicializa abajo
+
+var _plLastMode=null; // 'player' or 'pos'
+
+function plGetSelectedKeys(){
+  var sel=document.getElementById('pl-player-sel');
+  if(!sel)return[];
+  return Array.from(sel.selectedOptions||[]).map(function(o){return o.value;});
+}
+
+function plFmt(v,k){
+  if(k==='vmax'||k==='mts_min')return parseFloat(v||0).toFixed(1);
+  if(k.endsWith('_min'))return parseFloat(v||0).toFixed(2);
+  return Math.round(v||0);
+}
+
+function plToggleMode(){
+  _plPerMin=!_plPerMin;
+  var btn=document.getElementById('pl-mode-btn');
+  if(btn){
+    btn.textContent=_plPerMin?'📊 Ver totales':'⏱ Ver por minuto';
+    btn.style.background=_plPerMin?'#304483':'#f5f5f5';
+    btn.style.color=_plPerMin?'#fff':'#555';
+  }
+  if(_plLastMode==='player')plRender();
+  else if(_plLastMode==='pos')plRenderPos();
+}
+window.plToggleMode=plToggleMode;
+
+// ── Single or multi-player view ───────────────────────────────────────────────
+function plRender(){
+  var keys=plGetSelectedKeys();
+  var posSel=document.getElementById('pl-pos-sel');
+  if(posSel)posSel.value='';
+  _plLastMode='player';
+  if(!keys.length){document.getElementById('pl-content').innerHTML='';return;}
+  var all=plGetAllData();
+  var playerData=keys.map(function(key){
+    return{key:key,rows:all.filter(function(r){return r.name.toLowerCase()===key;})};
+  }).filter(function(p){return p.rows.length>0;});
+  if(!playerData.length){document.getElementById('pl-content').innerHTML='<div style="color:#aaa;font-size:11px;padding:16px">Sin datos.</div>';return;}
+  plDestroyCharts();
+
+  var single=playerData.length===1;
+
+  // ── Shared chart options for big, clean presentation charts ──
+  function baseOpts(title,yUnit){
+    return{
+      responsive:true,maintainAspectRatio:false,animation:{duration:400},
+      layout:{padding:{top:20}},
+      plugins:{
+        legend:{labels:{font:{size:12,weight:'600'},color:'#333',padding:12,boxWidth:14}},
+        title:{display:true,text:title,font:{size:14,weight:'bold'},color:'#0D1B2A',padding:{top:4,bottom:12}},
+        tooltip:{backgroundColor:'rgba(13,27,42,0.95)',titleFont:{size:12,weight:'700'},bodyFont:{size:11},padding:10,cornerRadius:6}
+      },
+      scales:{
+        x:{ticks:{font:{size:11,weight:'500'},color:'#555',maxRotation:25},grid:{display:false},offset:true},
+        y:{ticks:{font:{size:11},color:'#555',callback:function(v){return v+(yUnit?' '+yUnit:'');}},grid:{color:'#eee'},beginAtZero:true,grace:'15%'}
+      }
+    };
+  }
+
+  var html='';
+
+  if(single){
+    // ═══ SINGLE PLAYER: evolution across matches, grouped by profile ═══
+    var pd=playerData[0], rows=pd.rows, name=rows[0].name, pos=rows[0].pos;
+    var labels=rows.map(function(r){
+      var d=r.fecha?r.fecha.split('-').slice(1).reverse().join('/'):'';
+      return r.rival.slice(0,12)+(d?' · '+d:'');
+    });
+
+    // Header
+    html+='<div style="background:linear-gradient(135deg,#0D1B2A 0%,#1b3a5e 100%);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">';
+    html+='<div><div style="font-size:20px;font-weight:800;letter-spacing:-0.3px">'+name+'</div>';
+    html+='<div style="font-size:12px;opacity:.85;margin-top:4px">Puesto <strong style="background:rgba(255,255,255,0.18);padding:2px 10px;border-radius:4px;margin-left:4px">'+pos+'</strong>  ·  '+rows.length+' partido'+(rows.length>1?'s':'')+' con datos GPS</div></div>';
+    html+='<div style="text-align:right"><div style="font-size:10px;opacity:.65">Reporte individual · Dashboard GPS</div>';
+    html+='<div style="margin-top:5px"><span style="font-size:10px;font-weight:700;padding:3px 10px;border-radius:12px;background:'+ (_plPerMin?'#304483':'rgba(255,255,255,0.15)')+';border:1px solid rgba(255,255,255,0.3)">'+(_plPerMin?'⏱ Por minuto':'📊 Totales')+'</span></div></div></div>';
+
+    // One section per profile
+    plGetProfiles().forEach(function(prof,pi){
+      html+='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;margin-bottom:14px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,0.03)">';
+      html+='<div style="background:'+prof.color+'11;border-bottom:2px solid '+prof.color+';padding:10px 16px;display:flex;align-items:center;gap:10px">';
+      html+='<span style="font-size:18px">'+prof.icon+'</span>';
+      html+='<div><div style="font-size:14px;font-weight:700;color:'+prof.color+'">'+prof.title+'</div>';
+      html+='<div style="font-size:10px;color:#666">'+prof.desc+'</div></div></div>';
+      html+='<div style="padding:12px 16px">';
+      // KPI cards (averages)
+      html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">';
+      prof.metrics.forEach(function(m){
+        var avg=rows.reduce(function(a,r){return a+(r[m.k]||0);},0)/rows.length;
+        var mx=Math.max.apply(null,rows.map(function(r){return r[m.k]||0;}));
+        html+='<div style="flex:1;min-width:140px;background:'+m.color+'0d;border:1px solid '+m.color+'33;border-radius:8px;padding:10px 12px">';
+        html+='<div style="font-size:10px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:0.4px">'+m.lbl+'</div>';
+        html+='<div style="display:flex;align-items:baseline;gap:6px;margin-top:4px"><span style="font-size:22px;font-weight:800;color:'+m.color+'">'+plFmt(avg,m.k)+'</span><span style="font-size:10px;color:#888">'+(m.unit||'')+'</span></div>';
+        html+='<div style="font-size:9px;color:#999;margin-top:3px">Promedio · Máx: <strong style="color:'+m.color+'">'+plFmt(mx,m.k)+'</strong></div></div>';
+      });
+      html+='</div>';
+      // Charts grid
+      // Cada gráfico scrollea horizontal si hay muchos partidos: ancho mínimo
+      // proporcional a la cantidad de fechas (≈55px por partido). Así con pocos
+      // partidos llena el ancho, y con muchos crece y se scrollea lateralmente
+      // sin achicar los puntos hasta volverse ilegibles.
+      var nMatches=rows.length;
+      var chartMinW=Math.max(320, nMatches*58 + 80);
+      var gridCols=prof.metrics.length;
+      html+='<div class="pl-charts-grid" style="display:grid;grid-template-columns:repeat('+gridCols+',1fr);gap:12px">';
+      prof.metrics.forEach(function(m,mi){
+        html+='<div class="pl-chart-scroll" style="-webkit-overflow-scrolling:touch;--pl-chart-minw:'+chartMinW+'px"><div class="pl-chart-inner" style="position:relative;height:220px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div></div>';
+      });
+      html+='</div></div></div>';
+    });
+
+    document.getElementById('pl-content').innerHTML=html;
+
+    // Build charts
+    plGetProfiles().forEach(function(prof,pi){
+      prof.metrics.forEach(function(m,mi){
+        var c=document.getElementById('plc-'+pi+'-'+mi);if(!c)return;
+        var vals=rows.map(function(r){return r[m.k]||0;});
+        var mins=rows.map(function(r){return r.min||0;});
+        var avg=vals.reduce(function(a,v){return a+v;},0)/vals.length;
+        var _sFmt=(function(mk){return function(v){return plFmt(v,mk);};})(m.k);
+        var ch=new Chart(c,{data:{labels:labels,datasets:[
+          {type:'bar',label:'Minutos jugados',data:mins,yAxisID:'yMin',order:3,
+           backgroundColor:'rgba(156,89,209,0.18)',borderColor:'rgba(156,89,209,0.35)',
+           borderWidth:1,borderRadius:3,barPercentage:0.55,categoryPercentage:0.85},
+          {type:'line',label:m.lbl,data:vals,yAxisID:'y',order:1,
+           borderColor:m.color,backgroundColor:m.color+'22',borderWidth:3,
+           pointRadius:6,pointHoverRadius:9,
+           pointBackgroundColor:m.color,pointBorderColor:'#fff',pointBorderWidth:2,
+           fill:true,tension:0.35},
+          {type:'line',label:'Promedio ('+plFmt(avg,m.k)+')',data:vals.map(function(){return avg;}),yAxisID:'y',order:2,
+           borderColor:'#EF9F27',borderWidth:2,borderDash:[6,4],pointRadius:0,fill:false}
+        ]},plugins:[{id:'lineLbls',afterDatasetsDraw:function(ch2){
+          // Dibujar valor encima de cada punto de la línea principal (dataset 1)
+          var ctx2=ch2.ctx;
+          var meta=ch2.getDatasetMeta(1);
+          if(!meta||meta.hidden)return;
+          var chartArea=ch2.chartArea;
+          var n=meta.data.length;
+          meta.data.forEach(function(pt,i){
+            var val=vals[i];
+            if(val===null||val===undefined)return;
+            var txt=String(_sFmt(val));
+            ctx2.save();
+            ctx2.font='bold 9px system-ui,sans-serif';
+            ctx2.fillStyle=m.color;
+            ctx2.textBaseline='bottom';
+            // Alineación inteligente para que el texto no se salga del área:
+            //  - primer punto: alinear a la izquierda
+            //  - último punto: alinear a la derecha
+            //  - resto: centrado
+            var tx=pt.x, ty=pt.y-7;
+            if(i===0){ ctx2.textAlign='left'; tx=Math.max(pt.x-6, chartArea.left+1); }
+            else if(i===n-1){ ctx2.textAlign='right'; tx=Math.min(pt.x+6, chartArea.right-1); }
+            else { ctx2.textAlign='center'; }
+            // Si el texto se saldría por arriba, dibujarlo debajo del punto
+            if(ty < chartArea.top+10){ ty=pt.y+16; ctx2.textBaseline='top'; }
+            // Fondo blanco semi-transparente para legibilidad cuando se superponen
+            var tw=ctx2.measureText(txt).width;
+            var bx = ctx2.textAlign==='left'?tx:(ctx2.textAlign==='right'?tx-tw:tx-tw/2);
+            ctx2.fillStyle='rgba(255,255,255,0.75)';
+            ctx2.fillRect(bx-1, ty-10, tw+2, 11);
+            ctx2.fillStyle=m.color;
+            ctx2.fillText(txt, tx, ty);
+            ctx2.restore();
+          });
+        }}],options:(function(){
+          var o=baseOpts(m.lbl+(m.unit?' ('+m.unit+')':''),m.unit);
+          // Padding para que los valores y el último punto (ej. River) no se corten
+          o.layout={padding:{top:24,right:14,left:6,bottom:4}};
+          o.plugins.tooltip.callbacks={
+            afterBody:function(items){if(!items.length)return'';var idx=items[0].dataIndex;return '⏱ '+Math.round(mins[idx])+' min jugados';}
+          };
+          o.scales.yMin={position:'right',beginAtZero:true,max:120,
+            grid:{display:false},
+            ticks:{font:{size:10},color:'#9C59D1',callback:function(v){return v+"'";}},
+            title:{display:true,text:'Minutos',font:{size:10,weight:'600'},color:'#9C59D1'}};
+          return o;
+        })()});
+        _plCharts.push(ch);
+      });
+    });
+
+  } else {
+    // ═══ MULTI-PLAYER COMPARISON: bar charts per metric, grouped by profile ═══
+    var playerNames=playerData.map(function(p){return p.rows[0].name;});
+    var playerAvgs=playerData.map(function(p){
+      var avg={};PL_METRICS.forEach(function(m){avg[m.k]=p.rows.reduce(function(a,r){return a+(r[m.k]||0);},0)/p.rows.length;});
+      return avg;
+    });
+
+    // Header
+    html+='<div style="background:linear-gradient(135deg,#0D1B2A 0%,#1b3a5e 100%);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:16px">';
+    html+='<div style="font-size:18px;font-weight:800">Comparativa de jugadores</div>';
+    html+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
+    playerNames.forEach(function(n,i){
+      html+='<span style="background:'+PL_COLORS[i%PL_COLORS.length]+';color:#fff;padding:3px 12px;border-radius:16px;font-size:12px;font-weight:700">'+n+'  <span style="opacity:.75;font-size:10px;font-weight:500">('+playerData[i].rows.length+' p)</span></span>';
+    });
+    html+='</div></div>';
+
+    // One section per profile
+    plGetProfiles().forEach(function(prof,pi){
+      html+='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;margin-bottom:14px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,0.03)">';
+      html+='<div style="background:'+prof.color+'11;border-bottom:2px solid '+prof.color+';padding:10px 16px;display:flex;align-items:center;gap:10px">';
+      html+='<span style="font-size:18px">'+prof.icon+'</span>';
+      html+='<div><div style="font-size:14px;font-weight:700;color:'+prof.color+'">'+prof.title+'</div>';
+      html+='<div style="font-size:10px;color:#666">'+prof.desc+'</div></div></div>';
+      html+='<div style="padding:12px 16px">';
+      var gridCols=prof.metrics.length;
+      var nPlayers=playerData.length;
+      var chartMinWM=Math.max(280, nPlayers*70 + 60);
+      html+='<div class="pl-charts-grid" style="display:grid;grid-template-columns:repeat('+gridCols+',1fr);gap:12px">';
+      prof.metrics.forEach(function(m,mi){
+        html+='<div class="pl-chart-scroll" style="-webkit-overflow-scrolling:touch;--pl-chart-minw:'+chartMinWM+'px"><div class="pl-chart-inner" style="position:relative;height:240px"><canvas id="plc-'+pi+'-'+mi+'"></canvas></div></div>';
+      });
+      html+='</div></div></div>';
+    });
+
+    document.getElementById('pl-content').innerHTML=html;
+
+    plGetProfiles().forEach(function(prof,pi){
+      prof.metrics.forEach(function(m,mi){
+        var c=document.getElementById('plc-'+pi+'-'+mi);if(!c)return;
+        var vals=playerAvgs.map(function(a){return a[m.k]||0;});
+        var avgMins=playerData.map(function(p){
+          var mn=p.rows.reduce(function(a,r){return a+(r.min||0);},0)/p.rows.length;
+          return Math.round(mn);
+        });
+        var _mFmt=(function(mk){return function(v){return plFmt(v,mk);};})(m.k);
+        var ch=new Chart(c,{type:'bar',data:{
+          labels:playerNames.map(function(n,i){return n.split(' ').slice(0,2).join(' ')+' · '+avgMins[i]+"'";}),
+          datasets:[{label:m.lbl,data:vals,
+            backgroundColor:vals.map(function(_,i){return PL_COLORS[i%PL_COLORS.length]+'cc';}),
+            borderColor:vals.map(function(_,i){return PL_COLORS[i%PL_COLORS.length];}),
+            borderWidth:2,borderRadius:6}]
+        },plugins:[{id:'barLbls',afterDatasetsDraw:function(ch2){drawBarLabels(ch2,_mFmt);}}],options:(function(){
+          var o=baseOpts(m.lbl+(m.unit?' ('+m.unit+')':''),m.unit);
+          o.plugins.tooltip.callbacks={
+            afterBody:function(items){if(!items.length)return'';var idx=items[0].dataIndex;return '⏱ Promedio: '+avgMins[idx]+' min/partido ('+playerData[idx].rows.length+' partidos)';}
+          };
+          o.plBarLabels={enabled:true,fmt:function(v){return plFmt(v,m.k);}};
+          return o;
+        })()});
+        _plCharts.push(ch);
+      });
+    });
+  }
+}
+window.plRender=plRender;
+
+// ── Position view with min-minute filter (grouped by profile) ────────────────
+function plRenderPos(){
+  var pos=document.getElementById('pl-pos-sel').value;
+  var minMin=parseInt(document.getElementById('pl-min-filter').value)||0;
+  var pSel=document.getElementById('pl-player-sel');
+  if(pSel)Array.from(pSel.options).forEach(function(o){o.selected=false;});
+  _plLastMode='pos';
+  if(!pos){document.getElementById('pl-content').innerHTML='';return;}
+  var all=plGetAllData();
+  var byPlayer={};
+  all.filter(function(r){return r.pos===pos&&(r.min||0)>=minMin;}).forEach(function(r){
+    if(!byPlayer[r.name])byPlayer[r.name]=[];
+    byPlayer[r.name].push(r);
+  });
+  var players=Object.keys(byPlayer).sort();
+  if(!players.length){
+    document.getElementById('pl-content').innerHTML='<div style="color:#aaa;font-size:11px;padding:16px">Sin jugadores para este puesto con ≥'+minMin+' minutos.</div>';
+    return;
+  }
+  plDestroyCharts();
+
+  var playerAvgs=players.map(function(name){
+    var prows=byPlayer[name];
+    var avg={};
+    // Calcular promedios para TODOS los keys posibles (totales y /min)
+    var allKeys=['mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','rhie','hsr_min','h2_min','h25_min','spr_min','acc_min','dcc_min','rhie_min'];
+    allKeys.forEach(function(k){avg[k]=prows.reduce(function(a,r){return a+(r[k]||0);},0)/prows.length;});
+    return{name:name,avg:avg,n:prows.length};
+  });
+  var posAvg={};
+  var allKeys2=['mts','mts_min','hsr','h2','h25','spr','vmax','acc','dcc','rhie','hsr_min','h2_min','h25_min','spr_min','acc_min','dcc_min','rhie_min'];
+  allKeys2.forEach(function(k){
+    var total=0,count=0;
+    players.forEach(function(n){byPlayer[n].forEach(function(r){total+=(r[k]||0);count++;});});
+    posAvg[k]=count?total/count:0;
+  });
+
+  function baseOpts(title,yUnit,posAvgVal){
+    return{
+      responsive:true,maintainAspectRatio:false,animation:{duration:400},
+      layout:{padding:{top:20}},
+      plugins:{
+        legend:{labels:{font:{size:12,weight:'600'},color:'#333',padding:12,boxWidth:14}},
+        title:{display:true,text:title,font:{size:14,weight:'bold'},color:'#0D1B2A',padding:{top:4,bottom:12}},
+        tooltip:{backgroundColor:'rgba(13,27,42,0.95)',titleFont:{size:12,weight:'700'},bodyFont:{size:11},padding:10,cornerRadius:6}
+      },
+      scales:{
+        x:{ticks:{font:{size:11,weight:'500'},color:'#555',maxRotation:25},grid:{display:false},offset:true},
+        y:{ticks:{font:{size:11},color:'#555',callback:function(v){return v+(yUnit?' '+yUnit:'');}},grid:{color:'#eee'},beginAtZero:true,grace:'15%'}
+      }
+    };
+  }
+
+  var html='';
+
+  // Header
+  html+='<div style="background:linear-gradient(135deg,#0D1B2A 0%,#1b3a5e 100%);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">';
+  html+='<div><div style="font-size:20px;font-weight:800;letter-spacing:-0.3px">Puesto: '+pos+'</div>';
+  html+='<div style="font-size:12px;opacity:.85;margin-top:4px">'+players.length+' jugador'+(players.length>1?'es':'')+'  ·  Filtro ≥'+minMin+' min  ·  Línea naranja = promedio del puesto</div></div>';
+  html+='<span style="font-size:10px;font-weight:700;padding:4px 12px;border-radius:12px;background:'+ (_plPerMin?'#304483':'rgba(255,255,255,0.15)')+';border:1px solid rgba(255,255,255,0.3)">'+(_plPerMin?'⏱ Por minuto':'📊 Totales')+'</span></div>';
+
+  // One section per profile
+  plGetProfiles().forEach(function(prof,pi){
+    html+='<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;margin-bottom:14px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,0.03)">';
+    html+='<div style="background:'+prof.color+'11;border-bottom:2px solid '+prof.color+';padding:10px 16px;display:flex;align-items:center;gap:10px">';
+    html+='<span style="font-size:18px">'+prof.icon+'</span>';
+    html+='<div><div style="font-size:14px;font-weight:700;color:'+prof.color+'">'+prof.title+'</div>';
+    html+='<div style="font-size:10px;color:#666">'+prof.desc+'</div></div></div>';
+    html+='<div style="padding:12px 16px">';
+    var gridCols=prof.metrics.length;
+    html+='<div class="pl-charts-grid" style="display:grid;grid-template-columns:repeat('+gridCols+',1fr);gap:12px">';
+    prof.metrics.forEach(function(m,mi){
+      html+='<div style="position:relative;height:260px"><canvas id="plpc-'+pi+'-'+mi+'"></canvas></div>';
+    });
+    html+='</div></div></div>';
+  });
+
+  document.getElementById('pl-content').innerHTML=html;
+
+  plGetProfiles().forEach(function(prof,pi){
+    prof.metrics.forEach(function(m,mi){
+      var c=document.getElementById('plpc-'+pi+'-'+mi);if(!c)return;
+      var vals=playerAvgs.map(function(p){return p.avg[m.k]||0;});
+      var pa=posAvg[m.k];
+      var avgMins=players.map(function(n){
+        var pRows=byPlayer[n];
+        var mn=pRows.reduce(function(a,r){return a+(r.min||0);},0)/pRows.length;
+        return Math.round(mn);
+      });
+      var _pFmt=(function(mk){return function(v){return plFmt(v,mk);};})(m.k);
+      var ch=new Chart(c,{type:'bar',data:{
+        labels:players.map(function(n,i){return n.split(' ').slice(0,2).join(' ')+' · '+avgMins[i]+"'";}),
+        datasets:[
+          {label:m.lbl,data:vals,
+           backgroundColor:vals.map(function(v){return v>pa*1.08?m.color+'dd':v<pa*0.92?'#E24B4Ab3':'#9AA5B4aa';}),
+           borderColor:vals.map(function(v){return v>pa*1.08?m.color:v<pa*0.92?'#C62828':'#6C7785';}),
+           borderWidth:2,borderRadius:6},
+          {type:'line',label:'Promedio puesto ('+plFmt(pa,m.k)+')',data:vals.map(function(){return pa;}),
+           borderColor:'#EF9F27',borderWidth:2.5,borderDash:[6,4],pointRadius:0,fill:false}
+        ]
+      },plugins:[{id:'barLbls',afterDatasetsDraw:function(ch2){drawBarLabels(ch2,_pFmt);}}],options:(function(){
+        var o=baseOpts(m.lbl+(m.unit?' ('+m.unit+')':''),m.unit);
+        o.plugins.tooltip.callbacks={
+          afterBody:function(items){if(!items.length)return'';var idx=items[0].dataIndex;return '⏱ Promedio: '+avgMins[idx]+' min/partido ('+byPlayer[players[idx]].length+' partidos)';}
+        };
+        return o;
+      })()});
+      _plCharts.push(ch);
+    });
+  });
+}
+window.plRenderPos=plRenderPos;
+
+// Handler unificado para el filtro de minutos: re-renderiza la vista actual
+// (individual o por puesto) Y los cuadritos de Perfil de competencia.
+function plMinFilterChange(){
+  // Si hay un puesto seleccionado, re-renderiza por puesto
+  var posSel=document.getElementById('pl-pos-sel');
+  var pSel=document.getElementById('pl-player-sel');
+  if(posSel && posSel.value){
+    try{ plRenderPos(); }catch(e){}
+  } else if(pSel && pSel.selectedOptions && pSel.selectedOptions.length){
+    try{ plRender(); }catch(e){}
+  }
+  // Siempre actualizar los cuadritos máximo/promedio
+  try{ if(typeof compRender==='function') compRender(); }catch(e){}
+}
+window.plMinFilterChange=plMinFilterChange;
+
+// ── PDF export for player tab ─────────────────────────────────────────────────
+function plExportPDF(){
+  var content=document.getElementById('pl-content');
+  if(!content||!content.innerHTML.trim()||content.querySelector('[style*="color:#aaa"]')){
+    alert('Primero seleccioná un jugador o puesto para ver los datos.');return;
+  }
+  var now=new Date();
+  var dateStr=now.getDate()+'/'+(now.getMonth()+1)+'/'+now.getFullYear();
+
+  // Construir bloque de Perfil de competencia (máximo + promedio) si hay jugadores seleccionados
+  var competenciaHtml='';
+  var compMax=document.getElementById('comp-max-content');
+  var compAvg=document.getElementById('comp-avg-content');
+  var compInfo=document.getElementById('comp-info');
+  var compMinInput=document.getElementById('pl-min-filter');
+  if(compMax && compAvg && _compCurrentSelection && _compCurrentSelection.length){
+    var maxHtml=compMax.innerHTML||'';
+    var avgHtml=compAvg.innerHTML||'';
+    var infoTxt=(compInfo && compInfo.textContent) ? compInfo.textContent : '';
+    var minMinsTxt=(compMinInput && compMinInput.value) ? compMinInput.value : '60';
+    if(maxHtml && !maxHtml.toLowerCase().includes('seleccion') && !maxHtml.toLowerCase().includes('sin partidos') && !maxHtml.toLowerCase().includes('⚠')){
+      competenciaHtml=
+        '<div style="margin-bottom:18px;padding:12px 14px;background:#f7f9fc;border:1px solid #e0e8f5;border-radius:7px">'+
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #e0e8f5;padding-bottom:6px;margin-bottom:10px">'+
+            '<div style="font-size:14px;font-weight:800;color:#0D1B2A">🏆 Perfil de competencia</div>'+
+            '<div style="font-size:10px;color:#666">'+infoTxt+' · Min ≥ '+minMinsTxt+'</div>'+
+          '</div>'+
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
+            '<div style="flex:1;min-width:240px;background:#fff8e1;border:1px solid #f0d878;border-radius:7px;padding:10px 12px">'+
+              '<div style="font-size:12px;font-weight:700;color:#9c5a00;margin-bottom:6px;border-bottom:1px solid #f0d878;padding-bottom:4px">⭐ Perfil MÁXIMO</div>'+
+              maxHtml+
+            '</div>'+
+            '<div style="flex:1;min-width:240px;background:#e8f3ee;border:1px solid #b8dcc4;border-radius:7px;padding:10px 12px">'+
+              '<div style="font-size:12px;font-weight:700;color:#0F6E56;margin-bottom:6px;border-bottom:1px solid #b8dcc4;padding-bottom:4px">📊 Perfil PROMEDIO</div>'+
+              avgHtml+
+            '</div>'+
+          '</div>'+
+        '</div>';
+    }
+  }
+
+  // Convert all visible canvases to images
+  var canvasImgs=[];
+  content.querySelectorAll('canvas').forEach(function(c){
+    try{canvasImgs.push({id:c.id,src:c.toDataURL('image/png')});}catch(e){}
+  });
+
+  // Clone the content HTML, replacing canvases with img tags
+  var clone=content.cloneNode(true);
+  clone.querySelectorAll('canvas').forEach(function(c){
+    var img=document.createElement('img');
+    var match=canvasImgs.find(function(ci){return ci.id===c.id;});
+    if(match){img.src=match.src;img.style.cssText='width:100%;height:auto;border-radius:4px;';}
+    c.parentNode.replaceChild(img,c);
+  });
+
+  var printWin=window.open('','_blank','width=950,height=750');
+  if(!printWin){alert('Permitir ventanas emergentes para exportar PDF.');return;}
+  printWin.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">'+
+    '<title>Reporte Jugadores GPS</title>'+
+    '<style>'+
+    '*{box-sizing:border-box;margin:0;padding:0}'+
+    'body{font-family:system-ui,sans-serif;color:#1a1a1a;padding:20px;background:#fff}'+
+    'table{border-collapse:collapse;width:100%}'+
+    /* Evitar que se corten al pasar de página: */
+    'table,tr,td,th{page-break-inside:avoid;break-inside:avoid}'+
+    /* Si una tabla es muy larga y NO entra entera, repetir el header en la siguiente página: */
+    'thead{display:table-header-group}'+
+    'tfoot{display:table-footer-group}'+
+    /* Cuadritos / paneles enteros no se cortan: */
+    '.panel,.pdf-block,#comp-max-box,#comp-avg-box{page-break-inside:avoid;break-inside:avoid}'+
+    /* Imágenes (canvas convertidos a img) no se cortan: */
+    'img{page-break-inside:avoid;break-inside:avoid;max-width:100%;height:auto}'+
+    /* Gráficos del perfil de competencia: completos en el PDF (sin scroll/recorte tipo móvil) */
+    '.pl-chart-scroll{overflow:visible!important}'+
+    '.pl-chart-scroll>.pl-chart-inner{min-width:0!important;width:100%!important}'+
+    '.pl-charts-grid{display:grid!important}'+
+    /* Bloques que tienen títulos h2/h3/h4 no se separan del contenido siguiente: */
+    'h1,h2,h3,h4{page-break-after:avoid;break-after:avoid}'+
+    '@media print{'+
+    '  @page{margin:10mm;size:A4 landscape}'+
+    '  body{padding:0}'+
+    '}'+
+    '</style></head>'+
+    '<body>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0D1B2A;padding-bottom:10px;margin-bottom:16px">'+
+    '<div style="font-size:18px;font-weight:800;color:#0D1B2A">Reporte GPS — Jugadores</div>'+
+    '<div style="font-size:10px;color:#aaa">'+dateStr+' · Dashboard GPS v10</div></div>'+
+    competenciaHtml+
+    clone.innerHTML+
+    '</body></html>');
+  printWin.document.close();
+  printWin.onload=function(){printWin.focus();printWin.print();};
+}
+window.plExportPDF=plExportPDF;
+
+// ── END MATCH COMPARISON ──────────────────────────────────────────────────────
+
+
+(function(){
+  try{
+    if(typeof PLAYER_PROFILES==='undefined')return;
+    var s=localStorage.getItem('gps_dash_v9'); if(!s)return;
+    var p=JSON.parse(s);
+    if(p.PLAYER_PROFILES)Object.assign(PLAYER_PROFILES,p.PLAYER_PROFILES);
+  }catch(e){}
+})();
+
+// Rebuild PLAYER_PROFILES from all stored match and microciclo player data (by max)
+(function(){
+  try{
+    if(typeof MATCHES==='undefined'||typeof MICROCICLO==='undefined'||typeof PLAYER_PROFILES==='undefined')return;
+    function updateProfile(playerList){
+      if(!playerList||!playerList.length)return;
+      playerList.forEach(function(p){
+        if(!p||!p.name||p.name.length<2)return;
+        var key=p.name.trim().toLowerCase();
+        var ex=PLAYER_PROFILES[key]||{name:p.name.trim(),vmax:null,accmax:null,dccmax:null};
+        var locks=ex.locks||{};
+        if(!locks.vmax   && p.vmax  &&(!ex.vmax  ||p.vmax  >ex.vmax  ))ex.vmax=p.vmax;
+        if(!locks.accmax && p.accmax&&(!ex.accmax||p.accmax>ex.accmax))ex.accmax=p.accmax;
+        if(!locks.dccmax && p.dccmax&&(!ex.dccmax||p.dccmax>ex.dccmax))ex.dccmax=p.dccmax;
+        PLAYER_PROFILES[key]=ex;
+      });
+    }
+    MATCHES.forEach(function(m){if(m.players)updateProfile(m.players);});
+    MICROCICLO.forEach(function(s){if(s.players)updateProfile(s.players);});
+  }catch(e){console.warn('Profile rebuild skipped:',e);}
+})();
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PLANIFICACIÓN SEMANAL
+// ══════════════════════════════════════════════════════════════════════════════
+// PLAN_WEEKS now declared at the top of script block 3 (line ~1512).
+// The IIFE below kept as fallback in case loadData hasn't run yet for some reason.
+var _planEditIdx = null;      // index in PLAN_WEEKS being edited, or null = new
+
+// Cargar PLAN_WEEKS desde localStorage en cuanto la variable existe
+(function(){ try{ var p=JSON.parse(localStorage.getItem('gps_dash_v9')||'{}'); if(p.PLAN_WEEKS&&p.PLAN_WEEKS.length){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});} }catch(e){} })();
+var _planEditData = null;     // working copy of the week being edited
+var _planModalDayIdx = null;  // which day (0-5) the modal is adding to
+var _planModalBlockIdx = null;// which block within that day
+var _planModalSelected = null;// exercise object selected in modal
+
+// ── Migrate old days format (exercises[]) → new blocks format ─────────────────
+function planMigrateDay(day){
+  if(day.blocks) return; // already new format
+  var exs = day.exercises || [];
+  day.blocks = exs.length
+    ? [{ id: Date.now(), parallel: false, exercises: exs.map(function(e){ return Object.assign({countVolume:true}, e); }) }]
+    : [];
+  delete day.exercises;
+}
+function planMigrateWeek(w){
+  if(w&&w.days) w.days.forEach(planMigrateDay);
+}
+function planMigrateAll(){
+  PLAN_WEEKS.forEach(planMigrateWeek);
+  if(_planEditData) planMigrateWeek(_planEditData);
+}
+
+var PLAN_DAY_LABELS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+var PLAN_MD_DEFAULTS = ['MD-5','MD-4','MD-3','MD-2','MD-1','MD'];
+var PLAN_METRICS = [
+  {k:'mts', lbl:'Dist. (m)',    color:'#0C447C', refKey:'mts'},
+  {k:'hsr', lbl:'18-21 (m)',   color:'#1D9E75', refKey:'hsr'},
+  {k:'h2',  lbl:'21-25 (m)',   color:'#7F77DD', refKey:'h2'},
+  {k:'h25', lbl:'+25 (m)',     color:'#EF9F27', refKey:'h25'},
+  {k:'acc', lbl:'Acc+3',       color:'#D85A30', refKey:'acc'},
+  {k:'dcc', lbl:'Dec+3',       color:'#D4537E', refKey:'dcc'},
+  {k:'rhie',lbl:'RHIE',        color:'#0F6E56', refKey:'rhie'},
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function planGetRef(mode){
+  // Returns {mts,hsr,h2,h25,acc,dcc,rhie} as 90-min volumes
+  var t=parseFloat(document.getElementById('ref-tmin').value)||90;
+  if(!mode||mode==='current'){
+    return{mts:REF.mts*t,hsr:REF.hsr*t,h2:REF.h2*t,h25:REF.h25*t,acc:REF.acc*t,dcc:REF.dcc*t,rhie:REF.rhie*t};
+  }
+  var sorted=[...MATCHES].sort(function(a,b){return a.fecha.localeCompare(b.fecha);});
+  if(!sorted.length)return planGetRef('current');
+  var ms=mode==='last1'?sorted.slice(-1):mode==='last3'?sorted.slice(-3):sorted;
+  var avg=function(k){return ms.reduce(function(a,m){return a+(m[k]||0);},0)/ms.length;};
+  return{mts:avg('mts'),hsr:avg('hsr'),h2:avg('h2'),h25:avg('h25'),acc:avg('acc'),dcc:avg('dcc'),rhie:avg('rhie')};
+}
+
+// Resolves a plan exercise item to a usable exercise object.
+// Items can reference an exercise in the library by exId, OR contain inline csvEx data
+// (imported from a CSV that wasn't added to the library). Returns null if unresolvable.
+function planResolveEx(item){
+  if(!item) return null;
+  if(item.csvEx){
+    // Build a D-like exercise from inline csv data so the rest of the plan code works untouched
+    var c = item.csvEx;
+    return {
+      id: 'csv:'+(c._uid||c.n),
+      n: c.n,
+      cat: c.cat||'Otros',
+      min: c.min||1,
+      raw: c.raw||null,
+      vmax: c.vmax||0,
+      spr: c.spr||0,
+      jug: c.jug||null, L: c.L||null, A: c.A||null,
+      _fromCsv: true
+    };
+  }
+  if(item.exId!=null){
+    var found=D.find(function(r){return r.id===item.exId;});
+    if(found) return found;
+    // v151: si el ejercicio todavía no llegó desde la nube (lo acaba de crear
+    // el compañero), mostrar el nombre guardado en la tarea en vez de un
+    // "(eliminado)" that no dice nada. Se marca como pendiente para que la
+    // interfaz lo distinga de un borrado real.
+    if(item.exName){
+      return {id:item.exId, n:item.exName, cat:item.exCat||'Otros',
+              min:item.mins||1, raw:null, vmax:0, spr:0,
+              jug:item.customJug||null, L:item.customL||null, A:item.customA||null,
+              _pending:true};
+    }
+  }
+  return null;
+}
+window.planResolveEx=planResolveEx;
+
+function planCalcExVol(ex, mins){
+  // ex = exercise row from D[], mins = assigned minutes
+  // Volume = raw[k]/min * mins  (raw is per-minute value)
+  // mts_min is already /min; hsr,h2,h25,acc,dcc,rhie stored as ratio vs REF → need raw
+  // v140: normalizar `raw` antes de usarlo. Si venía como ARRAY (formatos
+  // viejos o un import mal armado), ex.raw.mts era undefined y TODO el total
+  // del día se volvía NaN: las métricas del resumen quedaban en cero o vacías
+  // aunque los ejercicios tuvieran datos. Ahora se convierte y se sanea.
+  var raw=planNormRaw(ex);
+  function num(v){ v=Number(v); return isFinite(v)?v:0; }
+  function vol(k){
+    if(raw&&raw[k]!=null) return num(raw[k])*mins;  // raw is value/min → × mins
+    return num(ex[k])*num(REF[k])*mins;             // ratio × REF/min × mins
+  }
+  var mtsMin = raw ? num(raw.mts) : num(ex.mts)*num(REF.mts);
+  return{
+    mts: mtsMin*mins,
+    mts_min: mtsMin,
+    hsr: vol('hsr'), h2: vol('h2'), h25: vol('h25'),
+    acc: vol('acc'), dcc: vol('dcc'), rhie: vol('rhie'),
+    mins: mins
+  };
+}
+// Devuelve el `raw` del ejercicio como OBJETO {mts,hsr,...} o null si no tiene.
+// Convierte el formato array y repara la fila para que no vuelva a pasar.
+var _PLAN_RAW_KEYS=['mts','hsr','h2','h25','acc','dcc','rhie','pl'];
+function planNormRaw(ex){
+  if(!ex||!ex.raw) return null;
+  var r=ex.raw;
+  if(Array.isArray(r)){
+    var o={};
+    _PLAN_RAW_KEYS.forEach(function(k,i){ var v=Number(r[i]); o[k]=isFinite(v)?v:0; });
+    ex.raw=o;               // reparar en memoria
+    return o;
+  }
+  if(typeof r!=='object') return null;
+  return r;
+}
+window.planNormRaw=planNormRaw;
+
+// ── BLOQUES PARALELOS (v130) ──────────────────────────────────────────────
+// Regla: en un bloque paralelo los ejercicios se hacen AL MISMO TIEMPO por
+// distintos grupos (ej: uno específico de defensores y otro de delanteros),
+// así que el bloque dura lo que dura el ejercicio MÁS LARGO y los datos
+// físicos son los de ese ejercicio. Si hay empate en el tiempo más largo,
+// se PROMEDIAN los valores físicos de los empatados (el tiempo es el mismo).
+// Reemplaza al viejo checkbox manual "vol", que obligaba a elegir a mano
+// cuál sumaba y se olvidaba fácil.
+function planParallelLeaders(exs){
+  var maxT=0;
+  (exs||[]).forEach(function(item){
+    var t=(item.minsTotal!=null?item.minsTotal:item.mins)||0;
+    if(t>maxT)maxT=t;
+  });
+  var idx=[];
+  (exs||[]).forEach(function(item,i){
+    var t=(item.minsTotal!=null?item.minsTotal:item.mins)||0;
+    if(t===maxT)idx.push(i);
+  });
+  return {maxT:maxT, idx:idx, tie:idx.length>1};
+}
+// Devuelve {mins, vol, n}: duración del bloque y métricas a imputar.
+function planParallelBlockVol(exs){
+  var L=planParallelLeaders(exs);
+  var acc={mts:0,hsr:0,h2:0,h25:0,acc:0,dcc:0,rhie:0,mts_min:0};
+  var n=0;
+  L.idx.forEach(function(i){
+    var item=exs[i];
+    var ex=planResolveEx(item);
+    if(!ex)return;
+    var v=planCalcExVol(ex,item.mins);
+    acc.mts+=v.mts; acc.hsr+=v.hsr; acc.h2+=v.h2; acc.h25+=v.h25;
+    acc.acc+=v.acc; acc.dcc+=v.dcc; acc.rhie+=v.rhie; acc.mts_min+=v.mts_min;
+    n++;
+  });
+  if(n>1){ // empate en el tiempo más largo → promedio de los físicos
+    acc.mts/=n; acc.hsr/=n; acc.h2/=n; acc.h25/=n;
+    acc.acc/=n; acc.dcc/=n; acc.rhie/=n; acc.mts_min/=n;
+  }
+  return {mins:L.maxT, vol:acc, n:n};
+}
+window.planParallelLeaders=planParallelLeaders;
+
+function planSumDay(day){
+  // Accept either old format (array of exercises) or new format (day object with blocks)
+  var blocks;
+  if(Array.isArray(day)){
+    // legacy: treat as a single sequential block
+    blocks=[{parallel:false,exercises:day.map(function(e){return Object.assign({countVolume:true},e);})}];
+  } else {
+    planMigrateDay(day);
+    blocks=day.blocks||[];
+  }
+
+  var sum={mts:0,hsr:0,h2:0,h25:0,acc:0,dcc:0,rhie:0,totalMins:0,mts_min_avg:0};
+  var mtsMinSum=0, mtsMinCount=0;
+
+  blocks.forEach(function(block){
+    var exs=block.exercises||[];
+    if(!exs.length)return;
+
+    if(block.parallel){
+      // v130: tiempo = el del ejercicio más largo; físicos = los de ese
+      // ejercicio (o promedio de los empatados en el tiempo más largo).
+      var pb=planParallelBlockVol(exs);
+      sum.mts+=pb.vol.mts; sum.hsr+=pb.vol.hsr; sum.h2+=pb.vol.h2; sum.h25+=pb.vol.h25;
+      sum.acc+=pb.vol.acc; sum.dcc+=pb.vol.dcc; sum.rhie+=pb.vol.rhie;
+      if(pb.n){ mtsMinSum+=pb.vol.mts_min; mtsMinCount++; }
+      sum.totalMins+=pb.mins;
+    } else {
+      // Sequential: all exercises contribute
+      exs.forEach(function(item){
+        var ex=planResolveEx(item);
+        if(!ex)return;
+        var v=planCalcExVol(ex,item.mins); // work time for volume
+        sum.mts+=v.mts; sum.hsr+=v.hsr; sum.h2+=v.h2; sum.h25+=v.h25;
+        sum.acc+=v.acc; sum.dcc+=v.dcc; sum.rhie+=v.rhie;
+        var itemTime = item.minsTotal!=null ? item.minsTotal : item.mins; // total time for session
+        sum.totalMins+=itemTime;
+        mtsMinSum+=v.mts_min; mtsMinCount++;
+      });
+    }
+  });
+
+  sum.mts_min_avg=mtsMinCount?mtsMinSum/mtsMinCount:0;
+  return sum;
+}
+
+function planPct(val, refVal){ return refVal>0?Math.round(val/refVal*100):0; }
+
+// Average of % across all metrics — used for summary % vs partido
+// (instead of just distance, which can hide imbalances). Returns 0 if no valid refs.
+function planAvgPct(sum, ref){
+  if(!sum||!ref) return 0;
+  var keys = ['mts','hsr','h2','h25','acc','dcc','rhie'];
+  var pcts = [], i;
+  for(i=0;i<keys.length;i++){
+    if((ref[keys[i]]||0) > 0){
+      pcts.push(Math.round((sum[keys[i]]||0)/ref[keys[i]]*100));
+    }
+  }
+  // Add mts/min ratio if available
+  var refMtsPerMin = (ref.mts||0)/90;
+  if(refMtsPerMin>0 && (sum.mts_min_avg||0)>0){
+    pcts.push(Math.round((sum.mts_min_avg||0)/refMtsPerMin*100));
+  }
+  if(!pcts.length) return 0;
+  var total = 0;
+  for(i=0;i<pcts.length;i++) total += pcts[i];
+  return Math.round(total/pcts.length);
+}
+
+function planPctColor(pct){
+  if(pct>=90)return'#E24B4A';
+  if(pct>=70)return'#1D9E75';
+  if(pct>=50)return'#EF9F27';
+  return'#9AA5B4';
+}
+
+// Sum day metrics keyed by group name.
+// Rule:
+//   - Exercises tagged "Todos" → added to ALL groups defined for the week
+//   - Exercises tagged "Suplentes" → added only to "Suplentes"
+// weekGroups: array of group names defined for this week (from _planEditData.groups)
+function planSumDayByGroup(day, weekGroups){
+  planMigrateDay(day);
+  var mkSum=function(){return{mts:0,hsr:0,h2:0,h25:0,acc:0,dcc:0,rhie:0,totalMins:0};};
+  var subGroupNames = weekGroups || [];
+  var hasSubgroups = subGroupNames.length > 0;
+  var todosSum = mkSum();
+  var specificSums = {};
+  subGroupNames.forEach(function(g){ specificSums[g]=mkSum(); });
+
+  function addVol(bucket, v, t){
+    bucket.mts+=v.mts; bucket.hsr+=v.hsr; bucket.h2+=v.h2;
+    bucket.h25+=v.h25; bucket.acc+=v.acc; bucket.dcc+=v.dcc; bucket.rhie+=v.rhie;
+    bucket.totalMins+=t;
+  }
+
+  (day.blocks||[]).forEach(function(block){
+    var exs=block.exercises||[];
+    if(!exs.length) return;
+    var isParallel=block.parallel;
+    if(isParallel){
+      var byGroup={};
+      exs.forEach(function(item){
+        var g=item.group||'Todos';
+        if(!byGroup[g]) byGroup[g]={maxTime:0,items:[]};
+        var t=item.minsTotal!=null?item.minsTotal:item.mins;
+        if(t>byGroup[g].maxTime) byGroup[g].maxTime=t;
+        byGroup[g].items.push(item);
+      });
+      Object.keys(byGroup).forEach(function(srcG){
+        var bg=byGroup[srcG];
+        var bucket=(srcG==='Todos')?todosSum:(specificSums[srcG]||(specificSums[srcG]=mkSum()));
+        // v130: misma regla dentro de cada grupo — el más largo manda; empate → promedio
+        var pbg=planParallelBlockVol(bg.items);
+        bucket.totalMins+=pbg.mins;
+        addVol(bucket,pbg.vol,0);
+      });
+    } else {
+      exs.forEach(function(item){
+        var ex=planResolveEx(item);
+        if(!ex) return;
+        var v=planCalcExVol(ex,item.mins);
+        var t=item.minsTotal!=null?item.minsTotal:item.mins;
+        var itemGroup=item.group||'Todos';
+        if(itemGroup==='Todos'){
+          addVol(todosSum,v,t);
+        } else {
+          if(!specificSums[itemGroup]) specificSums[itemGroup]=mkSum();
+          addVol(specificSums[itemGroup],v,t);
+        }
+      });
+    }
+  });
+
+  // Build result: Todos=shared base only; subgroups=base+specific (cumulative)
+  var result={'Todos':todosSum};
+  subGroupNames.forEach(function(g){
+    var spec=specificSums[g]||mkSum();
+    result[g]={
+      mts: todosSum.mts+spec.mts, hsr: todosSum.hsr+spec.hsr,
+      h2:  todosSum.h2+spec.h2,   h25: todosSum.h25+spec.h25,
+      acc: todosSum.acc+spec.acc, dcc: todosSum.dcc+spec.dcc,
+      rhie:todosSum.rhie+spec.rhie,
+      totalMins: todosSum.totalMins+spec.totalMins,
+      _specific: spec
+    };
+  });
+  return result;
+}
+function planSave(){
+  saveData(); // PLAN_WEEKS is now included in the main saveData blob
+}
+
+function planLoad(){
+  // PLAN_WEEKS is loaded by the main loadData at startup — nothing to do here
+  planMigrateAll();
+}
+
+// ── Weeks list ────────────────────────────────────────────────────────────────
+function planRenderWeeksList(){
+  var wrap=document.getElementById('plan-weeks-list');
+  if(!wrap)return;
+  if(!PLAN_WEEKS.length){
+    wrap.innerHTML='<div style="font-size:11px;color:#aaa;padding:10px 0">No hay semanas guardadas. Creá una nueva.</div>';
+    return;
+  }
+
+  // Construir índices ordenados: el último creado va primero
+  // Mantenemos el índice original (i) porque planEditWeek/planDeleteWeek operan sobre PLAN_WEEKS[i]
+  var indexed = PLAN_WEEKS.map(function(w, i){return {w:w, i:i};});
+  indexed.sort(function(a, b){
+    // Comparar por fecha de creación descendente (más nuevo primero)
+    return (b.w.created||'').localeCompare(a.w.created||'');
+  });
+
+  function summarize(item){
+    var w = item.w;
+    var d = new Date(w.created);
+    var dateStr = d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();
+    var totalMins = w.days.reduce(function(a,day){
+      if(day.blocks) return a + planSumDay(day).totalMins;
+      return a + (day.exercises||[]).reduce(function(b,e){return b+e.mins;},0);
+    }, 0);
+    return {name:w.name, dateStr:dateStr, totalMins:totalMins};
+  }
+
+  var html = '';
+
+  // 1) La última semana destacada (siempre la primera)
+  var first = indexed[0];
+  var fs = summarize(first);
+  html +=
+    '<div style="background:linear-gradient(135deg,var(--club-c2,#3B4D88) 0%,#2d3d70 100%);border-radius:9px;padding:12px 14px;color:#fff;box-shadow:0 2px 6px rgba(59,77,136,0.2)">'+
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+        '<span style="font-size:9px;background:#fff3;padding:1px 7px;border-radius:9px;letter-spacing:.5px;font-weight:700">⭐ ÚLTIMA</span>'+
+        '<div style="flex:1;min-width:120px">'+
+          '<div style="font-size:13px;font-weight:800">'+fs.name+'</div>'+
+          '<div style="font-size:10px;opacity:.85">Creada '+fs.dateStr+' · '+fs.totalMins+' min planificados</div>'+
+        '</div>'+
+        '<button onclick="planEditWeek('+first.i+')" style="background:#fff;color:var(--club-c2,#3B4D88);border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">✏️ Editar</button>'+
+        '<button onclick="planExportWeekPDF('+first.i+')" style="background:#fff3;color:#fff;border:1px solid #fff5;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer">🖨️ PDF</button>'+
+        '<button onclick="planDeleteWeek('+first.i+')" title="Eliminar" style="background:#fff2;color:#fff;border:none;border-radius:5px;padding:5px 9px;font-size:13px;cursor:pointer">🗑</button>'+
+      '</div>'+
+    '</div>';
+
+  // 2) Selector dropdown para anteriores (si hay)
+  if(indexed.length > 1){
+    var optsHtml = indexed.slice(1).map(function(it){
+      var s = summarize(it);
+      return '<option value="'+it.i+'">'+s.name+' — '+s.dateStr+' · '+s.totalMins+' min</option>';
+    }).join('');
+    html +=
+      '<div id="plan-prev-weeks-box" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:#fff;border:1px solid #e0e0e0;border-radius:7px;margin-top:8px">'+
+        '<span style="font-size:11px;font-weight:700;color:#555">📚 Microciclos anteriores:</span>'+
+        '<select id="plan-prev-week-sel" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;background:#fff">'+
+          '<option value="">— Seleccioná uno para editar/exportar —</option>'+
+          optsHtml+
+        '</select>'+
+        '<button onclick="planEditSelectedPrev()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">✏️ Editar</button>'+
+        '<button onclick="planExportSelectedPrev()" style="background:#1D9E75;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">🖨️ PDF</button>'+
+        '<button onclick="planDeleteSelectedPrev()" title="Eliminar" style="background:#fafafa;color:#E24B4A;border:1px solid #E24B4A55;border-radius:5px;padding:5px 9px;font-size:13px;cursor:pointer">🗑</button>'+
+      '</div>';
+  }
+
+  wrap.innerHTML = html;
+
+  // El botón del header solo aparece si hay microciclos anteriores
+  var prevBtn = document.getElementById('plan-prev-toggle-btn');
+  if(prevBtn) prevBtn.style.display = (indexed.length > 1) ? '' : 'none';
+}
+
+// Mostrar/ocultar el cuadro de microciclos anteriores desde el botón del header
+function planTogglePrevWeeks(){
+  var box = document.getElementById('plan-prev-weeks-box');
+  if(!box) return;
+  box.style.display = (box.style.display === 'none' || !box.style.display) ? 'flex' : 'none';
+}
+window.planTogglePrevWeeks = planTogglePrevWeeks;
+
+// Helpers para el selector de anteriores
+function _planSelectedPrevIdx(){
+  var sel = document.getElementById('plan-prev-week-sel');
+  if(!sel || !sel.value) return null;
+  return parseInt(sel.value, 10);
+}
+function planEditSelectedPrev(){
+  var i = _planSelectedPrevIdx();
+  if(i==null){ alert('Elegí primero un microciclo anterior del menú.'); return; }
+  planEditWeek(i);
+}
+function planExportSelectedPrev(){
+  var i = _planSelectedPrevIdx();
+  if(i==null){ alert('Elegí primero un microciclo anterior del menú.'); return; }
+  planExportWeekPDF(i);
+}
+function planDeleteSelectedPrev(){
+  var i = _planSelectedPrevIdx();
+  if(i==null){ alert('Elegí primero un microciclo anterior del menú.'); return; }
+  planDeleteWeek(i);
+}
+window.planEditSelectedPrev = planEditSelectedPrev;
+window.planExportSelectedPrev = planExportSelectedPrev;
+window.planDeleteSelectedPrev = planDeleteSelectedPrev;
+
+function planDeleteWeek(i){
+  if(!confirm('¿Eliminar "'+PLAN_WEEKS[i].name+'"?'))return;
+  var w=PLAN_WEEKS[i];
+  // Borrar también de la nube (si no, reaparece al recargar)
+  if(w && typeof sbPlanWeekDelete==='function'){ try{ sbPlanWeekDelete(w.name, w.created); }catch(e){} }
+  // v143: tombstone, para que el merge con la nube (o el sync del compañero)
+  // no la vuelva a insertar.
+  try{ if(typeof planTombAdd==='function') planTombAdd(planWeekKey(w)); }catch(e){}
+  PLAN_WEEKS.splice(i,1);
+  planSave();
+  planRenderWeeksList();
+}
+
+// ── New / Edit week ───────────────────────────────────────────────────────────
+// v119: helper — arma la lista de grupos heredando la plantilla global.
+// "Todos" siempre primero; después los grupos fijos definidos por el CT.
+function planTemplateGroups(){
+  var g=[{id:'todos',name:'Todos',color:'#555'}];
+  (PLAN_GROUP_DEFAULTS||[]).forEach(function(d){
+    if(d&&d.name&&d.name.toLowerCase()!=='todos')g.push({id:d.id||('grp_'+Date.now()+Math.random().toString(36).slice(2,6)),name:d.name,color:d.color||'#3B4D88'});
+  });
+  return g;
+}
+window.planTemplateGroups=planTemplateGroups;
+
+function planNewWeek(){
+  _planEditIdx=null;
+  _planEditData={
+    name:'',
+    created:new Date().toISOString(),
+    refMode:'current',
+    // FIX v119: la semana nueva HEREDA la plantilla global de grupos.
+    // Antes arrancaba con [Todos] solamente, y como el array no estaba vacío,
+    // la herencia de planGetGroups() nunca se disparaba — había que recrear
+    // los grupos a mano en cada semana.
+    groups:planTemplateGroups(),
+    days:PLAN_DAY_LABELS.map(function(lbl,i){
+      return{label:lbl, mdLabel:PLAN_MD_DEFAULTS[i], blocks:[]};
+    })
+  };
+  // v142: proponer nombre, fecha de inicio y duración continuando la última
+  // semana con fechas. Así crear la semana siguiente es un solo click.
+  var _prev=(typeof planWeeksWithDates==='function')?planWeeksWithDates():[];
+  var _last=_prev.length?_prev[_prev.length-1]:null;
+  var _sugName='', _sugStart='', _sugLen=7;
+  if(_last){
+    _sugLen=_last.len||7;
+    _sugStart=planShiftISO(_last.end,1);
+    var _nn=planWeekNextName(_last.week);
+    if(_nn)_sugName=_nn;
+  } else {
+    // Sin semanas con fecha: proponer el lunes de esta semana
+    var _t=new Date();
+    var _dow=(_t.getDay()+6)%7;
+    _t.setDate(_t.getDate()-_dow);
+    _sugStart=_t.getFullYear()+'-'+String(_t.getMonth()+1).padStart(2,'0')+'-'+String(_t.getDate()).padStart(2,'0');
+    // Continuar la numeración del microciclo según el GPS, si lo hay
+    var _wks=(typeof cargaMicroWeeksByDate==='function')?cargaMicroWeeksByDate():[];
+    if(_wks.length){
+      var _nn2=planWeekNextName(_wks[_wks.length-1].week);
+      if(_nn2)_sugName=_nn2;
+    }
+  }
+  _planEditData.startDate=_sugStart;
+  _planEditData.weekLen=_sugLen;
+  if(_sugName)_planEditData.name=_sugName;
+  document.getElementById('plan-week-name').value=_sugName;
+  document.getElementById('plan-ref-mode').value='current';
+  var _sEl2=document.getElementById('plan-week-start');
+  var _lEl2=document.getElementById('plan-week-len');
+  if(_sEl2)_sEl2.value=_sugStart;
+  if(_lEl2)_lEl2.value=String(_sugLen);
+  planWeekRangeHint();
+  planRefModeChange();
+  document.getElementById('plan-editor').style.display='';
+  planRenderGroups();
+  planRenderDays();
+  planRenderWeekSummary();
+  document.getElementById('plan-editor').scrollIntoView({behavior:'smooth'});
+}
+window.planNewWeek=planNewWeek;
+
+function planEditWeek(i){
+  _planEditIdx=i;
+  // v135: garantizar uid estable ANTES de copiar, para que el autoguardado
+  // pueda reencontrar esta semana aunque el orden de PLAN_WEEKS cambie.
+  if(PLAN_WEEKS[i] && !PLAN_WEEKS[i].uid){
+    PLAN_WEEKS[i].uid='w'+Date.now()+Math.random().toString(36).slice(2,7);
+    planSave();
+  }
+  _planEditData=JSON.parse(JSON.stringify(PLAN_WEEKS[i]));
+  planMigrateWeek(_planEditData);
+  if(!_planEditData.groups||!_planEditData.groups.length)
+    _planEditData.groups=planTemplateGroups();
+  document.getElementById('plan-week-name').value=_planEditData.name;
+  document.getElementById('plan-ref-mode').value=_planEditData.refMode||'current';
+  // v142: cargar fecha de inicio y duración del microciclo
+  var _sEl=document.getElementById('plan-week-start');
+  var _lEl=document.getElementById('plan-week-len');
+  if(_sEl)_sEl.value=_planEditData.startDate||'';
+  if(_lEl)_lEl.value=String(_planEditData.weekLen||7);
+  planWeekRangeHint();
+  planRefModeChange();
+  document.getElementById('plan-editor').style.display='';
+  planRenderGroups();
+  planRenderDays();
+  planRenderWeekSummary();
+  document.getElementById('plan-editor').scrollIntoView({behavior:'smooth'});
+}
+window.planEditWeek=planEditWeek;
+
+function planCancelEdit(){
+  _planEditIdx=null; _planEditData=null;
+  document.getElementById('plan-editor').style.display='none';
+}
+window.planCancelEdit=planCancelEdit;
+
+// ── Grupos de trabajo ─────────────────────────────────────────────────────────
+var PLAN_GROUP_DEFAULTS=[
+  {id:'todos',name:'Todos',color:'#555'},
+  {id:'titulares',name:'Titulares',color:'#0C447C'},
+  {id:'suplentes',name:'Suplentes',color:'#1D9E75'},
+  {id:'no_conv',name:'No convocados',color:'#EF9F27'},
+];
+
+// ── Plantilla GLOBAL de grupos ──
+// Los grupos que definís quedan fijos: cada semana nueva los hereda (además
+// de "Todos"), sin tener que recrearlos. Editable: agregar/quitar actualiza
+// la plantilla. Viaja a la nube por app_settings.
+var PLAN_GROUP_DEFAULTS=[];
+try{ PLAN_GROUP_DEFAULTS=JSON.parse(localStorage.getItem('planGroupDefaults_v1')||'[]')||[]; }catch(e){ PLAN_GROUP_DEFAULTS=[]; }
+function planSaveGroupDefaults(){
+  try{ localStorage.setItem('planGroupDefaults_v1', JSON.stringify(PLAN_GROUP_DEFAULTS)); }catch(e){}
+  if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} }
+}
+function planGetGroups(){
+  if(!_planEditData) return [];
+  if(!_planEditData.groups||!_planEditData.groups.length){
+    // Semana sin grupos: heredar la plantilla global (Todos siempre primero)
+    _planEditData.groups=planTemplateGroups();
+  }
+  return _planEditData.groups;
+}
+
+function planGroupColor(name){
+  var g=(planGetGroups()).find(function(g){return g.name===name;});
+  return g?g.color:'#555';
+}
+
+function planRenderGroups(){
+  var cont=document.getElementById('plan-groups-list');
+  if(!cont||!_planEditData) return;
+  var groups=planGetGroups();
+  cont.innerHTML=groups.map(function(g,gi){
+    var isTodos=g.id==='todos';
+    return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:12px;border:1.5px solid '+g.color+';background:'+g.color+'18;font-size:10px;font-weight:700;color:'+g.color+'">'
+      +'<span style="width:7px;height:7px;border-radius:50%;background:'+g.color+'"></span>'
+      +g.name
+      +(!isTodos?'<button onclick="planRemoveGroup('+gi+')" style="border:none;background:none;cursor:pointer;color:'+g.color+';font-size:11px;padding:0;margin-left:2px;line-height:1" title="Eliminar">✕</button>':'')
+    +'</span>';
+  }).join('');
+  planRebuildGroupSelect();
+}
+window.planRenderGroups=planRenderGroups;
+
+function planRebuildGroupSelect(){
+  var sel=document.getElementById('plan-modal-group');
+  if(!sel) return;
+  var cur=sel.value;
+  var groups=planGetGroups();
+  sel.innerHTML=groups.map(function(g){
+    return '<option value="'+g.name+'"'+(g.name===cur?' selected':'')+'>'+g.name+'</option>';
+  }).join('');
+}
+window.planRebuildGroupSelect=planRebuildGroupSelect;
+
+function planAddGroup(){
+  if(!_planEditData) return;
+  var nameEl=document.getElementById('plan-new-group-name');
+  var colorEl=document.getElementById('plan-new-group-color');
+  var name=(nameEl?nameEl.value.trim():'');
+  var color=(colorEl?colorEl.value:'#3B4D88');
+  if(!name){if(nameEl)nameEl.focus();return;}
+  var groups=planGetGroups();
+  if(groups.find(function(g){return g.name.toLowerCase()===name.toLowerCase();})){
+    alert('Ya existe un grupo con ese nombre.');return;
+  }
+  groups.push({id:'grp_'+Date.now(),name:name,color:color});
+  // La plantilla global también lo incorpora: las próximas semanas lo heredan
+  if(!PLAN_GROUP_DEFAULTS.find(function(g){return g.name.toLowerCase()===name.toLowerCase();})){
+    PLAN_GROUP_DEFAULTS.push({id:'grp_'+Date.now(),name:name,color:color});
+    planSaveGroupDefaults();
+  }
+  if(nameEl)nameEl.value='';
+  // Auto-save the current week so subgroups persist even without clicking "Guardar semana"
+  if(_planEditIdx!==null){
+    PLAN_WEEKS[_planEditIdx]=JSON.parse(JSON.stringify(_planEditData));
+  } else if(_planEditData.name) {
+    _planEditData.created=_planEditData.created||new Date().toISOString();
+    PLAN_WEEKS.push(JSON.parse(JSON.stringify(_planEditData)));
+    _planEditIdx=PLAN_WEEKS.length-1;
+  }
+  planSave();
+  planRenderGroups();
+  planRenderDays();
+}
+window.planAddGroup=planAddGroup;
+
+function planRemoveGroup(gi){
+  if(!_planEditData) return;
+  var groups=planGetGroups();
+  var g=groups[gi];
+  if(!g||g.id==='todos') return;
+  if(!confirm('¿Eliminar "'+g.name+'"? Los ejercicios asignados pasarán a "Todos".')) return;
+  // ¿También de la plantilla global (para que las próximas semanas no lo hereden)?
+  var di2=PLAN_GROUP_DEFAULTS.findIndex(function(x){return x.name.toLowerCase()===g.name.toLowerCase();});
+  if(di2>=0 && confirm('¿Quitarlo también de la plantilla para las próximas semanas?\n(Aceptar = no aparece más · Cancelar = solo lo saco de esta semana)')){
+    PLAN_GROUP_DEFAULTS.splice(di2,1);
+    planSaveGroupDefaults();
+  }
+  _planEditData.days.forEach(function(day){
+    planMigrateDay(day);
+    (day.blocks||[]).forEach(function(block){
+      (block.exercises||[]).forEach(function(item){
+        if(item.group===g.name) item.group='Todos';
+      });
+    });
+  });
+  groups.splice(gi,1);
+  // Auto-save
+  if(_planEditIdx!==null) PLAN_WEEKS[_planEditIdx]=JSON.parse(JSON.stringify(_planEditData));
+  planSave();
+  planRenderGroups();
+  planRenderDays();
+  planRenderWeekSummary();
+}
+window.planRemoveGroup=planRemoveGroup;
+
+function planSetExGroup(di,bi,ei,group){
+  if(!_planEditData) return;
+  _planEditData.days[di].blocks[bi].exercises[ei].group=group;
+  planTouchDay(di);
+  planRenderDays();
+  planRenderWeekSummary();
+  planAutoSave();
+}
+window.planSetExGroup=planSetExGroup;
+
+// ── AUTOGUARDADO (v130) ───────────────────────────────────────────────────
+// Todo cambio estructural de la semana (agregar/quitar ejercicios o bloques,
+// marcar paralelo, cambiar grupo o tiempos) persiste solo. Antes, si alguien
+// se olvidaba de apretar "Guardar semana", se perdía todo el trabajo.
+// Si la semana todavía no existe en la lista, se crea al primer cambio para
+// que el borrador quede guardado igual.
+// ── v135: proteger la semana EN EDICIÓN de los payloads de la nube ──────────
+// loadData/aplicar payload hace PLAN_WEEKS.length=0 y reemplaza todo. Si en ese
+// momento alguien está editando una semana, la versión de la nube (más vieja)
+// pisaba su trabajo y después se resubía, borrando los ejercicios recién
+// agregados. Este guardián reinyecta la copia en edición, que es la más fresca.
+function planPreserveEditing(){
+  try{
+    if(typeof _planEditData==='undefined' || !_planEditData) return;
+    if(!_planEditData.uid) return;
+    var idx=-1;
+    for(var i=0;i<PLAN_WEEKS.length;i++){
+      if(PLAN_WEEKS[i] && PLAN_WEEKS[i].uid===_planEditData.uid){ idx=i; break; }
+    }
+    if(idx>=0){
+      // v146: FUSIONAR con lo que trajo la nube, no pisarlo. Antes esta función
+      // reinyectaba la copia en edición tal cual, así que borraba los días que
+      // el compañero acababa de modificar — era la causa de "hay tareas que no
+      // le aparecen y otras que le aparecen eliminadas".
+      var merged=(typeof planMergeWeek==='function')
+        ? planMergeWeek(_planEditData, PLAN_WEEKS[idx])
+        : JSON.parse(JSON.stringify(_planEditData));
+      PLAN_WEEKS[idx]=merged;
+      _planEditData=merged;
+      if(typeof _planEditIdx!=='undefined')_planEditIdx=idx;
+      // Refrescar la vista si la semana abierta cambió
+      try{ if(typeof planRenderDays==='function'){ planRenderDays(); planRenderWeekSummary(); } }catch(e){}
+    } else {
+      var mine=JSON.parse(JSON.stringify(_planEditData));
+      PLAN_WEEKS.push(mine);
+      if(typeof _planEditIdx!=='undefined')_planEditIdx=PLAN_WEEKS.length-1;
+    }
+  }catch(e){ console.warn('planPreserveEditing:',e); }
+}
+window.planPreserveEditing=planPreserveEditing;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRABAJO COLABORATIVO EN PLANIFICACIÓN (v143)
+// PROBLEMA: el sync subía SIEMPRE el array completo de semanas con la copia
+// que tenía cada dispositivo en memoria, y la carga reemplazaba la semana
+// entera con la de la nube sin comparar fechas. Resultado: "último que guarda
+// gana" a nivel de semana completa — si tu compañero tocaba cualquier cosa,
+// su copia (sin tus ejercicios recién agregados) pisaba la tuya y los
+// ejercicios desaparecían. Y viceversa.
+// SOLUCIÓN: sello de modificación por DÍA. El merge compara día por día y se
+// queda con el más nuevo de cada uno. Si él edita el MD-3 y vos el MD-1 de la
+// misma semana, se conservan los dos. Además el sync sube sólo lo que cambió
+// y hay refresco automático para ver los cambios del otro sin recargar.
+function planTouchDay(di){
+  if(!_planEditData||!_planEditData.days||!_planEditData.days[di])return;
+  _planEditData.days[di]._upd=Date.now();
+  _planEditData._upd=Date.now();
+  _planEditData._dirty=true;
+}
+window.planTouchDay=planTouchDay;
+
+// Marca la semana entera (cambios que no son de un día puntual: nombre, grupos…)
+function planTouchWeek(){
+  if(!_planEditData)return;
+  _planEditData._upd=Date.now();
+  _planEditData._dirty=true;
+}
+window.planTouchWeek=planTouchWeek;
+
+// Fusiona dos versiones de una MISMA semana quedándose con lo más nuevo de
+// cada día. `mine` y `theirs` son objetos de semana con el mismo uid.
+function planMergeWeek(mine, theirs){
+  if(!mine) return theirs;
+  if(!theirs) return mine;
+  var mu=Number(mine._upd||0), tu=Number(theirs._upd||0);
+  // La base es la versión más nueva a nivel de semana (nombre, grupos, fechas)
+  var base = (tu>mu) ? JSON.parse(JSON.stringify(theirs)) : JSON.parse(JSON.stringify(mine));
+  var other = (tu>mu) ? mine : theirs;
+  if(!Array.isArray(base.days)||!Array.isArray(other.days)) return base;
+  // Y dentro, cada día gana por su propio sello
+  var n=Math.max(base.days.length, other.days.length);
+  for(var i=0;i<n;i++){
+    var bd=base.days[i], od=other.days[i];
+    if(!od) continue;
+    if(!bd){ base.days[i]=JSON.parse(JSON.stringify(od)); continue; }
+    var bu=Number(bd._upd||0), ou=Number(od._upd||0);
+    if(ou>bu) base.days[i]=JSON.parse(JSON.stringify(od));
+  }
+  base._upd=Math.max(mu,tu);
+  return base;
+}
+window.planMergeWeek=planMergeWeek;
+
+// Identidad estable de una semana (uid nuevo, o name+created para las viejas)
+function planWeekKey(w){
+  if(!w) return '';
+  if(w.uid) return 'uid:'+w.uid;
+  return 'nc:'+(w.name||'')+'||'+(w.created||'');
+}
+window.planWeekKey=planWeekKey;
+
+// ── Tombstones de semanas borradas ──
+var PLAN_DELETED={};
+try{
+  var _pdw=JSON.parse(localStorage.getItem('planDeleted_v1')||'null');
+  if(_pdw&&typeof _pdw==='object'&&!Array.isArray(_pdw))PLAN_DELETED=_pdw;
+}catch(e){}
+function planTombSave(){ try{ localStorage.setItem('planDeleted_v1',JSON.stringify(PLAN_DELETED)); }catch(e){} }
+function planTombAdd(key){ if(!key)return; PLAN_DELETED[key]=new Date().toISOString(); planTombSave(); }
+function planTombHas(key){ return key && PLAN_DELETED[key]!==undefined; }
+window.planTombAdd=planTombAdd;
+window.planTombHas=planTombHas;
+
+// Fusiona un conjunto de semanas de la nube con las locales.
+// Devuelve {weeks, changed} — changed indica si algo cambió respecto a lo local.
+function planMergeAll(cloudWeeks){
+  var byKey={}, changed=false;
+  (PLAN_WEEKS||[]).forEach(function(w){
+    var k=planWeekKey(w);
+    if(planTombHas(k))return;
+    byKey[k]=w;
+  });
+  (cloudWeeks||[]).forEach(function(cw){
+    var k=planWeekKey(cw);
+    if(planTombHas(k)) return;          // borrada acá: no revive
+    var mine=byKey[k];
+    if(!mine){ byKey[k]=cw; changed=true; return; }
+    var merged=planMergeWeek(mine, cw);
+    if(JSON.stringify(merged)!==JSON.stringify(mine)) changed=true;
+    byKey[k]=merged;
+  });
+  var out=Object.keys(byKey).map(function(k){return byKey[k];});
+  return {weeks:out, changed:changed};
+}
+window.planMergeAll=planMergeAll;
+
+// ── REFRESCO AUTOMÁTICO (v143) ────────────────────────────────────────────
+// Cada 20 segundos, mientras se está mirando la pestaña Planificación, se
+// consulta la nube y se fusiona lo que hizo el compañero. Antes había que
+// recargar para enterarse, y en el medio se pisaban cosas.
+// ── REFRESCO AUTOMÁTICO GLOBAL (v146) ─────────────────────────────────────
+// Antes esto sólo corría dentro de la pestaña Planificación, así que los
+// cambios de estado de jugadores (Perfiles / Hoy) nunca llegaban al otro sin
+// recargar. Ahora refresca planificación Y perfiles, en cualquier vista.
+var _planPollTimer=null, _planPollBusy=false;
+function planPollStart(){
+  if(_planPollTimer)return;
+  _planPollTimer=setInterval(planPollOnce, 15000);
+}
+function planPollStop(){
+  if(_planPollTimer){ clearInterval(_planPollTimer); _planPollTimer=null; }
+}
+window.planPollStart=planPollStart;
+window.planPollStop=planPollStop;
+
+// Trae perfiles de la nube y aplica el mismo criterio: gana el más nuevo.
+// v148: trae del servidor los check-ins nuevos (wellness y PSE). Sin esto,
+// aunque el celular del jugador los subiera, los demás dispositivos no los
+// veían hasta recargar la página entera.
+// v151: trae de la nube los ejercicios nuevos o modificados de la biblioteca.
+var _drPollBusy=false;
+function drillsPollOnce(){
+  if(_drPollBusy)return Promise.resolve(false);
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(false);
+  if(typeof D==='undefined'||!Array.isArray(D))return Promise.resolve(false);
+  if(!window._sbDrillsSynced)return Promise.resolve(false);  // esperar la carga inicial
+  _drPollBusy=true;
+  return sbClient.from('drills_exercises').select('*').eq('categoria',SB_CATEGORIA).then(function(r){
+    _drPollBusy=false;
+    if(!r||r.error||!r.data)return false;
+    var added=0, updated=0;
+    r.data.forEach(function(row){
+      var d=(typeof _sbDrillFromRow==='function')?_sbDrillFromRow(row):null;
+      if(!d||d.id==null)return;
+      if(typeof drillIsDeletedRow==='function'&&drillIsDeletedRow(d))return;   // borrado: no revive
+      var idx=D.findIndex(function(x){return Number(x.id)===Number(d.id);});
+      if(idx<0){ D.push(d); added++; return; }
+      // Gana el más nuevo
+      if(Number(d._upd||0) > Number(D[idx]._upd||0)){ D[idx]=d; updated++; }
+    });
+    if(added||updated){
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      try{ if(typeof rebuildCatBtns==='function')rebuildCatBtns(); }catch(e){}
+      try{ if(typeof refresh==='function')refresh(); }catch(e){}
+      // Refrescar la planificación: puede haber tareas esperando este ejercicio
+      try{
+        if(typeof mainView!=='undefined'&&mainView==='plan'){
+          if(typeof planRenderDays==='function')planRenderDays();
+          if(typeof planRenderWeekSummary==='function')planRenderWeekSummary();
+        }
+      }catch(e){}
+      console.log('[Sync] Biblioteca: '+added+' ejercicio(s) nuevo(s), '+updated+' actualizado(s).');
+    }
+    return (added+updated)>0;
+  }).catch(function(){ _drPollBusy=false; return false; });
+}
+window.drillsPollOnce=drillsPollOnce;
+
+var _wpPollBusy=false;
+function wellPsePollOnce(){
+  if(_wpPollBusy)return Promise.resolve(false);
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(false);
+  _wpPollBusy=true;
+  // Sólo los últimos 21 días: alcanza para el día a día y no pesa
+  var since=new Date(); since.setDate(since.getDate()-21);
+  var sinceISO=since.toISOString().slice(0,10);
+  var tasks=[
+    sbClient.from('wellness_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO),
+    sbClient.from('pse_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO)
+  ];
+  return Promise.all(tasks).then(function(res){
+    _wpPollBusy=false;
+    var changed=0;
+    // Wellness
+    try{
+      var wRows=(res[0]&&res[0].data)||[];
+      wRows.forEach(function(row){
+        var rec=(typeof _sbWellnessFromRow==='function')?_sbWellnessFromRow(row):Object.assign({name:row.name,date:row.date},row.data||{});
+        if(!rec||!rec.name||!rec.date)return;
+        var k=(typeof cargaNormName==='function'?cargaNormName(rec.name):rec.name)+'__'+((typeof cargaParseDate==='function'&&cargaParseDate(rec.date))||rec.date);
+        var idx=WELLNESS_DATA.findIndex(function(x){
+          return (typeof cargaNormName==='function'?cargaNormName(x.name):x.name)+'__'+((typeof cargaParseDate==='function'&&cargaParseDate(x.date))||x.date)===k;
+        });
+        if(idx<0){ WELLNESS_DATA.push(rec); changed++; }
+        else {
+          var mioW=WELLNESS_DATA[idx];
+          if(Number(mioW._upd||0) > Number(rec._upd||0)) return;   // v164
+          if(JSON.stringify(mioW)!==JSON.stringify(rec)){ WELLNESS_DATA[idx]=rec; changed++; }
+        }
+      });
+    }catch(e){}
+    // PSE
+    try{
+      var pRows=(res[1]&&res[1].data)||[];
+      pRows.forEach(function(row){
+        var rec=(typeof _sbPseFromRow==='function')?_sbPseFromRow(row):Object.assign({name:row.name,date:row.date},row.data||{});
+        if(!rec||!rec.name||!rec.date)return;
+        var k=(typeof cargaNormName==='function'?cargaNormName(rec.name):rec.name)+'__'+rec.date+'__'+(rec.week||'')+'__'+(rec.day||'');
+        var idx=PSE_DATA.findIndex(function(x){
+          return (typeof cargaNormName==='function'?cargaNormName(x.name):x.name)+'__'+x.date+'__'+(x.week||'')+'__'+(x.day||'')===k;
+        });
+        if(idx<0){ PSE_DATA.push(rec); changed++; }
+        else {
+          // v164: NO pisar si lo local es más nuevo. Éste era el bug de los
+          // minutos: se escribían, el refresco traía la fila de la nube (que
+          // todavía no los tenía) y los borraba.
+          var mio=PSE_DATA[idx];
+          if(Number(mio._upd||0) > Number(rec._upd||0)) return;
+          if(JSON.stringify(mio)!==JSON.stringify(rec)){ PSE_DATA[idx]=rec; changed++; }
+        }
+      });
+    }catch(e){}
+    if(changed){
+      try{ if(typeof nameApplyAliases==='function') nameApplyAliases(); }catch(e){}
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      try{ if(typeof mainView!=='undefined'&&mainView==='hoy'&&typeof hoyRender==='function')hoyRender(); }catch(e){}
+      try{ if(typeof mainView!=='undefined'&&mainView==='carga'&&typeof cargaRender==='function')cargaRender(); }catch(e){}
+      console.log('[Sync] '+changed+' check-in(s) nuevos recibidos.');
+    }
+    return changed>0;
+  }).catch(function(){ _wpPollBusy=false; return false; });
+}
+window.wellPsePollOnce=wellPsePollOnce;
+
+function profPollOnce(){
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(false);
+  return sbClient.from('player_profiles').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
+    if(!r||r.error||!r.data)return false;
+    var changed=false, cloudIds={};
+    r.data.forEach(function(row){
+      cloudIds[row.id]=true;
+      if(typeof profIsDeleted==='function'&&profIsDeleted(row.id))return;
+      var prof=Object.assign({}, row.data||{});
+      prof.name=row.name;
+      if(prof._upd==null&&row.updated_at){ var t=Date.parse(row.updated_at); if(!isNaN(t))prof._upd=t; }
+      var mine=PLAYER_PROFILES[row.id];
+      if(mine && Number(mine._upd||0) >= Number(prof._upd||0)) return;   // el mío manda
+      if(!mine || JSON.stringify(mine)!==JSON.stringify(prof)){
+        PLAYER_PROFILES[row.id]=prof; changed=true;
+      }
+    });
+    // Borrados hechos por el compañero
+    Object.keys(PLAYER_PROFILES).forEach(function(k){
+      if(cloudIds[k]||_profDirty[k])return;
+      delete PLAYER_PROFILES[k]; changed=true;
+    });
+    if(changed){
+      try{ if(typeof nameApplyAliases==='function') nameApplyAliases(); }catch(e){}
+      try{ if(typeof saveData==='function')saveData(); }catch(e){}
+      try{ if(typeof renderProfilesTable==='function')renderProfilesTable(); }catch(e){}
+      try{ if(typeof mainView!=='undefined'&&mainView==='hoy'&&typeof hoyRender==='function')hoyRender(); }catch(e){}
+      console.log('[Sync] Perfiles actualizados desde la nube.');
+    }
+    return changed;
+  }).catch(function(){ return false; });
+}
+window.profPollOnce=profPollOnce;
+
+function planPollOnce(){
+  if(_planPollBusy)return;
+  if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return;
+  if(typeof document!=='undefined'&&document.hidden)return;   // pestaña en segundo plano
+  _planPollBusy=true;
+  // Perfiles siempre (el estado de un jugador afecta a todas las vistas)
+  profPollOnce();
+  // v148: y los check-ins que cargan los jugadores desde el celular
+  wellPsePollOnce();
+  // v151: y los ejercicios nuevos de la biblioteca. Sin esto, un ejercicio que
+  // creaba el compañero no llegaba hasta recargar la página, y la planificación
+  // que lo usaba mostraba "(eliminado)".
+  drillsPollOnce();
+  sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
+    _planPollBusy=false;
+    if(!r||r.error||!r.data)return;
+    var cloud=r.data.map(_sbPlanWeekFromRow);
+    var res=planMergeAll(cloud);
+    // Propagar semanas borradas por el compañero
+    var cloudKeys={};
+    cloud.forEach(function(cw){ cloudKeys[planWeekKey(cw)]=true; });
+    var kept=[];
+    res.weeks.forEach(function(w){
+      var k=planWeekKey(w);
+      // Si no está en la nube y tampoco la estoy editando ni es nueva sin subir,
+      // el compañero la borró.
+      if(!cloudKeys[k] && !w._dirty && cloud.length){
+        if(_planEditData && planWeekKey(_planEditData)===k){ kept.push(w); return; }
+        res.changed=true; return;
+      }
+      kept.push(w);
+    });
+    if(!res.changed)return;
+    PLAN_WEEKS.length=0;
+    kept.forEach(function(w){ PLAN_WEEKS.push(w); });
+    // Si hay una semana abierta en el editor, fusionarla en vivo
+    var reopened=false;
+    if(_planEditData&&_planEditData.uid){
+      var k2=planWeekKey(_planEditData);
+      var updated=PLAN_WEEKS.find(function(w){ return planWeekKey(w)===k2; });
+      if(updated){
+        var merged=planMergeWeek(_planEditData, updated);
+        if(JSON.stringify(merged)!==JSON.stringify(_planEditData)){
+          _planEditData=merged;
+          var idx=PLAN_WEEKS.findIndex(function(w){ return planWeekKey(w)===k2; });
+          if(idx>=0){ PLAN_WEEKS[idx]=merged; _planEditIdx=idx; }
+          try{ planRenderDays(); planRenderWeekSummary(); }catch(e){}
+          reopened=true;
+        }
+      }
+    }
+    try{ if(typeof saveData==='function')saveData(); }catch(e){}
+    try{ if(typeof planRenderWeeksList==='function')planRenderWeeksList(); }catch(e){}
+    if(reopened) planShowSyncToast('Se actualizó con los cambios de tu compañero');
+    console.log('[Sync] Planificación actualizada desde la nube.');
+  }).catch(function(){ _planPollBusy=false; });
+}
+window.planPollOnce=planPollOnce;
+
+// Aviso discreto cuando entran cambios de otra cuenta
+function planShowSyncToast(msg){
+  var el=document.getElementById('plan-sync-toast');
+  if(!el){
+    el=document.createElement('div');
+    el.id='plan-sync-toast';
+    el.style.cssText='position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#0D1B2A;color:#fff;'+
+      'padding:9px 16px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 6px 24px rgba(0,0,0,.3);'+
+      'opacity:0;transition:opacity .3s;pointer-events:none';
+    document.body.appendChild(el);
+  }
+  el.textContent='🔄 '+msg;
+  el.style.opacity='1';
+  clearTimeout(el._t);
+  el._t=setTimeout(function(){ el.style.opacity='0'; },3500);
+}
+window.planShowSyncToast=planShowSyncToast;
+
+function planAutoSave(){
+  if(!_planEditData)return;
+  try{
+    var nmEl=document.getElementById('plan-week-name');
+    var nm=nmEl&&nmEl.value?nmEl.value.trim():'';
+    if(nm)_planEditData.name=nm;
+    var rmEl=document.getElementById('plan-ref-mode');
+    if(rmEl&&rmEl.value)_planEditData.refMode=rmEl.value;
+
+    // v135: identificar la semana por un uid ESTABLE, no por índice posicional.
+    // El índice se desincronizaba cuando el sync con la nube reordenaba o
+    // agregaba semanas mientras se editaba: el autoguardado escribía en la
+    // semana equivocada, o en un índice fuera de rango, y el trabajo se perdía
+    // en silencio. Esto fue lo que le pasó a tu compañero.
+    if(!_planEditData.uid) _planEditData.uid='w'+Date.now()+Math.random().toString(36).slice(2,7);
+
+    var idx=-1;
+    for(var i=0;i<PLAN_WEEKS.length;i++){
+      if(PLAN_WEEKS[i] && PLAN_WEEKS[i].uid===_planEditData.uid){ idx=i; break; }
+    }
+    // Fallback para semanas viejas sin uid: usar el índice si el nombre coincide
+    if(idx<0 && _planEditIdx!==null && PLAN_WEEKS[_planEditIdx]
+       && (!PLAN_WEEKS[_planEditIdx].uid)
+       && PLAN_WEEKS[_planEditIdx].name===_planEditData.name){
+      idx=_planEditIdx;
+    }
+
+    var snapshot=JSON.parse(JSON.stringify(_planEditData));
+    if(idx>=0){
+      PLAN_WEEKS[idx]=snapshot;
+      _planEditIdx=idx;
+    } else {
+      // No existe todavía (semana nueva, o se perdió la referencia): crearla
+      if(!snapshot.name)snapshot.name='Semana '+(PLAN_WEEKS.length+1);
+      if(!snapshot.created)snapshot.created=new Date().toISOString();
+      _planEditData.name=snapshot.name;
+      _planEditData.created=snapshot.created;
+      PLAN_WEEKS.push(snapshot);
+      _planEditIdx=PLAN_WEEKS.length-1;
+      if(typeof planRenderWeeksList==='function')planRenderWeeksList();
+    }
+
+    planSave();
+    // Verificar que realmente quedó guardado (localStorage puede fallar por
+    // cuota llena y saveData no siempre lo informa).
+    var ok=planAutoSaveVerify(_planEditData.uid);
+    planAutoSaveFlash(ok);
+  }catch(e){
+    console.warn('planAutoSave:',e);
+    planAutoSaveFlash(false);
+  }
+}
+window.planAutoSave=planAutoSave;
+
+// Relee lo persistido y confirma que la semana está ahí con sus ejercicios.
+function planAutoSaveVerify(uid){
+  try{
+    if(typeof STORAGE_KEY==='undefined')return true; // no podemos verificar
+    var raw=localStorage.getItem(STORAGE_KEY);
+    if(!raw)return false;
+    var p=JSON.parse(raw);
+    var weeks=p&&p.PLAN_WEEKS;
+    if(!Array.isArray(weeks))return false;
+    var w=weeks.find(function(x){return x&&x.uid===uid;});
+    if(!w)return false;
+    // Contar ejercicios guardados vs en memoria
+    var count=function(wk){
+      var n=0;
+      (wk.days||[]).forEach(function(d){ (d.blocks||[]).forEach(function(b){ n+=((b.exercises||[]).length); }); });
+      return n;
+    };
+    return count(w)===count(_planEditData);
+  }catch(e){ return false; }
+}
+
+// Indicador junto al botón Guardar semana. Si el guardado falló, avisa fuerte:
+// es peor perder el trabajo en silencio que molestar con un cartel.
+var _planAutoSaveTimer=null;
+function planAutoSaveFlash(ok){
+  var el=document.getElementById('plan-autosave-ind');
+  if(!el)return;
+  if(ok===false){
+    el.textContent='⚠️ NO se pudo guardar — tocá "Guardar semana"';
+    el.style.color='#E24B4A';
+    el.style.opacity='1';
+    if(_planAutoSaveTimer)clearTimeout(_planAutoSaveTimer);
+    return; // queda fijo hasta que se resuelva
+  }
+  el.textContent='✓ Guardado';
+  el.style.color='#1D9E75';
+  el.style.opacity='1';
+  if(_planAutoSaveTimer)clearTimeout(_planAutoSaveTimer);
+  _planAutoSaveTimer=setTimeout(function(){ el.style.opacity='0'; },1800);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CALENDARIO DEL MICROCICLO (v142)
+// Problema: las semanas se derivaban SOLO del Excel de GPS, así que el
+// wellness/PSE que cargan los chicos desde la tablet quedaba huérfano ("Sem
+// 27/07") hasta que se importaba el Excel.
+// Solución: (C) la semana de planificación puede llevar fecha de inicio y
+// duración —  y esa es la fuente más exacta, porque se planifica ANTES de
+// entrenar — y (A) si no hay ninguna, se continúa automáticamente la
+// numeración desde la última semana conocida.
+// La duración es configurable (5 a 14 días) para clubes con microciclos cortos.
+function planWeekMetaChange(){
+  if(!_planEditData)return;
+  var sEl=document.getElementById('plan-week-start');
+  var lEl=document.getElementById('plan-week-len');
+  var start=sEl&&sEl.value?sEl.value:'';
+  var len=lEl?(parseInt(lEl.value)||7):7;
+  if(start) _planEditData.startDate=start; else delete _planEditData.startDate;
+  _planEditData.weekLen=len;
+  planWeekRangeHint();
+  planAutoSave();
+}
+window.planWeekMetaChange=planWeekMetaChange;
+
+// Muestra el rango cubierto ("28/07 → 03/08 · 7 días")
+function planWeekRangeHint(){
+  var el=document.getElementById('plan-week-range');
+  if(!el)return;
+  var s=_planEditData&&_planEditData.startDate;
+  if(!s){ el.textContent=''; return; }
+  var len=(_planEditData.weekLen)||7;
+  var end=planShiftISO(s,len-1);
+  var f=function(iso){ return iso.slice(8,10)+'/'+iso.slice(5,7); };
+  el.textContent=f(s)+' → '+f(end)+' · '+len+' días';
+}
+function planShiftISO(iso,days){
+  var d=new Date(iso+'T12:00:00');
+  d.setDate(d.getDate()+days);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+window.planShiftISO=planShiftISO;
+
+// Semanas de planificación que tienen fecha: [{week,start,end,len}]
+function planWeeksWithDates(){
+  var out=[];
+  (typeof PLAN_WEEKS!=='undefined'?PLAN_WEEKS:[]).forEach(function(w){
+    if(!w||!w.startDate)return;
+    var len=parseInt(w.weekLen)||7;
+    out.push({week:w.name||'Semana', start:w.startDate, end:planShiftISO(w.startDate,len-1), len:len});
+  });
+  return out.sort(function(a,b){return a.start<b.start?-1:1;});
+}
+window.planWeeksWithDates=planWeeksWithDates;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPARATIVA SEMANAL CON DATOS REALES (v179)
+// Deja de usar los promedios de la planificación y lee MICROCICLO (GPS) +
+// MATCHES (partido). Separa por rol —titulares y suplentes del partido
+// anterior— con clasificación automática y ajuste manual.
+// ═══════════════════════════════════════════════════════════════════════════
+var PLAN_CMP_ROLES={};   // {claveMicrociclo: {norm(nombre): 'tit'|'sup'|'nc'}}
+try{
+  var _pcr=JSON.parse(localStorage.getItem('planCmpRoles_v1')||'null');
+  if(_pcr&&typeof _pcr==='object'&&!Array.isArray(_pcr)) PLAN_CMP_ROLES=_pcr;
+}catch(e){}
+function planCmpRolesSave(){
+  try{ localStorage.setItem('planCmpRoles_v1', JSON.stringify(PLAN_CMP_ROLES)); }catch(e){}
+  try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync(); }catch(e){}
+}
+window.planCmpRolesSave=planCmpRolesSave;
+// Unión entre dispositivos: gana el más nuevo por microciclo
+function planCmpRolesMerge(remoto){
+  if(!remoto||typeof remoto!=='object')return;
+  Object.keys(remoto).forEach(function(k){
+    var r=remoto[k], m=PLAN_CMP_ROLES[k];
+    if(!m){ PLAN_CMP_ROLES[k]=r; return; }
+    if(Number(r._upd||0) > Number(m._upd||0)) PLAN_CMP_ROLES[k]=r;
+  });
+  try{ localStorage.setItem('planCmpRoles_v1', JSON.stringify(PLAN_CMP_ROLES)); }catch(e){}
+}
+window.planCmpRolesMerge=planCmpRolesMerge;
+
+function _pcNorm(s){
+  return String(s||'').toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+}
+
+// ── Roles de un microciclo: automático + ajustes manuales ──
+// Devuelve {roles:{norm:rol}, origen:'partido'|'manual'|'sin datos', match, ajustes:n}
+function planCmpRoles(weekName){
+  var key=(typeof cargaWeekKey==='function')?cargaWeekKey(weekName):String(weekName);
+  var auto={}, match=null, origen='sin datos';
+  // 1) Clasificación automática desde el partido anterior
+  try{
+    if(typeof mcRoleClassify==='function'){
+      var c=mcRoleClassify(weekName);
+      if(c&&c.match){
+        match=c.match; origen='partido';
+        (c.tit||[]).forEach(function(n){ auto[_pcNorm(n)]='tit'; });
+        (c.sup||[]).forEach(function(n){ auto[_pcNorm(n)]='sup'; });
+        (c.nc||[]).forEach(function(n){ auto[_pcNorm(n)]='nc'; });
+      }
+    }
+  }catch(e){}
+  // 2) Ajustes manuales: pisan lo automático
+  var man=PLAN_CMP_ROLES[key]||{};
+  var nAj=0;
+  var roles=Object.assign({}, auto);
+  Object.keys(man).forEach(function(k){
+    if(k==='_upd')return;
+    roles[k]=man[k]; nAj++;
+  });
+  if(!match && nAj) origen='manual';
+  return {roles:roles, origen:origen, match:match, ajustes:nAj, key:key, auto:auto};
+}
+window.planCmpRoles=planCmpRoles;
+
+function planCmpSetRole(weekName, playerName, rol){
+  var key=(typeof cargaWeekKey==='function')?cargaWeekKey(weekName):String(weekName);
+  if(!PLAN_CMP_ROLES[key]) PLAN_CMP_ROLES[key]={};
+  var nk=_pcNorm(playerName);
+  var info=planCmpRoles(weekName);
+  // Si vuelve a coincidir con lo automático, se quita el ajuste
+  if(info.auto[nk]===rol) delete PLAN_CMP_ROLES[key][nk];
+  else PLAN_CMP_ROLES[key][nk]=rol;
+  PLAN_CMP_ROLES[key]._upd=Date.now();
+  if(Object.keys(PLAN_CMP_ROLES[key]).length<=1) delete PLAN_CMP_ROLES[key];
+  planCmpRolesSave();
+}
+window.planCmpSetRole=planCmpSetRole;
+
+function planCmpResetRoles(weekName){
+  var key=(typeof cargaWeekKey==='function')?cargaWeekKey(weekName):String(weekName);
+  delete PLAN_CMP_ROLES[key];
+  planCmpRolesSave();
+}
+window.planCmpResetRoles=planCmpResetRoles;
+
+// ── CARGA REAL por microciclo ──
+// Suma las sesiones de GPS del microciclo. El partido se cuenta UNA sola vez:
+// si hay sesión de GPS de ese día se usa esa; si no, el registro del fixture.
+// v180: nombre propio, para no pisar PLAN_CMP_METRICS del comparativo por
+// planificación, que sigue existiendo y se usa en el gráfico de líneas.
+var PC_METRICS=[
+  {k:'mts',   lbl:'Distancia',        unit:'m',  dec:0, color:'#304483'},
+  {k:'hsr',   lbl:'18–21 km/h',       unit:'m',  dec:0, color:'#2E7D32'},
+  {k:'h2',    lbl:'21–25 km/h',       unit:'m',  dec:0, color:'#6A1B9A'},
+  {k:'h25',   lbl:'+25 km/h',         unit:'m',  dec:0, color:'#E65100'},
+  {k:'acc',   lbl:'Aceleraciones',    unit:'',   dec:0, color:'#BF360C'},
+  {k:'dcc',   lbl:'Desaceleraciones', unit:'',   dec:0, color:'#880E4F'},
+  {k:'rhie',  lbl:'RHIE',             unit:'',   dec:0, color:'#37474F'},
+  {k:'min',   lbl:'Minutos',          unit:'′',  dec:0, color:'#0277BD'}
+];
+window.PC_METRICS=PC_METRICS;
+
+function _pcVal(p,k){
+  if(!p)return 0;
+  var v=p[k];
+  if(v==null&&k==='min') v=p.tot_dur;
+  var n=parseFloat(v);
+  return isNaN(n)?0:n;
+}
+
+// Datos reales de un microciclo, ya separados por rol.
+// Devuelve {porRol:{tit:{...},sup:{...},todos:{...}}, porJugador:{}, dias:[], fuentes:{}}
+function planCmpRealData(weekName){
+  var info=planCmpRoles(weekName);
+  var out={
+    porRol:{tit:{n:0,jug:{}},sup:{n:0,jug:{}},todos:{n:0,jug:{}}},
+    porJugador:{}, dias:[], roles:info.roles, origen:info.origen,
+    match:info.match, ajustes:info.ajustes, fuentes:{gps:0,partido:0}
+  };
+  PC_METRICS.forEach(function(m){
+    out.porRol.tit[m.k]=0; out.porRol.sup[m.k]=0; out.porRol.todos[m.k]=0;
+  });
+  var diasVistos={};
+  var sumar=function(nombre, p, esPartido, fecha, dia){
+    if(!nombre)return;
+    var nk=_pcNorm(nombre);
+    var rol=info.roles[nk]||'nc';
+    if(!out.porJugador[nk]){
+      out.porJugador[nk]={name:nombre, rol:rol, sesiones:0};
+      PC_METRICS.forEach(function(m){ out.porJugador[nk][m.k]=0; });
+    }
+    out.porJugador[nk].rol=rol;
+    out.porJugador[nk].sesiones++;
+    PC_METRICS.forEach(function(m){
       var v=_pcVal(p,m.k);
       out.porJugador[nk][m.k]+=v;
       out.porRol.todos[m.k]+=v;
@@ -15006,6 +17749,110 @@ window.pcSetVista=pcSetVista; window.pcSetRol=pcSetRol;
 window.pcSetMetrica=pcSetMetrica; window.pcSetJugador=pcSetJugador;
 window.pcToggleEdit=pcToggleEdit;
 
+// ═══ GRÁFICO DE LÍNEAS EN LA COMPARATIVA REAL (v180) ═════════════════════
+// Recupera la visualización de la comparativa anterior: evolución por
+// microciclo con la métrica elegida, ahora con los datos reales del GPS.
+var _pcGraf=true;   // gráfico visible por defecto
+function pcToggleGraf(){ _pcGraf=!_pcGraf; planCmpRender(); }
+window.pcToggleGraf=pcToggleGraf;
+
+// Gráfico de líneas en SVG (sin dependencias externas)
+function pcChart(series, labels, opts){
+  opts=opts||{};
+  var W=760, H=opts.height||230, PL=58, PR=18, PT=16, PB=36;
+  var iw=W-PL-PR, ih=H-PT-PB;
+  var vals=[];
+  series.forEach(function(s){ (s.pts||[]).forEach(function(v){ if(v!=null&&!isNaN(v))vals.push(v); }); });
+  if(!vals.length) return '<div style="padding:20px;text-align:center;color:#bbb;font-size:11px">Sin datos para graficar.</div>';
+  var vmin=Math.min.apply(null,vals), vmax=Math.max.apply(null,vals);
+  var pad=(vmax-vmin)*0.15||Math.abs(vmax*0.1)||1;
+  vmin=Math.max(0,vmin-pad); vmax=vmax+pad;
+  if(vmin===vmax){ vmax=vmin+1; }
+  var n=labels.length;
+  var X=function(i){ return n<=1?(PL+iw/2):(PL+(i/(n-1))*iw); };
+  var Y=function(v){ return PT+ih-((v-vmin)/(vmax-vmin))*ih; };
+  var fmt=function(v){
+    if(Math.abs(v)>=1000) return Math.round(v/100)/10+'k';
+    return Math.round(v*10)/10;
+  };
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">';
+  // Grilla horizontal
+  for(var g=0;g<=4;g++){
+    var yv=vmin+(vmax-vmin)*g/4, yy=Y(yv);
+    svg+='<line x1="'+PL+'" y1="'+yy.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+yy.toFixed(1)+'" stroke="#eef0f4" stroke-width="1"/>';
+    svg+='<text x="'+(PL-8)+'" y="'+(yy+3.5).toFixed(1)+'" text-anchor="end" font-size="9.5" fill="#a3a9b6" font-family="system-ui,sans-serif">'+fmt(yv)+'</text>';
+  }
+  // Etiquetas del eje X
+  labels.forEach(function(l,i){
+    svg+='<text x="'+X(i).toFixed(1)+'" y="'+(PT+ih+17)+'" text-anchor="middle" font-size="9.5" fill="#8a93a5" font-family="system-ui,sans-serif">'+
+      String(l).replace(/^Microciclo\s*/i,'MC ').slice(0,10)+'</text>';
+  });
+  // Series
+  series.forEach(function(s){
+    var pts=[];
+    (s.pts||[]).forEach(function(v,i){ if(v!=null&&!isNaN(v))pts.push([X(i),Y(v),i,v]); });
+    if(!pts.length)return;
+    if(pts.length>1){
+      var d='M'+pts.map(function(p){return p[0].toFixed(1)+' '+p[1].toFixed(1);}).join(' L');
+      svg+='<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"'+
+        (s.dash?(' stroke-dasharray="'+s.dash+'"'):'')+'/>';
+    }
+    pts.forEach(function(p){
+      svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="4" fill="'+s.color+'" stroke="#fff" stroke-width="1.6">'+
+        '<title>'+String(s.label||'')+': '+fmt(p[3])+'</title></circle>';
+      if(n<=8){
+        svg+='<text x="'+p[0].toFixed(1)+'" y="'+(p[1]-10).toFixed(1)+'" text-anchor="middle" font-size="9.5" font-weight="700" fill="'+s.color+
+          '" font-family="system-ui,sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2.5">'+fmt(p[3])+'</text>';
+      }
+    });
+  });
+  svg+='</svg>';
+  return svg;
+}
+window.pcChart=pcChart;
+
+function pcLegend(items){
+  return '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:5px;font-size:10.5px">'+
+    items.map(function(it){
+      return '<span style="display:inline-flex;align-items:center;gap:5px;color:'+it.color+';font-weight:700">'+
+        '<span style="width:14px;height:3px;background:'+it.color+';border-radius:2px;display:inline-block"></span>'+it.label+'</span>';
+    }).join('')+'</div>';
+}
+window.pcLegend=pcLegend;
+
+// Gráfico para la vista POR GRUPO: titulares vs suplentes por microciclo
+function pcGrafGrupo(datos, met){
+  var labels=datos.map(function(x){return x.week;});
+  var series=[
+    {label:'Titulares', color:'#0C447C', pts:datos.map(function(x){ return planCmpPromedio(x.d,'tit',met.k); })},
+    {label:'Suplentes', color:'#1D9E75', pts:datos.map(function(x){ return planCmpPromedio(x.d,'sup',met.k); })}
+  ];
+  var hayTodos=datos.some(function(x){ return x.d.porRol.todos.n>0; });
+  if(hayTodos){
+    series.push({label:'Plantel', color:'#9AA6BF', dash:'6 4',
+      pts:datos.map(function(x){ return planCmpPromedio(x.d,'todos',met.k); })});
+  }
+  var items=[{color:'#0C447C',label:'Titulares'},{color:'#1D9E75',label:'Suplentes'}];
+  if(hayTodos) items.push({color:'#9AA6BF',label:'Plantel'});
+  return '<div style="background:#fafbfd;border:1px solid #eef0f4;border-radius:9px;padding:10px 12px;margin-bottom:12px">'+
+    '<div style="font-size:11px;font-weight:800;color:#0D1B2A;margin-bottom:5px">'+pcEsc(met.lbl)+' — promedio por jugador</div>'+
+    pcLegend(items)+pcChart(series,labels,{height:230})+
+  '</div>';
+}
+window.pcGrafGrupo=pcGrafGrupo;
+
+// Gráfico para la vista POR JUGADOR
+function pcGrafJugador(serie, met){
+  var labels=serie.map(function(x){return x.week;});
+  var s=[{label:_pcJugador, color:'#304483', pts:serie.map(function(x){ return x.datos?(x.datos[met.k]||0):null; })}];
+  return '<div style="background:#fafbfd;border:1px solid #eef0f4;border-radius:9px;padding:10px 12px;margin-bottom:12px">'+
+    '<div style="font-size:11px;font-weight:800;color:#0D1B2A;margin-bottom:5px">'+pcEsc(met.lbl)+' — '+pcEsc(_pcJugador)+'</div>'+
+    pcChart(s,labels,{height:210})+
+  '</div>';
+}
+window.pcGrafJugador=pcGrafJugador;
+
+
 function planCmpRender(){
   var cont=document.getElementById('plan-cmp-container');
   if(!cont)return;
@@ -15032,7 +17879,8 @@ function planCmpRender(){
       '</span>'+
     '</div>'+
     '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+
-      '<span style="font-size:10px;color:#9fb3c8;font-weight:700">Métrica</span>'+
+      '<button onclick="pcToggleGraf()" title="Mostrar u ocultar el gráfico" style="padding:4px 11px;border:1px solid '+(_pcGraf?'#fff':'#ffffff33')+';background:'+(_pcGraf?'#fff':'none')+';color:'+(_pcGraf?'#0D1B2A':'#9fb3c8')+';border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">📈 Gráfico</button>'+
+      '<span style="font-size:10px;color:#9fb3c8;font-weight:700;margin-left:4px">Métrica</span>'+
       '<select onchange="pcSetMetrica(this.value)" style="padding:4px 9px;border:none;border-radius:6px;font-size:11.5px;font-weight:700;color:#0D1B2A;cursor:pointer">'+
         PLAN_CMP_METRICS.map(function(m){ return '<option value="'+m.k+'"'+(m.k===_pcMetrica?' selected':'')+'>'+m.lbl+'</option>'; }).join('')+
       '</select>'+
@@ -15068,6 +17916,9 @@ function pcViewGrupo(weeks, met){
 
   // Panel de roles del último microciclo
   html+=pcPanelRoles(ult.week, ult.d);
+
+  // v180: gráfico de evolución (como en la comparativa anterior)
+  if(_pcGraf) html+=pcGrafGrupo(datos, met);
 
   // Tabla comparativa
   html+='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin:14px 0 6px">'+pcEsc(met.lbl)+' — promedio por jugador</div>';
@@ -15165,7 +18016,10 @@ function pcViewJugador(weeks, met){
   if(!conDatos.length) return '<div style="padding:22px;text-align:center;color:#999;font-size:12px">'+pcEsc(_pcJugador)+' no tiene datos de GPS.</div>';
   var rolCol={tit:'#0C447C',sup:'#1D9E75',nc:'#8a93a5'};
   var rolLbl={tit:'Titular',sup:'Suplente',nc:'No convocado'};
-  var html='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:7px">'+
+  var html='';
+  // v180: gráfico de evolución individual
+  if(_pcGraf) html+=pcGrafJugador(serie, met);
+  html+='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:7px">'+
     pcEsc(_pcJugador)+' — '+pcEsc(met.lbl)+' por microciclo</div>';
   // Barras comparativas
   var maxV=Math.max.apply(null, conDatos.map(function(x){ return x.datos[met.k]||0; }))||1;
