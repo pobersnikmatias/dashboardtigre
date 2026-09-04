@@ -12238,6 +12238,11 @@ function planSwitchSubtab(tab){
     }
     if(pane) pane.style.display = isActive?'':'none';
   });
+  // v179: dibujar la comparativa con datos reales al entrar
+  if(tab==='compare'){
+    try{ if(typeof planCmpRender==='function') planCmpRender(); }
+    catch(e){ console.warn('[Comparativo] ', e); }
+  }
   // El botón "Microciclos anteriores" solo se muestra en la subpestaña de planificación semanal
   var prevBtn = document.getElementById('plan-prev-toggle-btn');
   if(prevBtn){
@@ -14720,6 +14725,493 @@ function planWeeksWithDates(){
   return out.sort(function(a,b){return a.start<b.start?-1:1;});
 }
 window.planWeeksWithDates=planWeeksWithDates;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPARATIVA SEMANAL CON DATOS REALES (v179)
+// Deja de usar los promedios de la planificación y lee MICROCICLO (GPS) +
+// MATCHES (partido). Separa por rol —titulares y suplentes del partido
+// anterior— con clasificación automática y ajuste manual.
+// ═══════════════════════════════════════════════════════════════════════════
+var PLAN_CMP_ROLES={};   // {claveMicrociclo: {norm(nombre): 'tit'|'sup'|'nc'}}
+try{
+  var _pcr=JSON.parse(localStorage.getItem('planCmpRoles_v1')||'null');
+  if(_pcr&&typeof _pcr==='object'&&!Array.isArray(_pcr)) PLAN_CMP_ROLES=_pcr;
+}catch(e){}
+function planCmpRolesSave(){
+  try{ localStorage.setItem('planCmpRoles_v1', JSON.stringify(PLAN_CMP_ROLES)); }catch(e){}
+  try{ if(typeof saveData==='function')saveData(); }catch(e){}
+  try{ if(typeof sbScheduleTanda3Sync==='function')sbScheduleTanda3Sync(); }catch(e){}
+}
+window.planCmpRolesSave=planCmpRolesSave;
+// Unión entre dispositivos: gana el más nuevo por microciclo
+function planCmpRolesMerge(remoto){
+  if(!remoto||typeof remoto!=='object')return;
+  Object.keys(remoto).forEach(function(k){
+    var r=remoto[k], m=PLAN_CMP_ROLES[k];
+    if(!m){ PLAN_CMP_ROLES[k]=r; return; }
+    if(Number(r._upd||0) > Number(m._upd||0)) PLAN_CMP_ROLES[k]=r;
+  });
+  try{ localStorage.setItem('planCmpRoles_v1', JSON.stringify(PLAN_CMP_ROLES)); }catch(e){}
+}
+window.planCmpRolesMerge=planCmpRolesMerge;
+
+function _pcNorm(s){
+  return String(s||'').toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+}
+
+// ── Roles de un microciclo: automático + ajustes manuales ──
+// Devuelve {roles:{norm:rol}, origen:'partido'|'manual'|'sin datos', match, ajustes:n}
+function planCmpRoles(weekName){
+  var key=(typeof cargaWeekKey==='function')?cargaWeekKey(weekName):String(weekName);
+  var auto={}, match=null, origen='sin datos';
+  // 1) Clasificación automática desde el partido anterior
+  try{
+    if(typeof mcRoleClassify==='function'){
+      var c=mcRoleClassify(weekName);
+      if(c&&c.match){
+        match=c.match; origen='partido';
+        (c.tit||[]).forEach(function(n){ auto[_pcNorm(n)]='tit'; });
+        (c.sup||[]).forEach(function(n){ auto[_pcNorm(n)]='sup'; });
+        (c.nc||[]).forEach(function(n){ auto[_pcNorm(n)]='nc'; });
+      }
+    }
+  }catch(e){}
+  // 2) Ajustes manuales: pisan lo automático
+  var man=PLAN_CMP_ROLES[key]||{};
+  var nAj=0;
+  var roles=Object.assign({}, auto);
+  Object.keys(man).forEach(function(k){
+    if(k==='_upd')return;
+    roles[k]=man[k]; nAj++;
+  });
+  if(!match && nAj) origen='manual';
+  return {roles:roles, origen:origen, match:match, ajustes:nAj, key:key, auto:auto};
+}
+window.planCmpRoles=planCmpRoles;
+
+function planCmpSetRole(weekName, playerName, rol){
+  var key=(typeof cargaWeekKey==='function')?cargaWeekKey(weekName):String(weekName);
+  if(!PLAN_CMP_ROLES[key]) PLAN_CMP_ROLES[key]={};
+  var nk=_pcNorm(playerName);
+  var info=planCmpRoles(weekName);
+  // Si vuelve a coincidir con lo automático, se quita el ajuste
+  if(info.auto[nk]===rol) delete PLAN_CMP_ROLES[key][nk];
+  else PLAN_CMP_ROLES[key][nk]=rol;
+  PLAN_CMP_ROLES[key]._upd=Date.now();
+  if(Object.keys(PLAN_CMP_ROLES[key]).length<=1) delete PLAN_CMP_ROLES[key];
+  planCmpRolesSave();
+}
+window.planCmpSetRole=planCmpSetRole;
+
+function planCmpResetRoles(weekName){
+  var key=(typeof cargaWeekKey==='function')?cargaWeekKey(weekName):String(weekName);
+  delete PLAN_CMP_ROLES[key];
+  planCmpRolesSave();
+}
+window.planCmpResetRoles=planCmpResetRoles;
+
+// ── CARGA REAL por microciclo ──
+// Suma las sesiones de GPS del microciclo. El partido se cuenta UNA sola vez:
+// si hay sesión de GPS de ese día se usa esa; si no, el registro del fixture.
+var PLAN_CMP_METRICS=[
+  {k:'mts',   lbl:'Distancia',        unit:'m',  dec:0},
+  {k:'hsr',   lbl:'18–21 km/h',       unit:'m',  dec:0},
+  {k:'h2',    lbl:'21–25 km/h',       unit:'m',  dec:0},
+  {k:'h25',   lbl:'+25 km/h',         unit:'m',  dec:0},
+  {k:'acc',   lbl:'Aceleraciones',    unit:'',   dec:0},
+  {k:'dcc',   lbl:'Desaceleraciones', unit:'',   dec:0},
+  {k:'min',   lbl:'Minutos',          unit:'′',  dec:0}
+];
+window.PLAN_CMP_METRICS=PLAN_CMP_METRICS;
+
+function _pcVal(p,k){
+  if(!p)return 0;
+  var v=p[k];
+  if(v==null&&k==='min') v=p.tot_dur;
+  var n=parseFloat(v);
+  return isNaN(n)?0:n;
+}
+
+// Datos reales de un microciclo, ya separados por rol.
+// Devuelve {porRol:{tit:{...},sup:{...},todos:{...}}, porJugador:{}, dias:[], fuentes:{}}
+function planCmpRealData(weekName){
+  var info=planCmpRoles(weekName);
+  var out={
+    porRol:{tit:{n:0,jug:{}},sup:{n:0,jug:{}},todos:{n:0,jug:{}}},
+    porJugador:{}, dias:[], roles:info.roles, origen:info.origen,
+    match:info.match, ajustes:info.ajustes, fuentes:{gps:0,partido:0}
+  };
+  PLAN_CMP_METRICS.forEach(function(m){
+    out.porRol.tit[m.k]=0; out.porRol.sup[m.k]=0; out.porRol.todos[m.k]=0;
+  });
+  var diasVistos={};
+  var sumar=function(nombre, p, esPartido, fecha, dia){
+    if(!nombre)return;
+    var nk=_pcNorm(nombre);
+    var rol=info.roles[nk]||'nc';
+    if(!out.porJugador[nk]){
+      out.porJugador[nk]={name:nombre, rol:rol, sesiones:0};
+      PLAN_CMP_METRICS.forEach(function(m){ out.porJugador[nk][m.k]=0; });
+    }
+    out.porJugador[nk].rol=rol;
+    out.porJugador[nk].sesiones++;
+    PLAN_CMP_METRICS.forEach(function(m){
+      var v=_pcVal(p,m.k);
+      out.porJugador[nk][m.k]+=v;
+      out.porRol.todos[m.k]+=v;
+      if(rol==='tit') out.porRol.tit[m.k]+=v;
+      else if(rol==='sup') out.porRol.sup[m.k]+=v;
+    });
+    if(!diasVistos[fecha]) diasVistos[fecha]={fecha:fecha, dia:dia, esPartido:esPartido, n:0};
+    diasVistos[fecha].n++;
+    if(esPartido) diasVistos[fecha].esPartido=true;
+  };
+  // 1) Sesiones de GPS del microciclo
+  var fechasGps={};
+  (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){
+    if(!s||!s.week)return;
+    var mismoMc=(typeof cargaWeekKey==='function')
+      ? (cargaWeekKey(s.week)===info.key)
+      : (s.week===weekName);
+    if(!mismoMc)return;
+    var f=String(s.fecha||'').slice(0,10);
+    var esMD=/^MD$/i.test(String(s.day||'').trim());
+    if(f) fechasGps[f]=true;
+    (s.players||[]).forEach(function(p){ sumar(p.name, p, esMD, f, s.day); });
+    out.fuentes.gps++;
+  });
+  // 2) Partido DE ESTE microciclo (no el anterior, que sólo define los roles).
+  // Se suma únicamente si ese día no tiene sesión de GPS, para no contarlo dos veces.
+  try{
+    var rango=null;
+    if(typeof cargaMicroWeeksByDate==='function'){
+      var wk=cargaMicroWeeksByDate().find(function(w){
+        return (typeof cargaWeekKey==='function')?(cargaWeekKey(w.week)===info.key):(w.week===weekName);
+      });
+      // Rango REAL del microciclo, no el extendido: el extendido llega hasta
+      // la semana anterior y arrastraría el partido previo, que ya pertenece
+      // al microciclo pasado.
+      if(wk) rango={ini:wk.start, fin:wk.end};
+    }
+    if(!rango){
+      // Sin rango declarado: usar el que abarcan las propias sesiones de GPS
+      var fs=Object.keys(fechasGps).sort();
+      if(fs.length) rango={ini:fs[0], fin:fs[fs.length-1]};
+    }
+    // El partido suele cerrar el microciclo y puede no tener GPS, así que el
+    // rango se extiende hasta el día anterior al microciclo siguiente.
+    if(rango){
+      var sig=null;
+      try{
+        (typeof cargaMicroWeeksByDate==='function'?cargaMicroWeeksByDate():[]).forEach(function(w){
+          if(w.start>rango.ini && (!sig||w.start<sig)) sig=w.start;
+        });
+      }catch(e){}
+      var tope=(function(){
+        var dt=new Date(rango.fin+'T00:00:00');
+        dt.setDate(dt.getDate()+4);
+        return dt.toISOString().slice(0,10);
+      })();
+      if(sig){
+        var previo=(function(){
+          var dt=new Date(sig+'T00:00:00');
+          dt.setDate(dt.getDate()-1);
+          return dt.toISOString().slice(0,10);
+        })();
+        tope=(previo<tope)?previo:tope;
+      }
+      if(tope>rango.fin) rango.fin=tope;
+    }
+    if(rango){
+      (typeof MATCHES!=='undefined'?MATCHES:[]).forEach(function(m){
+        if(!m||!m.fecha)return;
+        var fm=String(m.fecha).slice(0,10);
+        if(fm<rango.ini||fm>rango.fin)return;     // fuera del microciclo
+        if(fechasGps[fm])return;                   // ya viene del GPS
+        (m.players||[]).forEach(function(p){ sumar(p.name, p, true, fm, 'MD'); });
+        out.fuentes.partido++;
+      });
+    }
+  }catch(e){}
+  // Contar jugadores por rol
+  Object.keys(out.porJugador).forEach(function(nk){
+    var r=out.porJugador[nk].rol;
+    out.porRol.todos.n++;
+    if(r==='tit') out.porRol.tit.n++;
+    else if(r==='sup') out.porRol.sup.n++;
+  });
+  out.dias=Object.values(diasVistos).sort(function(a,b){ return String(a.fecha).localeCompare(String(b.fecha)); });
+  return out;
+}
+window.planCmpRealData=planCmpRealData;
+
+// Promedio por jugador de un rol (lo comparable entre microciclos)
+function planCmpPromedio(datos, rol, metrica){
+  var b=datos.porRol[rol];
+  if(!b||!b.n)return null;
+  return b[metrica]/b.n;
+}
+window.planCmpPromedio=planCmpPromedio;
+
+// Serie de un jugador a lo largo de los microciclos, con el rol que tuvo en cada uno
+function planCmpJugadorSerie(nombre, weeks){
+  var nk=_pcNorm(nombre);
+  return (weeks||[]).map(function(w){
+    var d=planCmpRealData(w);
+    var j=d.porJugador[nk];
+    return {week:w, rol:j?j.rol:null, datos:j||null};
+  });
+}
+window.planCmpJugadorSerie=planCmpJugadorSerie;
+
+// ═══ INTERFAZ DE LA COMPARATIVA REAL (v179) ══════════════════════════════
+var _pcVista='grupo';      // grupo | jugador
+var _pcRol='tit';          // tit | sup | todos
+var _pcMetrica='mts';
+var _pcJugador='';
+var _pcEditRoles=false;
+
+function pcEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function pcFmt(v,dec){
+  if(v==null||isNaN(v))return '—';
+  return Number(v).toLocaleString('es-AR',{minimumFractionDigits:dec||0,maximumFractionDigits:dec||0});
+}
+
+// Microciclos con datos reales de GPS
+function pcWeeks(){
+  var set={};
+  (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){
+    if(s&&s.week) set[(typeof cargaWeekKey==='function')?cargaWeekKey(s.week):s.week]=s.week;
+  });
+  var out=Object.keys(set).map(function(k){
+    return (typeof cargaWeekLabel==='function')?cargaWeekLabel(k,[set[k]]):set[k];
+  });
+  out.sort(function(a,b){
+    var na=(typeof cargaWeekNum==='function')?cargaWeekNum(a):null;
+    var nb=(typeof cargaWeekNum==='function')?cargaWeekNum(b):null;
+    if(na!=null&&nb!=null)return na-nb;
+    return String(a).localeCompare(String(b),'es');
+  });
+  return out;
+}
+window.pcWeeks=pcWeeks;
+
+function pcSetVista(v){ _pcVista=v; planCmpRender(); }
+function pcSetRol(v){ _pcRol=v; planCmpRender(); }
+function pcSetMetrica(v){ _pcMetrica=v; planCmpRender(); }
+function pcSetJugador(v){ _pcJugador=v; planCmpRender(); }
+function pcToggleEdit(){ _pcEditRoles=!_pcEditRoles; planCmpRender(); }
+window.pcSetVista=pcSetVista; window.pcSetRol=pcSetRol;
+window.pcSetMetrica=pcSetMetrica; window.pcSetJugador=pcSetJugador;
+window.pcToggleEdit=pcToggleEdit;
+
+function planCmpRender(){
+  var cont=document.getElementById('plan-cmp-container');
+  if(!cont)return;
+  var weeks=pcWeeks();
+  if(!weeks.length){
+    cont.innerHTML='<div style="background:#fff;border:1px solid #e4e6ec;border-radius:10px;padding:30px;text-align:center">'+
+      '<div style="font-size:30px;margin-bottom:8px">📊</div>'+
+      '<div style="font-size:13px;font-weight:700;color:#555">Sin datos de GPS todavía</div>'+
+      '<div style="font-size:11px;color:#aaa;margin-top:6px;max-width:420px;margin-left:auto;margin-right:auto">'+
+        'Esta comparativa usa la carga <b>real</b> de Análisis de carga → Carga externa. Importá al menos un microciclo.</div></div>';
+    return;
+  }
+  var met=PLAN_CMP_METRICS.find(function(m){return m.k===_pcMetrica;})||PLAN_CMP_METRICS[0];
+
+  var html='<div style="background:#0D1B2A;border-radius:10px 10px 0 0;padding:12px 15px">'+
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:9px">'+
+      '<span style="color:#fff;font-size:14px;font-weight:800">📊 Comparativo semanal</span>'+
+      '<span style="font-size:10px;color:#9fb3c8;background:#ffffff14;border-radius:10px;padding:2px 9px">datos reales de GPS</span>'+
+      '<span style="margin-left:auto;display:flex;gap:4px">'+
+        [['grupo','👥 Por grupo'],['jugador','🏃 Por jugador']].map(function(v){
+          var on=_pcVista===v[0];
+          return '<button onclick="pcSetVista(\''+v[0]+'\')" style="padding:5px 12px;border:1px solid '+(on?'#fff':'#ffffff33')+';background:'+(on?'#fff':'none')+';color:'+(on?'#0D1B2A':'#9fb3c8')+';border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">'+v[1]+'</button>';
+        }).join('')+
+      '</span>'+
+    '</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+
+      '<span style="font-size:10px;color:#9fb3c8;font-weight:700">Métrica</span>'+
+      '<select onchange="pcSetMetrica(this.value)" style="padding:4px 9px;border:none;border-radius:6px;font-size:11.5px;font-weight:700;color:#0D1B2A;cursor:pointer">'+
+        PLAN_CMP_METRICS.map(function(m){ return '<option value="'+m.k+'"'+(m.k===_pcMetrica?' selected':'')+'>'+m.lbl+'</option>'; }).join('')+
+      '</select>'+
+      (_pcVista==='jugador'?('<span style="font-size:10px;color:#9fb3c8;font-weight:700;margin-left:6px">Jugador</span>'+
+        '<select onchange="pcSetJugador(this.value)" style="padding:4px 9px;border:none;border-radius:6px;font-size:11.5px;font-weight:700;color:#0D1B2A;cursor:pointer;min-width:150px">'+
+          pcAllPlayers(weeks).map(function(n){ return '<option'+(n===_pcJugador?' selected':'')+'>'+pcEsc(n)+'</option>'; }).join('')+
+        '</select>'):'')+
+    '</div></div>';
+
+  html+='<div style="background:#fff;border:1px solid #e4e6ec;border-top:none;border-radius:0 0 10px 10px;padding:14px 15px">';
+  html+=(_pcVista==='grupo')?pcViewGrupo(weeks,met):pcViewJugador(weeks,met);
+  html+='</div>';
+  cont.innerHTML=html;
+}
+window.planCmpRender=planCmpRender;
+
+function pcAllPlayers(weeks){
+  var set={};
+  (weeks||[]).forEach(function(w){
+    var d=planCmpRealData(w);
+    Object.keys(d.porJugador).forEach(function(nk){ set[d.porJugador[nk].name]=true; });
+  });
+  var out=Object.keys(set).sort(function(a,b){return a.localeCompare(b,'es');});
+  if(out.length && (!_pcJugador||out.indexOf(_pcJugador)<0)) _pcJugador=out[0];
+  return out;
+}
+
+// ── Vista POR GRUPO ──
+function pcViewGrupo(weeks, met){
+  var datos=weeks.map(function(w){ return {week:w, d:planCmpRealData(w)}; });
+  var ult=datos[datos.length-1];
+  var html='';
+
+  // Panel de roles del último microciclo
+  html+=pcPanelRoles(ult.week, ult.d);
+
+  // Tabla comparativa
+  html+='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin:14px 0 6px">'+pcEsc(met.lbl)+' — promedio por jugador</div>';
+  html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'+
+    '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
+      '<th style="padding:7px 10px;text-align:left;color:#555">Microciclo</th>'+
+      '<th style="padding:7px 8px;color:#0C447C">Titulares</th>'+
+      '<th style="padding:7px 8px;color:#1D9E75">Suplentes</th>'+
+      '<th style="padding:7px 8px;color:#555">Diferencia</th>'+
+      '<th style="padding:7px 8px;color:#8a93a5">Días</th>'+
+      '<th style="padding:7px 8px;color:#8a93a5">Origen</th>'+
+    '</tr></thead><tbody>';
+  datos.forEach(function(x){
+    var pt=planCmpPromedio(x.d,'tit',met.k);
+    var ps=planCmpPromedio(x.d,'sup',met.k);
+    var dif=(pt!=null&&ps!=null&&ps!==0)?((pt-ps)/ps*100):null;
+    var dc=dif==null?'#ccc':(Math.abs(dif)<10?'#1D9E75':(Math.abs(dif)<25?'#EF9F27':'#D9534F'));
+    var conPartido=x.d.dias.some(function(dd){return dd.esPartido;});
+    html+='<tr style="border-bottom:1px solid #f0f2f6">'+
+      '<td style="padding:6px 10px;font-weight:700;color:#0D1B2A;white-space:nowrap">'+pcEsc(x.week)+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;font-weight:800;color:#0C447C">'+pcFmt(pt,met.dec)+
+        '<span style="font-size:9px;color:#a3a9b6;font-weight:500"> ('+x.d.porRol.tit.n+')</span></td>'+
+      '<td style="padding:6px 8px;text-align:center;font-weight:800;color:#1D9E75">'+pcFmt(ps,met.dec)+
+        '<span style="font-size:9px;color:#a3a9b6;font-weight:500"> ('+x.d.porRol.sup.n+')</span></td>'+
+      '<td style="padding:6px 8px;text-align:center;font-weight:700;color:'+dc+'">'+
+        (dif==null?'—':((dif>0?'+':'')+dif.toFixed(0)+'%'))+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;color:#8a93a5">'+x.d.dias.length+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;font-size:9.5px;color:#8a93a5">'+
+        x.d.fuentes.gps+' GPS'+(conPartido?' <span title="Incluye la carga del partido" style="color:#D9534F">⚽</span>':'')+'</td>'+
+    '</tr>';
+  });
+  html+='</tbody></table></div>';
+  html+='<div style="font-size:10px;color:#a3a9b6;margin-top:7px">La diferencia compara el promedio de titulares contra el de suplentes. '+
+    'El ⚽ marca los microciclos que incluyen la carga del partido; se cuenta una sola vez, priorizando el GPS.</div>';
+
+  // Desglose por día del último microciclo
+  if(ult.d.dias.length){
+    html+='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin:16px 0 6px">Desglose diario — '+pcEsc(ult.week)+'</div>';
+    html+='<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+      ult.d.dias.map(function(dd){
+        return '<div style="flex:1;min-width:88px;background:'+(dd.esPartido?'#fdf2f2':'#f8faff')+';border:1px solid '+(dd.esPartido?'#f0d5d5':'#e8ecf5')+';border-radius:8px;padding:7px 9px">'+
+          '<div style="font-size:9px;color:#a3a9b6;font-weight:700">'+(dd.dia||'—')+(dd.esPartido?' ⚽':'')+'</div>'+
+          '<div style="font-size:11px;font-weight:700;color:#0D1B2A">'+String(dd.fecha).slice(8,10)+'/'+String(dd.fecha).slice(5,7)+'</div>'+
+          '<div style="font-size:9.5px;color:#8a93a5">'+dd.n+' jugador'+(dd.n===1?'':'es')+'</div></div>';
+      }).join('')+'</div>';
+  }
+  return html;
+}
+
+// ── Panel de roles con ajuste manual ──
+function pcPanelRoles(week, d){
+  var origen=d.origen==='partido'
+      ? ('automático desde el partido del '+(d.match&&d.match.fecha?String(d.match.fecha).slice(8,10)+'/'+String(d.match.fecha).slice(5,7):'—'))
+      : (d.origen==='manual'?'definido a mano':'sin partido previo cargado');
+  var html='<div style="background:#f8faff;border:1px solid #e0e8f5;border-radius:9px;padding:10px 12px">'+
+    '<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:'+(_pcEditRoles?'9px':'0')+'">'+
+      '<span style="font-size:11px;font-weight:800;color:#0D1B2A">Roles de '+pcEsc(week)+'</span>'+
+      '<span style="font-size:10px;color:#8a93a5">'+origen+
+        (d.ajustes?(' · <b style="color:#B26A00">'+d.ajustes+' ajuste'+(d.ajustes===1?'':'s')+' manual'+(d.ajustes===1?'':'es')+'</b>'):'')+'</span>'+
+      '<span style="margin-left:auto;display:flex;gap:5px">'+
+        (d.ajustes?'<button onclick="planCmpResetRoles(\''+pcEsc(week).replace(/'/g,"\\'")+'\');planCmpRender()" style="border:1px solid #e6dada;background:#fff;color:#c47c7c;font-size:9.5px;font-weight:700;cursor:pointer;padding:3px 10px;border-radius:12px">volver al automático</button>':'')+
+        '<button onclick="pcToggleEdit()" style="border:1px solid '+(_pcEditRoles?'#3B4D88':'#cdd6e6')+';background:'+(_pcEditRoles?'#3B4D88':'#fff')+';color:'+(_pcEditRoles?'#fff':'#3B4D88')+';font-size:10px;font-weight:700;cursor:pointer;padding:4px 12px;border-radius:13px">'+
+          (_pcEditRoles?'− Cerrar':'✎ Ajustar roles')+'</button>'+
+      '</span>'+
+    '</div>';
+  if(_pcEditRoles){
+    var jug=Object.values(d.porJugador).sort(function(a,b){ return a.name.localeCompare(b.name,'es'); });
+    if(!jug.length) html+='<div style="font-size:11px;color:#999">Sin jugadores en este microciclo.</div>';
+    else{
+      html+='<div style="display:flex;flex-direction:column;gap:3px;max-height:280px;overflow-y:auto">';
+      jug.forEach(function(j){
+        var esAj=(d.roles[_pcNorm(j.name)]!==undefined)&&(d.origen!=='sin datos');
+        html+='<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;background:#fff;border:1px solid #e8ebf2;border-radius:6px">'+
+          '<span style="flex:1;font-size:11.5px;font-weight:600;color:#0D1B2A">'+pcEsc(j.name)+'</span>'+
+          [['tit','Titular','#0C447C'],['sup','Suplente','#1D9E75'],['nc','No conv.','#8a93a5']].map(function(r){
+            var on=(j.rol===r[0]);
+            return '<button onclick="planCmpSetRole(\''+pcEsc(week).replace(/'/g,"\\'")+'\',\''+pcEsc(j.name).replace(/'/g,"\\'")+'\',\''+r[0]+'\');planCmpRender()" '+
+              'style="padding:3px 10px;border:1px solid '+(on?r[2]:'#dde2ea')+';background:'+(on?r[2]:'#fff')+';color:'+(on?'#fff':'#8a93a5')+';border-radius:11px;font-size:9.5px;font-weight:700;cursor:pointer">'+r[1]+'</button>';
+          }).join('')+
+        '</div>';
+      });
+      html+='</div>';
+      html+='<div style="font-size:9.5px;color:#a3a9b6;margin-top:6px">Los cambios se guardan para este microciclo y se comparten con tu compañero. Si volvés a elegir lo que propone el partido, el ajuste se quita solo.</div>';
+    }
+  }
+  html+='</div>';
+  return html;
+}
+
+// ── Vista POR JUGADOR ──
+function pcViewJugador(weeks, met){
+  if(!_pcJugador) return '<div style="padding:22px;text-align:center;color:#999;font-size:12px">Elegí un jugador.</div>';
+  var serie=planCmpJugadorSerie(_pcJugador, weeks);
+  var conDatos=serie.filter(function(x){return x.datos;});
+  if(!conDatos.length) return '<div style="padding:22px;text-align:center;color:#999;font-size:12px">'+pcEsc(_pcJugador)+' no tiene datos de GPS.</div>';
+  var rolCol={tit:'#0C447C',sup:'#1D9E75',nc:'#8a93a5'};
+  var rolLbl={tit:'Titular',sup:'Suplente',nc:'No convocado'};
+  var html='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:7px">'+
+    pcEsc(_pcJugador)+' — '+pcEsc(met.lbl)+' por microciclo</div>';
+  // Barras comparativas
+  var maxV=Math.max.apply(null, conDatos.map(function(x){ return x.datos[met.k]||0; }))||1;
+  html+='<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:12px">';
+  serie.forEach(function(x){
+    var v=x.datos?(x.datos[met.k]||0):null;
+    var pct=v?Math.max(2,(v/maxV*100)):0;
+    var col=x.rol?rolCol[x.rol]:'#e0e0e0';
+    html+='<div style="display:flex;align-items:center;gap:9px">'+
+      '<span style="min-width:110px;font-size:11px;font-weight:700;color:#0D1B2A">'+pcEsc(x.week)+'</span>'+
+      '<span style="min-width:74px;font-size:9.5px;font-weight:700;color:'+col+'">'+(x.rol?rolLbl[x.rol]:'sin datos')+'</span>'+
+      '<span style="flex:1;background:#f0f2f6;border-radius:5px;height:19px;position:relative;overflow:hidden">'+
+        (v?('<span style="display:block;height:100%;width:'+pct.toFixed(1)+'%;background:'+col+';border-radius:5px"></span>'):'')+
+      '</span>'+
+      '<span style="min-width:74px;text-align:right;font-size:11.5px;font-weight:800;color:'+(v?'#0D1B2A':'#ccc')+'">'+pcFmt(v,met.dec)+'</span>'+
+    '</div>';
+  });
+  html+='</div>';
+  // Tabla con todas las métricas
+  html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">'+
+    '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
+      '<th style="padding:6px 9px;text-align:left;color:#555">Microciclo</th>'+
+      '<th style="padding:6px 7px;color:#555">Rol</th>'+
+      PLAN_CMP_METRICS.map(function(m){ return '<th style="padding:6px 7px;color:#555;white-space:nowrap">'+m.lbl+'</th>'; }).join('')+
+    '</tr></thead><tbody>';
+  serie.forEach(function(x){
+    if(!x.datos){
+      html+='<tr style="border-bottom:1px solid #f0f2f6;opacity:.5"><td style="padding:5px 9px;font-weight:600">'+pcEsc(x.week)+'</td>'+
+        '<td colspan="'+(PLAN_CMP_METRICS.length+1)+'" style="padding:5px;text-align:center;color:#bbb;font-size:10px">sin datos</td></tr>';
+      return;
+    }
+    html+='<tr style="border-bottom:1px solid #f0f2f6">'+
+      '<td style="padding:5px 9px;font-weight:600;color:#0D1B2A;white-space:nowrap">'+pcEsc(x.week)+'</td>'+
+      '<td style="padding:5px 7px;text-align:center"><span style="font-size:9px;font-weight:700;color:#fff;background:'+rolCol[x.rol]+';border-radius:9px;padding:1px 7px">'+rolLbl[x.rol].slice(0,3)+'</span></td>'+
+      PLAN_CMP_METRICS.map(function(m){
+        return '<td style="padding:5px 7px;text-align:center;'+(m.k===met.k?'font-weight:800;color:#0D1B2A':'color:#6b7a90')+'">'+pcFmt(x.datos[m.k],m.dec)+'</td>';
+      }).join('')+
+    '</tr>';
+  });
+  html+='</tbody></table></div>';
+  html+='<div style="font-size:10px;color:#a3a9b6;margin-top:7px">El rol es el que tuvo el jugador en cada microciclo, según el partido anterior. '+
+    'Sirve para ver si su carga acompañó los cambios de rol.</div>';
+  return html;
+}
+
+
 
 // Extrae el número de un nombre de semana ("Semana 27", "MC 27", "27 - vs X")
 function planWeekNum(name){
@@ -35384,6 +35876,7 @@ var SB_SETTINGS_KEYS = [
   // bajaban nunca. Por eso los pendientes del CT no se guardaban: quedaban
   // sólo en el dispositivo donde se escribían.
   'VBT_SESSIONS',
+  'PLAN_CMP_ROLES',
   'TST_COND',
   'RESI_NAME_MAP',
   'VBT_EX_MAP',
@@ -35558,6 +36051,11 @@ function _sbApplySettingRow(row){
     return;
   }
   // v173: las condiciones de jornada se FUSIONAN, nunca se reemplazan
+  // v179: los roles de la comparativa se fusionan, nunca se reemplazan
+  if(row.key==='PLAN_CMP_ROLES'){
+    try{ if(typeof planCmpRolesMerge==='function') planCmpRolesMerge(row.value||{}); }catch(e){}
+    return;
+  }
   if(row.key==='TST_COND'){
     try{ if(typeof tstCondMerge==='function') tstCondMerge(row.value||{}); }catch(e){ console.warn('[Tests] cond merge:',e); }
     return;
