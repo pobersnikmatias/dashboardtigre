@@ -5665,7 +5665,14 @@ var _mcExtraRows=[]; // [{exId,mins}]
 function mcExtraInitPlayers(csvRows){
   var pWrap=document.getElementById('mc-extra-players');
   if(!pWrap) return;
-  var csvNames=new Set((csvRows||[]).map(function(r){return (r.name||'').toLowerCase();}));
+  // v183: comparar NORMALIZANDO (sin tildes, sin mayúsculas, sin dobles
+  // espacios). Antes "Jeronimo" del GPS no coincidía con "Jerónimo" del perfil
+  // y el jugador se contaba dos veces en la carga.
+  var _norm=function(x){
+    return (typeof csvNormName==='function')?csvNormName(x)
+      :String(x||'').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  };
+  var csvNames=new Set((csvRows||[]).map(function(r){ return _norm(r.name); }));
   var keys=Object.keys(PLAYER_PROFILES).sort();
   if(!keys.length){
     pWrap.innerHTML='<span style="font-size:10px;color:#aaa">Sin perfiles. Agregá jugadores en la pestaña Perfiles.</span>';
@@ -5673,7 +5680,7 @@ function mcExtraInitPlayers(csvRows){
   }
   pWrap.innerHTML=keys.map(function(k){
     var p=PLAYER_PROFILES[k]; var name=p.name||k;
-    var inCsv=csvNames.has(name.toLowerCase());
+    var inCsv=csvNames.has(_norm(name));
     var estado=p.estado||'disponible';
     var estCol=estado==='lesion'?'#E24B4A':estado==='reserva'?'#3B4D88':estado==='primera'?'#EF9F27':estado==='nodisp'?'#6B7280':'#1D9E75';
     return '<label style="display:flex;align-items:center;gap:5px;padding:3px 8px;background:#fff;border:1px solid '+(inCsv?'#1D9E7544':'#eee')+';border-radius:5px;cursor:pointer;font-size:10px" title="'+(inCsv?'Ya en el GPS — le sumás trabajo extra':'Sin GPS — se agrega con métricas estimadas')+'">'
@@ -5801,7 +5808,12 @@ function mcImport(){
     checkedKeys.forEach(function(k){
       var estimated=mcExtraCalcPlayer(k,extraExercises);
       // If player already in GPS rows, sum the metrics
-      var existing=rows.find(function(r){return r.name&&estimated.name&&r.name.toLowerCase()===estimated.name.toLowerCase();});
+      // v183: normalizado, para no duplicar por tildes o mayúsculas
+      var _ne=function(x){
+        return (typeof csvNormName==='function')?csvNormName(x)
+          :String(x||'').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+      };
+      var existing=rows.find(function(r){return r.name&&estimated.name&&_ne(r.name)===_ne(estimated.name);});
       if(existing){
         ['mts','hsr','h2','h25','acc','dcc','rhie'].forEach(function(m){existing[m]=(existing[m]||0)+estimated[m];});
         existing.tot_dur=(existing.tot_dur||0)+estimated.tot_dur;
@@ -6615,16 +6627,31 @@ function mcEstInit(){
   document.getElementById('mc-est-ex-rows').innerHTML='';
   document.getElementById('mc-est-msg').textContent='';
   document.getElementById('mc-est-preview').innerHTML='';
+  _mcEstSinMetricas={};   // v183
 }
 window.mcEstInit=mcEstInit;
 
 function mcEstAddRow(){
   var rid=_mcEstRows.length;
   _mcEstRows.push({exId:null,mins:20});
+  // v183: mostrar TODOS los ejercicios de la videoteca, no sólo los que tienen
+  // datos de GPS. Antes se filtraba por `mts || raw`, así que los que se crean
+  // a mano no aparecían nunca en la lista.
+  var _exDisp=D.slice().sort(function(a,b){
+    var ca=String(a.cat||''), cb=String(b.cat||'');
+    return ca.localeCompare(cb,'es') || String(a.n||'').localeCompare(String(b.n||''),'es');
+  });
+  var _porCat={};
+  _exDisp.forEach(function(r){ (_porCat[r.cat||'Sin categoría']=_porCat[r.cat||'Sin categoría']||[]).push(r); });
   var exOpts='<option value="">— elegir ejercicio —</option>'
-    +D.filter(function(r){return r.mts||r.raw;}).map(function(r){
-      var col=BC[r.cat]||'#888';
-      return'<option value="'+r.id+'" style="color:'+col+'">'+r.n+' ('+r.cat+')</option>';
+    +Object.keys(_porCat).map(function(cat){
+      return '<optgroup label="'+String(cat).replace(/"/g,'&quot;')+'">'+
+        _porCat[cat].map(function(r){
+          var tieneDatos=!!(r.mts||r.raw);
+          // Los que no tienen métricas cargadas se marcan, porque aportan
+          // minutos pero no distancia ni intensidad.
+          return '<option value="'+r.id+'">'+String(r.n||'')+(tieneDatos?'':' — sin métricas')+'</option>';
+        }).join('')+'</optgroup>';
     }).join('');
   var cont=document.getElementById('mc-est-ex-rows');
   var div=document.createElement('div');
@@ -6642,6 +6669,7 @@ function mcEstRemoveRow(rid){
 }
 window.mcEstRemoveRow=mcEstRemoveRow;
 
+var _mcEstSinMetricas={};   // v183: ejercicios elegidos que no aportan carga
 function mcEstCalcPlayer(playerKey, exercises){
   var prof=PLAYER_PROFILES[playerKey]||{};
   var name=prof.name||playerKey;
@@ -6652,6 +6680,8 @@ function mcEstCalcPlayer(playerKey, exercises){
     if(!ex) return;
     var mins=exRow.mins||0;
     totDur+=mins;
+    // v183: un ejercicio sin métricas suma minutos pero no carga externa
+    if(!ex.raw && !ex.mts) _mcEstSinMetricas[ex.n]=true;
     // Each ex field is ratio vs REF (ex.mts=1.27 means 1.27× the reference m/min)
     // REF.mts is the reference m/min for a match. ex.mts*REF.mts = m/min for this exercise
     // Total distance = (ex.mts * REF.mts) * mins
@@ -6774,7 +6804,13 @@ function mcEstSave(){
   if(existIdx>-1){
     var sess=MICROCICLO[existIdx];
     allPlayers.forEach(function(np){
-      var existP=sess.players.find(function(p){return p.name&&np.name&&p.name.toLowerCase()===np.name.toLowerCase();});
+      // v183: comparar normalizado, para no duplicar al mismo jugador por una
+      // tilde o una mayúscula distinta.
+      var _n=function(x){
+        return (typeof csvNormName==='function')?csvNormName(x)
+          :String(x||'').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+      };
+      var existP=sess.players.find(function(p){return p.name&&np.name&&_n(p.name)===_n(np.name);});
       if(existP){
         ['mts','hsr','h2','h25','acc','dcc','rhie'].forEach(function(m){existP[m]=(existP[m]||0)+np[m];});
         existP.tot_dur=(existP.tot_dur||0)+np.tot_dur;
@@ -6798,8 +6834,15 @@ function mcEstSave(){
   if(weekSel) weekSel.value=week;
   mcRenderWeek(); mcRenderLoad();
   msg.style.color='#1D9E75';
-  msg.textContent='✓ '+allPlayers.length+' jugador'+(allPlayers.length!==1?'es':'')
-    +' agregados a '+day+' en "'+week+'"';
+  // v183: avisar si algún ejercicio elegido no tiene métricas cargadas.
+  // Suma minutos pero no distancia ni intensidad, y conviene saberlo.
+  var _sin=Object.keys(_mcEstSinMetricas||{});
+  msg.innerHTML='✓ '+allPlayers.length+' jugador'+(allPlayers.length!==1?'es':'')
+    +' agregados a '+day+' en "'+String(week).replace(/</g,'&lt;')+'"'
+    +(_sin.length?('<br><span style="color:#B26A00;font-size:10.5px">⚠ Sin métricas cargadas (sólo suman minutos): '
+        +_sin.slice(0,4).map(function(x){return String(x).replace(/</g,'&lt;');}).join(', ')
+        +(_sin.length>4?' y '+(_sin.length-4)+' más':'')+'</span>'):'');
+  _mcEstSinMetricas={};
   window._mcEstCsvRows=[];
   setTimeout(function(){msg.textContent='';},3000);
 }
@@ -7565,10 +7608,13 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   <button id="prof-subtab-competencia" onclick="profSetSubtab('competencia')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🏆 Perfil de competencia</button>
   <button id="prof-subtab-nutricional" onclick="profSetSubtab('nutricional')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🥗 Nutricional</button>
   <button id="prof-subtab-movilidad" onclick="profSetSubtab('movilidad')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🦵 Movilidad</button>
+  <button id="prof-subtab-medica" onclick="profSetSubtab('medica')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🏥 Área médica</button>
   <button id="prof-subtab-informes" onclick="profSetSubtab('informes')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">📄 Informes</button>
 </div>
 
 <!-- SUBTAB: Informes (ficha élite del jugador) -->
+<div id="prof-subview-medica" style="display:none"><div id="med-container"></div></div>
+
 <div id="prof-subview-informes" style="display:none">
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
     <select id="inf-player-sel" onchange="infRender()" style="padding:7px 12px;border:1px solid #ccc;border-radius:8px;font-size:12px;font-weight:700;min-width:220px;background:#fff"></select>
@@ -25887,7 +25933,11 @@ function injSave(){
   p.injuries.push(inj);
   // Si hay fecha de inicio y sin alta, marcar jugador en lesión
   if(!inj.dateEnd) p.estado = 'lesion';
+  // v182: sellar y SUBIR el perfil. Antes sólo hacía saveData(): la lesión
+  // quedaba en este dispositivo y la carga desde la nube (que no la tenía)
+  // la borraba al recargar.
   saveData();
+  if(typeof profSaveOne==='function'){ try{ profSaveOne(_injPlayerKey); }catch(e){} }
   msg.style.color='#1D9E75'; msg.textContent='Lesión registrada.';
   setTimeout(function(){ msg.textContent=''; }, 2500);
   // Reset form
@@ -25905,7 +25955,9 @@ function injDelete(injId){
   var p = PLAYER_PROFILES[_injPlayerKey]; if(!p||!p.injuries) return;
   if(!confirm('¿Eliminar este registro de lesión?')) return;
   p.injuries = p.injuries.filter(function(i){ return i.id !== injId; });
-  saveData(); injRenderList(); renderProfilesTable();
+  saveData();
+  if(typeof profSaveOne==='function'){ try{ profSaveOne(_injPlayerKey); }catch(e){} }   // v182
+  injRenderList(); renderProfilesTable();
 }
 window.injDelete = injDelete;
 
@@ -25920,9 +25972,410 @@ function injSetAlta(injId){
   // Si no quedan lesiones activas, marcar disponible
   var hasActive = p.injuries.some(function(i){ return !i.dateEnd; });
   if(!hasActive) p.estado = 'disponible';
-  saveData(); injRenderList(); renderProfilesTable();
+  saveData();
+  if(typeof profSaveOne==='function'){ try{ profSaveOne(_injPlayerKey); }catch(e){} }   // v182
+  injRenderList(); renderProfilesTable();
 }
 window.injSetAlta = injSetAlta;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ÁREA MÉDICA (v182)
+// Lesiones en curso, historial por jugador y por grupo, y análisis con
+// indicadores de uso habitual en clubes: incidencia, días perdidos,
+// disponibilidad del plantel, distribución por zona y mecanismo, recurrencias.
+// Sólo LEE de PLAYER_PROFILES[].injuries — no crea ni modifica lesiones.
+// ═══════════════════════════════════════════════════════════════════════════
+var _medVista='curso';     // curso | historial | grupo | analisis
+var _medJugador='';
+var _medPeriodo=365;       // días hacia atrás para el análisis
+
+function medEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function medHoyISO(){
+  var d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function medDias(ini,fin){
+  if(!ini)return null;
+  var a=new Date(ini+'T00:00:00'), b=new Date((fin||medHoyISO())+'T00:00:00');
+  var d=Math.round((b-a)/86400000);
+  return d>=0?d:null;
+}
+window.medDias=medDias;
+
+// Todas las lesiones con su jugador, ordenadas por fecha
+function medAllInjuries(){
+  var out=[];
+  Object.keys(PLAYER_PROFILES||{}).forEach(function(k){
+    var p=PLAYER_PROFILES[k];
+    if(!p||!Array.isArray(p.injuries))return;
+    p.injuries.forEach(function(inj){
+      if(!inj||!inj.dateStart)return;
+      out.push(Object.assign({}, inj, {
+        _key:k, _player:p.name||k, _pos:p.pos||'',
+        _dias:medDias(inj.dateStart, inj.dateEnd),
+        _activa:!inj.dateEnd
+      }));
+    });
+  });
+  return out.sort(function(a,b){ return String(b.dateStart).localeCompare(String(a.dateStart)); });
+}
+window.medAllInjuries=medAllInjuries;
+
+function medSetVista(v){ _medVista=v; medRender(); }
+function medSetJugador(v){ _medJugador=v; medRender(); }
+function medSetPeriodo(v){ _medPeriodo=parseInt(v)||365; medRender(); }
+window.medSetVista=medSetVista; window.medSetJugador=medSetJugador; window.medSetPeriodo=medSetPeriodo;
+
+// Severidad estándar (consenso FIFA/UEFA): por días de baja
+function medSeveridad(dias){
+  if(dias==null)return {k:'',lbl:'—',col:'#ccc'};
+  if(dias<=3)  return {k:'min',lbl:'Mínima',col:'#1D9E75'};
+  if(dias<=7)  return {k:'leve',lbl:'Leve',col:'#8BC34A'};
+  if(dias<=28) return {k:'mod',lbl:'Moderada',col:'#EF9F27'};
+  return {k:'sev',lbl:'Severa',col:'#D9534F'};
+}
+window.medSeveridad=medSeveridad;
+
+function medRender(){
+  var cont=document.getElementById('med-container');
+  if(!cont)return;
+  var todas=medAllInjuries();
+  var activas=todas.filter(function(i){return i._activa;});
+
+  var html='<div style="background:#0D1B2A;border-radius:10px 10px 0 0;padding:12px 15px">'+
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:9px">'+
+      '<span style="color:#fff;font-size:14px;font-weight:800">🏥 Área médica</span>'+
+      (activas.length?'<span style="font-size:10.5px;font-weight:800;color:#fff;background:#D9534F;border-radius:11px;padding:2px 10px">'+activas.length+' en curso</span>':
+        '<span style="font-size:10.5px;font-weight:700;color:#0D1B2A;background:#7fd4a8;border-radius:11px;padding:2px 10px">plantel sano</span>')+
+      '<button onclick="medPrint()" style="margin-left:auto;padding:5px 13px;border:1px solid #ffffff33;background:none;color:#9fb3c8;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🖨 Informe</button>'+
+    '</div>'+
+    '<div style="display:flex;gap:5px;flex-wrap:wrap">'+
+      [['curso','🚑 En curso'],['historial','📋 Por jugador'],['grupo','👥 Plantel'],['analisis','📊 Análisis']].map(function(v){
+        var on=_medVista===v[0];
+        return '<button onclick="medSetVista(\''+v[0]+'\')" style="padding:5px 12px;border:1px solid '+(on?'#fff':'#ffffff33')+';background:'+(on?'#fff':'none')+';color:'+(on?'#0D1B2A':'#9fb3c8')+';border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">'+v[1]+'</button>';
+      }).join('')+
+    '</div></div>';
+
+  html+='<div style="background:#fff;border:1px solid #e4e6ec;border-top:none;border-radius:0 0 10px 10px;padding:14px 15px">';
+  if(!todas.length){
+    html+='<div style="padding:30px;text-align:center">'+
+      '<div style="font-size:30px;margin-bottom:8px">🏥</div>'+
+      '<div style="font-size:13px;font-weight:700;color:#555">Sin lesiones registradas</div>'+
+      '<div style="font-size:11px;color:#aaa;margin-top:6px">Las lesiones se cargan desde 👤 Datos generales, con el botón 🚑 de cada jugador.</div></div>';
+  }
+  else if(_medVista==='curso')     html+=medViewCurso(activas, todas);
+  else if(_medVista==='historial') html+=medViewHistorial(todas);
+  else if(_medVista==='grupo')     html+=medViewGrupo(todas);
+  else                             html+=medViewAnalisis(todas);
+  html+='</div>';
+  cont.innerHTML=html;
+}
+window.medRender=medRender;
+
+// ── KPI reutilizable ──
+function medKpi(lbl,val,col,sub){
+  return '<div style="flex:1;min-width:112px;background:#f8faff;border:1px solid #e8ecf5;border-radius:9px;padding:9px 12px">'+
+    '<div style="font-size:9px;color:#a3a9b6;font-weight:700;text-transform:uppercase;letter-spacing:.3px">'+lbl+'</div>'+
+    '<div style="font-size:19px;font-weight:800;color:'+col+';line-height:1.25">'+val+'</div>'+
+    (sub?'<div style="font-size:9.5px;color:#a3a9b6">'+sub+'</div>':'')+'</div>';
+}
+
+// ── VISTA: lesiones en curso ──
+function medViewCurso(activas, todas){
+  var totalJug=Object.keys(PLAYER_PROFILES||{}).length;
+  var dispon=totalJug-activas.length;
+  var pctDisp=totalJug?Math.round(dispon/totalJug*100):0;
+  var html='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px">'+
+    medKpi('Disponibilidad', pctDisp+'%', pctDisp>=90?'#1D9E75':(pctDisp>=80?'#EF9F27':'#D9534F'), dispon+' de '+totalJug+' jugadores')+
+    medKpi('Lesiones activas', activas.length, activas.length?'#D9534F':'#1D9E75', '')+
+    medKpi('Días perdidos hoy', activas.reduce(function(a,i){return a+(i._dias||0);},0), '#0D1B2A', 'acumulados')+
+    medKpi('Baja prolongada', activas.filter(function(i){return (i._dias||0)>28;}).length, '#8a6d3b', 'más de 28 días')+
+  '</div>';
+  if(!activas.length){
+    return html+'<div style="padding:24px;text-align:center;background:#f2fbf6;border:1px solid #cfe8dc;border-radius:9px">'+
+      '<div style="font-size:26px">✅</div><div style="font-size:13px;font-weight:700;color:#1D6B4F;margin-top:5px">Plantel completo</div>'+
+      '<div style="font-size:11px;color:#6b8a7a">No hay lesiones activas.</div></div>';
+  }
+  html+='<div style="display:flex;flex-direction:column;gap:8px">';
+  activas.sort(function(a,b){ return (b._dias||0)-(a._dias||0); }).forEach(function(i){
+    var sev=medSeveridad(i._dias);
+    html+='<div style="border:1px solid #e8ebf2;border-left:4px solid '+sev.col+';border-radius:9px;padding:10px 13px;background:#fff">'+
+      '<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">'+
+        '<b style="font-size:13px;color:#0D1B2A">'+medEsc(i._player)+'</b>'+
+        (i._pos?'<span style="font-size:9.5px;font-weight:800;color:#fff;background:#9fb3c8;border-radius:9px;padding:1px 8px">'+medEsc(i._pos)+'</span>':'')+
+        '<span style="font-size:11px;color:#6b7a90">'+medEsc(i.type||'—')+(i.zone?' · '+medEsc(i.zone):'')+'</span>'+
+        '<span style="margin-left:auto;font-size:11px;font-weight:800;color:'+sev.col+'">'+(i._dias!=null?i._dias+' días':'—')+
+          '<span style="font-size:9.5px;font-weight:600;opacity:.8"> · '+sev.lbl+'</span></span>'+
+      '</div>'+
+      '<div style="font-size:10.5px;color:#8a93a5;margin-top:3px">Desde el '+medEsc(i.dateStart)+
+        (i.severity?(' · gravedad declarada: '+medEsc(i.severity)):'')+'</div>'+
+      (i.notes?'<div style="font-size:10.5px;color:#6b7a90;margin-top:4px;padding:5px 9px;background:#fafbfd;border-radius:6px">'+medEsc(i.notes)+'</div>':'')+
+    '</div>';
+  });
+  html+='</div>';
+  return html;
+}
+
+// ── VISTA: historial por jugador ──
+function medViewHistorial(todas){
+  var jugadores={};
+  todas.forEach(function(i){ (jugadores[i._player]=jugadores[i._player]||[]).push(i); });
+  var nombres=Object.keys(jugadores).sort(function(a,b){ return jugadores[b].length-jugadores[a].length; });
+  if(!_medJugador||nombres.indexOf(_medJugador)<0) _medJugador=nombres[0];
+  var mias=jugadores[_medJugador]||[];
+  var diasTot=mias.reduce(function(a,i){return a+(i._dias||0);},0);
+  var recur=medRecurrencias(mias);
+
+  var html='<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+    '<span style="font-size:10.5px;color:#8a93a5;font-weight:700">Jugador</span>'+
+    '<select onchange="medSetJugador(this.value)" style="padding:5px 11px;border:1px solid #ccd3de;border-radius:6px;font-size:12px;font-weight:700;min-width:190px">'+
+      nombres.map(function(n){ return '<option'+(n===_medJugador?' selected':'')+'>'+medEsc(n)+' ('+jugadores[n].length+')</option>'; }).join('')+
+    '</select></div>';
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px">'+
+    medKpi('Lesiones', mias.length, '#0D1B2A', 'registradas')+
+    medKpi('Días perdidos', diasTot, '#D9534F', 'total')+
+    medKpi('Promedio', mias.length?Math.round(diasTot/mias.length):0, '#8a6d3b', 'días por lesión')+
+    medKpi('Recurrencias', recur.length, recur.length?'#D9534F':'#1D9E75', 'misma zona')+
+  '</div>';
+  if(recur.length){
+    html+='<div style="background:#fdf2f2;border:1px solid #f0d5d5;border-radius:8px;padding:9px 12px;margin-bottom:12px">'+
+      '<div style="font-size:10.5px;font-weight:800;color:#A03A36;margin-bottom:3px">⚠ Zonas con lesiones repetidas</div>'+
+      recur.map(function(r){ return '<div style="font-size:10.5px;color:#7a5050">'+medEsc(r.zona)+': <b>'+r.n+' episodios</b> · '+r.dias+' días perdidos</div>'; }).join('')+
+    '</div>';
+  }
+  html+='<div style="position:relative;padding-left:18px">';
+  mias.forEach(function(i,idx){
+    var sev=medSeveridad(i._dias);
+    html+='<div style="position:relative;padding-bottom:'+(idx<mias.length-1?'14px':'0')+'">'+
+      '<span style="position:absolute;left:-18px;top:4px;width:11px;height:11px;border-radius:50%;background:'+sev.col+';border:2px solid #fff;box-shadow:0 0 0 1.5px '+sev.col+'"></span>'+
+      (idx<mias.length-1?'<span style="position:absolute;left:-13px;top:16px;bottom:0;width:1.5px;background:#e8ebf2"></span>':'')+
+      '<div style="border:1px solid #e8ebf2;border-radius:8px;padding:8px 11px;background:'+(i._activa?'#fffaf5':'#fff')+'">'+
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+          '<b style="font-size:12px;color:#0D1B2A">'+medEsc(i.type||'—')+'</b>'+
+          (i.zone?'<span style="font-size:10.5px;color:#6b7a90">'+medEsc(i.zone)+'</span>':'')+
+          (i._activa?'<span style="font-size:9px;font-weight:800;color:#fff;background:#D9534F;border-radius:9px;padding:1px 8px">EN CURSO</span>':'')+
+          '<span style="margin-left:auto;font-size:11px;font-weight:800;color:'+sev.col+'">'+(i._dias!=null?i._dias+'d':'—')+'</span>'+
+        '</div>'+
+        '<div style="font-size:10px;color:#a3a9b6;margin-top:2px">'+medEsc(i.dateStart)+(i.dateEnd?(' → '+medEsc(i.dateEnd)):' → sin alta')+'</div>'+
+        (i.notes?'<div style="font-size:10.5px;color:#6b7a90;margin-top:4px">'+medEsc(i.notes)+'</div>':'')+
+      '</div></div>';
+  });
+  html+='</div>';
+  return html;
+}
+
+// Zonas con más de un episodio
+function medRecurrencias(lista){
+  var byZona={};
+  (lista||[]).forEach(function(i){
+    var z=(i.zone||i.type||'Sin especificar');
+    if(!byZona[z]) byZona[z]={zona:z,n:0,dias:0};
+    byZona[z].n++; byZona[z].dias+=(i._dias||0);
+  });
+  return Object.values(byZona).filter(function(z){return z.n>1;}).sort(function(a,b){return b.n-a.n;});
+}
+window.medRecurrencias=medRecurrencias;
+
+// ── VISTA: plantel ──
+function medViewGrupo(todas){
+  var byJug={};
+  todas.forEach(function(i){
+    if(!byJug[i._player]) byJug[i._player]={name:i._player,pos:i._pos,n:0,dias:0,activas:0};
+    byJug[i._player].n++;
+    byJug[i._player].dias+=(i._dias||0);
+    if(i._activa) byJug[i._player].activas++;
+  });
+  var lista=Object.values(byJug).sort(function(a,b){ return b.dias-a.dias; });
+  var maxD=Math.max.apply(null,lista.map(function(x){return x.dias;}))||1;
+  var html='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:7px">Días perdidos por jugador</div>';
+  html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'+
+    '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
+      '<th style="padding:7px 10px;text-align:left;color:#555">Jugador</th>'+
+      '<th style="padding:7px 8px;color:#555">Pos.</th>'+
+      '<th style="padding:7px 8px;color:#555">Lesiones</th>'+
+      '<th style="padding:7px 8px;color:#555">Días perdidos</th>'+
+      '<th style="padding:7px 8px;color:#555">Estado</th>'+
+    '</tr></thead><tbody>';
+  lista.forEach(function(x){
+    var pct=(x.dias/maxD*100);
+    html+='<tr style="border-bottom:1px solid #f0f2f6">'+
+      '<td style="padding:6px 10px;font-weight:600;color:#0D1B2A;white-space:nowrap">'+medEsc(x.name)+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;font-size:10px;color:#8a93a5">'+medEsc(x.pos||'—')+'</td>'+
+      '<td style="padding:6px 8px;text-align:center;font-weight:700;color:#0D1B2A">'+x.n+'</td>'+
+      '<td style="padding:6px 8px">'+
+        '<div style="display:flex;align-items:center;gap:7px">'+
+          '<span style="min-width:34px;text-align:right;font-weight:800;color:#D9534F">'+x.dias+'</span>'+
+          '<span style="flex:1;height:6px;background:#f0f2f6;border-radius:3px;overflow:hidden"><span style="display:block;height:100%;width:'+pct.toFixed(0)+'%;background:#D9534F;border-radius:3px"></span></span>'+
+        '</div></td>'+
+      '<td style="padding:6px 8px;text-align:center">'+
+        (x.activas?'<span style="font-size:9px;font-weight:800;color:#fff;background:#D9534F;border-radius:9px;padding:1px 8px">EN CURSO</span>':
+                   '<span style="font-size:9px;font-weight:700;color:#1D9E75">disponible</span>')+'</td>'+
+    '</tr>';
+  });
+  html+='</tbody></table></div>';
+  return html;
+}
+
+// ── VISTA: análisis ──
+function medViewAnalisis(todas){
+  var desde=(function(){
+    var d=new Date(); d.setDate(d.getDate()-_medPeriodo);
+    return d.toISOString().slice(0,10);
+  })();
+  var per=todas.filter(function(i){ return String(i.dateStart)>=desde; });
+  var totalJug=Object.keys(PLAYER_PROFILES||{}).length||1;
+  var diasPerd=per.reduce(function(a,i){return a+(i._dias||0);},0);
+
+  var html='<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+    '<span style="font-size:10.5px;color:#8a93a5;font-weight:700">Período</span>'+
+    [[90,'3 meses'],[180,'6 meses'],[365,'1 año'],[3650,'Todo']].map(function(p){
+      var on=_medPeriodo===p[0];
+      return '<button onclick="medSetPeriodo('+p[0]+')" style="padding:4px 11px;border:1px solid '+(on?'#3B4D88':'#dde2ea')+';background:'+(on?'#3B4D88':'#fff')+';color:'+(on?'#fff':'#6b7a90')+';border-radius:14px;font-size:10.5px;font-weight:700;cursor:pointer">'+p[1]+'</button>';
+    }).join('')+'</div>';
+
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
+    medKpi('Lesiones', per.length, '#0D1B2A', 'en el período')+
+    medKpi('Días perdidos', diasPerd, '#D9534F', 'acumulados')+
+    medKpi('Por jugador', (per.length/totalJug).toFixed(1), '#8a6d3b', 'promedio del plantel')+
+    medKpi('Duración media', per.length?Math.round(diasPerd/per.length):0, '#EF9F27', 'días por lesión')+
+  '</div>';
+  if(!per.length) return html+'<div style="padding:22px;text-align:center;color:#999;font-size:12px">Sin lesiones en este período.</div>';
+
+  // Distribución por severidad
+  var sevs={min:0,leve:0,mod:0,sev:0};
+  per.forEach(function(i){ var s=medSeveridad(i._dias); if(sevs[s.k]!=null)sevs[s.k]++; });
+  html+='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:6px">Severidad (criterio de consenso: días de baja)</div>'+
+    '<div style="display:flex;gap:5px;margin-bottom:14px;height:34px;border-radius:7px;overflow:hidden">'+
+    [['min','Mínima (≤3d)','#1D9E75'],['leve','Leve (4-7d)','#8BC34A'],['mod','Moderada (8-28d)','#EF9F27'],['sev','Severa (>28d)','#D9534F']].map(function(s){
+      var n=sevs[s[0]], pct=per.length?(n/per.length*100):0;
+      if(!n)return '';
+      return '<div title="'+s[1]+': '+n+'" style="flex:'+Math.max(pct,6)+';background:'+s[2]+';display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:800">'+n+'</div>';
+    }).join('')+'</div>'+
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:-8px;margin-bottom:14px;font-size:9.5px;color:#8a93a5">'+
+    [['Mínima ≤3d','#1D9E75'],['Leve 4-7d','#8BC34A'],['Moderada 8-28d','#EF9F27'],['Severa >28d','#D9534F']].map(function(s){
+      return '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:'+s[1]+';display:inline-block"></span>'+s[0]+'</span>';
+    }).join('')+'</div>';
+
+  // Por zona y por tipo
+  html+='<div style="display:flex;gap:12px;flex-wrap:wrap">';
+  [['Zona corporal','zone'],['Tipo de lesión','type']].forEach(function(cfg){
+    var by={};
+    per.forEach(function(i){
+      var k=i[cfg[1]]||'Sin especificar';
+      if(!by[k]) by[k]={k:k,n:0,dias:0};
+      by[k].n++; by[k].dias+=(i._dias||0);
+    });
+    var lista=Object.values(by).sort(function(a,b){return b.n-a.n;}).slice(0,8);
+    var mx=Math.max.apply(null,lista.map(function(x){return x.n;}))||1;
+    html+='<div style="flex:1;min-width:270px">'+
+      '<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:6px">'+cfg[0]+'</div>'+
+      lista.map(function(x){
+        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'+
+          '<span style="min-width:118px;font-size:10.5px;color:#4a5568;font-weight:600">'+medEsc(x.k)+'</span>'+
+          '<span style="flex:1;height:16px;background:#f0f2f6;border-radius:4px;overflow:hidden">'+
+            '<span style="display:block;height:100%;width:'+(x.n/mx*100).toFixed(0)+'%;background:#3B4D88;border-radius:4px"></span></span>'+
+          '<span style="min-width:52px;text-align:right;font-size:10.5px;font-weight:800;color:#0D1B2A">'+x.n+
+            '<span style="font-size:9px;color:#a3a9b6;font-weight:500"> · '+x.dias+'d</span></span>'+
+        '</div>';
+      }).join('')+'</div>';
+  });
+  html+='</div>';
+
+  // Evolución mensual
+  var meses={};
+  per.forEach(function(i){
+    var m=String(i.dateStart).slice(0,7);
+    if(!meses[m]) meses[m]={m:m,n:0,dias:0};
+    meses[m].n++; meses[m].dias+=(i._dias||0);
+  });
+  var lm=Object.values(meses).sort(function(a,b){return a.m.localeCompare(b.m);});
+  if(lm.length>1){
+    var mx=Math.max.apply(null,lm.map(function(x){return x.n;}))||1;
+    html+='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin:16px 0 6px">Lesiones por mes</div>'+
+      '<div style="display:flex;gap:4px;align-items:flex-end;height:100px;padding:0 2px">'+
+      lm.map(function(x){
+        var h=Math.max(6,(x.n/mx*88));
+        return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px" title="'+x.m+': '+x.n+' lesiones · '+x.dias+' días">'+
+          '<span style="font-size:9.5px;font-weight:800;color:#0D1B2A">'+x.n+'</span>'+
+          '<span style="width:100%;max-width:38px;height:'+h.toFixed(0)+'px;background:#3B4D88;border-radius:4px 4px 0 0"></span>'+
+          '<span style="font-size:8.5px;color:#a3a9b6">'+x.m.slice(5)+'/'+x.m.slice(2,4)+'</span>'+
+        '</div>';
+      }).join('')+'</div>';
+  }
+
+  // Recurrencias del plantel
+  var recPl=[];
+  var byJug={};
+  todas.forEach(function(i){ (byJug[i._player]=byJug[i._player]||[]).push(i); });
+  Object.keys(byJug).forEach(function(n){
+    medRecurrencias(byJug[n]).forEach(function(r){ recPl.push({jug:n, zona:r.zona, n:r.n, dias:r.dias}); });
+  });
+  if(recPl.length){
+    recPl.sort(function(a,b){return b.n-a.n;});
+    html+='<div style="background:#fdf2f2;border:1px solid #f0d5d5;border-radius:9px;padding:10px 13px;margin-top:16px">'+
+      '<div style="font-size:11.5px;font-weight:800;color:#A03A36;margin-bottom:5px">⚠ Recurrencias — jugadores con lesiones repetidas en la misma zona</div>'+
+      recPl.slice(0,8).map(function(r){
+        return '<div style="font-size:11px;color:#7a5050;margin:2px 0"><b>'+medEsc(r.jug)+'</b> · '+medEsc(r.zona)+' — '+r.n+' episodios, '+r.dias+' días perdidos</div>';
+      }).join('')+
+      (recPl.length>8?'<div style="font-size:10px;color:#a89090;margin-top:3px">y '+(recPl.length-8)+' más</div>':'')+
+      '<div style="font-size:9.5px;color:#a89090;margin-top:5px">La recurrencia en una misma zona sugiere revisar el proceso de retorno y el trabajo preventivo específico.</div>'+
+    '</div>';
+  }
+  return html;
+}
+
+// ── Informe imprimible ──
+function medPrint(){
+  var todas=medAllInjuries();
+  var activas=todas.filter(function(i){return i._activa;});
+  var totalJug=Object.keys(PLAYER_PROFILES||{}).length||1;
+  var diasPerd=todas.reduce(function(a,i){return a+(i._dias||0);},0);
+  var pctDisp=Math.round((totalJug-activas.length)/totalJug*100);
+  var byZona={};
+  todas.forEach(function(i){ var z=i.zone||'Sin especificar'; byZona[z]=(byZona[z]||0)+1; });
+  var zonas=Object.keys(byZona).map(function(k){return{k:k,n:byZona[k]};}).sort(function(a,b){return b.n-a.n;}).slice(0,6);
+  var h='<html><head><meta charset="utf-8"><title>Informe médico</title><style>'+
+    'body{font-family:system-ui,-apple-system,sans-serif;padding:26px;color:#0D1B2A}'+
+    'h1{font-size:20px;margin:0 0 3px}h2{font-size:13px;color:#3B4D88;margin:20px 0 7px;border-bottom:1px solid #e0e0e0;padding-bottom:4px}'+
+    '.sub{font-size:11px;color:#6b7a90;margin-bottom:16px}'+
+    '.k{display:inline-block;border:1px solid #e0e0e0;border-radius:8px;padding:9px 15px;margin:0 7px 7px 0;min-width:104px}'+
+    '.kl{font-size:9px;color:#8a93a5;text-transform:uppercase;font-weight:700}.kv{font-size:19px;font-weight:800}'+
+    'table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:5px}'+
+    'th{background:#0D1B2A;color:#fff;padding:6px 9px;text-align:left;font-size:10px}'+
+    'td{padding:6px 9px;border-bottom:1px solid #eee}'+
+    '@media print{body{padding:12px}}</style></head><body>'+
+    '<h1>Informe del área médica</h1>'+
+    '<div class="sub">Emitido el '+medHoyISO()+' · '+totalJug+' jugadores en plantel</div>'+
+    '<div>'+
+      '<span class="k"><div class="kl">Disponibilidad</div><div class="kv" style="color:'+(pctDisp>=90?'#1D9E75':'#D9534F')+'">'+pctDisp+'%</div></span>'+
+      '<span class="k"><div class="kl">Lesiones activas</div><div class="kv">'+activas.length+'</div></span>'+
+      '<span class="k"><div class="kl">Lesiones totales</div><div class="kv">'+todas.length+'</div></span>'+
+      '<span class="k"><div class="kl">Días perdidos</div><div class="kv">'+diasPerd+'</div></span>'+
+    '</div>';
+  if(activas.length){
+    h+='<h2>Lesiones en curso</h2><table><tr><th>Jugador</th><th>Pos.</th><th>Lesión</th><th>Zona</th><th>Desde</th><th>Días</th></tr>'+
+      activas.sort(function(a,b){return (b._dias||0)-(a._dias||0);}).map(function(i){
+        return '<tr><td><b>'+medEsc(i._player)+'</b></td><td>'+medEsc(i._pos||'—')+'</td><td>'+medEsc(i.type||'—')+
+          '</td><td>'+medEsc(i.zone||'—')+'</td><td>'+medEsc(i.dateStart)+'</td><td><b>'+(i._dias||0)+'</b></td></tr>';
+      }).join('')+'</table>';
+  }
+  if(zonas.length){
+    h+='<h2>Distribución por zona</h2><table><tr><th>Zona</th><th>Episodios</th></tr>'+
+      zonas.map(function(z){ return '<tr><td>'+medEsc(z.k)+'</td><td>'+z.n+'</td></tr>'; }).join('')+'</table>';
+  }
+  h+='<h2>Historial completo</h2><table><tr><th>Jugador</th><th>Lesión</th><th>Zona</th><th>Inicio</th><th>Alta</th><th>Días</th></tr>'+
+    todas.slice(0,60).map(function(i){
+      return '<tr><td>'+medEsc(i._player)+'</td><td>'+medEsc(i.type||'—')+'</td><td>'+medEsc(i.zone||'—')+
+        '</td><td>'+medEsc(i.dateStart)+'</td><td>'+medEsc(i.dateEnd||'en curso')+'</td><td>'+(i._dias!=null?i._dias:'—')+'</td></tr>';
+    }).join('')+'</table>';
+  h+='</body></html>';
+  var w=window.open('','_blank');
+  if(!w){ alert('El navegador bloqueó la ventana. Permití las ventanas emergentes.'); return; }
+  w.document.write(h); w.document.close();
+  setTimeout(function(){ try{ w.print(); }catch(e){} }, 400);
+}
+window.medPrint=medPrint;
+
 
 function injDays(inj){
   if(!inj.dateStart) return null;
@@ -32725,6 +33178,10 @@ function profSetSubtab(t){
   if(bc){bc.style.color=t==='competencia'?'#0D1B2A':'#aaa';bc.style.borderBottomColor=t==='competencia'?'#304483':'transparent';}
   if(bn){bn.style.color=t==='nutricional'?'#0D1B2A':'#aaa';bn.style.borderBottomColor=t==='nutricional'?'#304483':'transparent';}
   if(bm){bm.style.color=t==='movilidad'?'#0D1B2A':'#aaa';bm.style.borderBottomColor=t==='movilidad'?'#304483':'transparent';}
+  var mv2=document.getElementById('prof-subview-medica'); if(mv2)mv2.style.display=t==='medica'?'':'none';
+  var bmed=document.getElementById('prof-subtab-medica');
+  if(bmed){bmed.style.color=t==='medica'?'#0D1B2A':'#aaa';bmed.style.borderBottomColor=t==='medica'?'#304483':'transparent';}
+  if(t==='medica'){ try{ medRender(); }catch(e){ console.warn('Área médica:',e); } }
   if(t==='competencia'){compInit();}
   if(t==='nutricional'){nutRender();}
   if(t==='movilidad'){if(typeof mobRender==='function')mobRender();}
