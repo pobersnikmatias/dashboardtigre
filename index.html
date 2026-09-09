@@ -25931,8 +25931,15 @@ function injSave(){
 
   if(!p.injuries) p.injuries = [];
   p.injuries.push(inj);
-  // Si hay fecha de inicio y sin alta, marcar jugador en lesión
-  if(!inj.dateEnd) p.estado = 'lesion';
+  // v184: el estado se deduce de si queda alguna lesión SIN alta. Antes sólo
+  // se marcaba 'lesion'; al cargar una lesión pasada ya cerrada de un jugador
+  // marcado en rojo, el estado quedaba desactualizado.
+  var _hayAbierta = p.injuries.some(function(x){ return x && x.dateStart && !x.dateEnd; });
+  if(_hayAbierta) p.estado = 'lesion';
+  else if(p.estado === 'lesion') p.estado = 'disponible';
+  // Ordenar por fecha, para que el historial quede cronológico aunque se
+  // carguen lesiones viejas después.
+  p.injuries.sort(function(a,b){ return String(a.dateStart||'').localeCompare(String(b.dateStart||'')); });
   // v182: sellar y SUBIR el perfil. Antes sólo hacía saveData(): la lesión
   // quedaba en este dispositivo y la carga desde la nube (que no la tenía)
   // la borraba al recargar.
@@ -25948,6 +25955,9 @@ function injSave(){
   document.getElementById('inj-notes').value = '';
   injRenderList();
   renderProfilesTable();
+  // v184: si el Área médica está abierta, refrescarla al instante
+  try{ var mv=document.getElementById('prof-subview-medica');
+       if(mv&&mv.style.display!=='none'&&typeof medRender==='function')medRender(); }catch(e){}
 }
 window.injSave = injSave;
 
@@ -25958,6 +25968,8 @@ function injDelete(injId){
   saveData();
   if(typeof profSaveOne==='function'){ try{ profSaveOne(_injPlayerKey); }catch(e){} }   // v182
   injRenderList(); renderProfilesTable();
+  try{ var mv=document.getElementById('prof-subview-medica');
+       if(mv&&mv.style.display!=='none'&&typeof medRender==='function')medRender(); }catch(e){}
 }
 window.injDelete = injDelete;
 
@@ -25975,6 +25987,8 @@ function injSetAlta(injId){
   saveData();
   if(typeof profSaveOne==='function'){ try{ profSaveOne(_injPlayerKey); }catch(e){} }   // v182
   injRenderList(); renderProfilesTable();
+  try{ var mv=document.getElementById('prof-subview-medica');
+       if(mv&&mv.style.display!=='none'&&typeof medRender==='function')medRender(); }catch(e){}
 }
 window.injSetAlta = injSetAlta;
 
@@ -26007,18 +26021,75 @@ function medAllInjuries(){
   var out=[];
   Object.keys(PLAYER_PROFILES||{}).forEach(function(k){
     var p=PLAYER_PROFILES[k];
-    if(!p||!Array.isArray(p.injuries))return;
-    p.injuries.forEach(function(inj){
-      if(!inj||!inj.dateStart)return;
-      out.push(Object.assign({}, inj, {
-        _key:k, _player:p.name||k, _pos:p.pos||'',
-        _dias:medDias(inj.dateStart, inj.dateEnd),
-        _activa:!inj.dateEnd
-      }));
-    });
+    if(!p)return;
+    if(Array.isArray(p.injuries)){
+      p.injuries.forEach(function(inj){
+        if(!inj||!inj.dateStart)return;
+        out.push(Object.assign({}, inj, {
+          _key:k, _player:p.name||k, _pos:p.pos||'',
+          _dias:medDias(inj.dateStart, inj.dateEnd),
+          _activa:!inj.dateEnd
+        }));
+      });
+    }
   });
   return out.sort(function(a,b){ return String(b.dateStart).localeCompare(String(a.dateStart)); });
 }
+window.medAllInjuries=medAllInjuries;
+
+// v184: jugadores marcados como lesionados en Perfiles que NO tienen ninguna
+// lesión abierta registrada. El estado se pone a mano desde la ficha, así que
+// puede haber lesionados sin ficha médica: hay que mostrarlos igual, y ofrecer
+// completar los datos.
+function medSinFicha(){
+  var todas=medAllInjuries();
+  var conActiva={};
+  todas.forEach(function(i){ if(i._activa) conActiva[i._key]=true; });
+  var out=[];
+  Object.keys(PLAYER_PROFILES||{}).forEach(function(k){
+    var p=PLAYER_PROFILES[k];
+    if(!p||p.estado!=='lesion')return;
+    if(conActiva[k])return;
+    out.push({_key:k, _player:p.name||k, _pos:p.pos||'', _sinFicha:true});
+  });
+  return out;
+}
+window.medSinFicha=medSinFicha;
+
+// Abre el registro de lesión de ese jugador desde el Área médica
+// v184: registrar una lesión (incluso pasada) sin salir del Área médica
+function medNuevaLesion(){
+  var keys=Object.keys(PLAYER_PROFILES||{});
+  if(!keys.length){ alert('No hay jugadores cargados en Perfiles.'); return; }
+  var lista=keys.map(function(k){ return {k:k, n:(PLAYER_PROFILES[k].name||k)}; })
+    .sort(function(a,b){ return a.n.localeCompare(b.n,'es'); });
+  var txt=lista.map(function(x,i){ return (i+1)+'. '+x.n; }).join('\n');
+  var v=prompt('¿A qué jugador le registrás la lesión?\n\nEscribí el número o el nombre:\n\n'+txt);
+  if(v===null)return;
+  v=String(v).trim();
+  if(!v)return;
+  var sel=null;
+  var num=parseInt(v);
+  if(!isNaN(num) && num>=1 && num<=lista.length) sel=lista[num-1];
+  if(!sel){
+    var nv=(typeof csvNormName==='function')?csvNormName(v):v.toLowerCase();
+    sel=lista.find(function(x){
+      var nx=(typeof csvNormName==='function')?csvNormName(x.n):x.n.toLowerCase();
+      return nx===nv || nx.indexOf(nv)>=0;
+    });
+  }
+  if(!sel){ alert('No encontré ese jugador.'); return; }
+  medAbrirFicha(sel.k);
+}
+window.medNuevaLesion=medNuevaLesion;
+
+function medAbrirFicha(key){
+  try{
+    if(typeof openInjuryModal==='function'){ openInjuryModal(key); return; }
+  }catch(e){}
+  alert('Abrí la ficha del jugador desde 👤 Datos generales para registrar la lesión.');
+}
+window.medAbrirFicha=medAbrirFicha;
 window.medAllInjuries=medAllInjuries;
 
 function medSetVista(v){ _medVista=v; medRender(); }
@@ -26047,7 +26118,10 @@ function medRender(){
       '<span style="color:#fff;font-size:14px;font-weight:800">🏥 Área médica</span>'+
       (activas.length?'<span style="font-size:10.5px;font-weight:800;color:#fff;background:#D9534F;border-radius:11px;padding:2px 10px">'+activas.length+' en curso</span>':
         '<span style="font-size:10.5px;font-weight:700;color:#0D1B2A;background:#7fd4a8;border-radius:11px;padding:2px 10px">plantel sano</span>')+
-      '<button onclick="medPrint()" style="margin-left:auto;padding:5px 13px;border:1px solid #ffffff33;background:none;color:#9fb3c8;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🖨 Informe</button>'+
+      '<span style="margin-left:auto;display:flex;gap:6px">'+
+        '<button onclick="medNuevaLesion()" style="padding:5px 13px;border:none;background:#1D9E75;color:#fff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">+ Registrar lesión</button>'+
+        '<button onclick="medPrint()" style="padding:5px 13px;border:1px solid #ffffff33;background:none;color:#9fb3c8;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🖨 Informe</button>'+
+      '</span>'+
     '</div>'+
     '<div style="display:flex;gap:5px;flex-wrap:wrap">'+
       [['curso','🚑 En curso'],['historial','📋 Por jugador'],['grupo','👥 Plantel'],['analisis','📊 Análisis']].map(function(v){
@@ -26083,18 +26157,41 @@ function medKpi(lbl,val,col,sub){
 // ── VISTA: lesiones en curso ──
 function medViewCurso(activas, todas){
   var totalJug=Object.keys(PLAYER_PROFILES||{}).length;
-  var dispon=totalJug-activas.length;
+  // v184: los marcados como lesionados en Perfiles cuentan como baja aunque
+  // todavía no tengan la lesión registrada.
+  var sinFicha=medSinFicha();
+  var bajas=activas.length+sinFicha.length;
+  var dispon=totalJug-bajas;
   var pctDisp=totalJug?Math.round(dispon/totalJug*100):0;
   var html='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px">'+
     medKpi('Disponibilidad', pctDisp+'%', pctDisp>=90?'#1D9E75':(pctDisp>=80?'#EF9F27':'#D9534F'), dispon+' de '+totalJug+' jugadores')+
-    medKpi('Lesiones activas', activas.length, activas.length?'#D9534F':'#1D9E75', '')+
+    medKpi('Bajas', bajas, bajas?'#D9534F':'#1D9E75', sinFicha.length?(activas.length+' con ficha · '+sinFicha.length+' sin ficha'):'')+
     medKpi('Días perdidos hoy', activas.reduce(function(a,i){return a+(i._dias||0);},0), '#0D1B2A', 'acumulados')+
     medKpi('Baja prolongada', activas.filter(function(i){return (i._dias||0)>28;}).length, '#8a6d3b', 'más de 28 días')+
   '</div>';
+  // v184: lesionados marcados en Perfiles sin lesión registrada
+  if(sinFicha.length){
+    html+='<div style="background:#fff8ec;border:1px solid #f0e0c0;border-radius:9px;padding:10px 13px;margin-bottom:12px">'+
+      '<div style="font-size:11.5px;font-weight:800;color:#8a6d3b;margin-bottom:5px">⚠ '+sinFicha.length+
+        ' jugador'+(sinFicha.length===1?'':'es')+' marcado'+(sinFicha.length===1?'':'s')+' como lesionado sin ficha médica</div>'+
+      '<div style="font-size:10px;color:#a89878;margin-bottom:7px">Están en rojo en Perfiles pero no tienen la lesión registrada, '+
+        'así que no entran en el historial ni en el análisis. Cargá los datos para completarla.</div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+        sinFicha.map(function(x){
+          return '<button onclick="medAbrirFicha(\''+String(x._key).replace(/'/g,"\\'")+'\')" '+
+            'style="display:inline-flex;align-items:center;gap:6px;border:1px solid #e6d8b8;background:#fff;border-radius:16px;padding:4px 12px;font-size:11px;font-weight:700;color:#8a6d3b;cursor:pointer">'+
+            medEsc(x._player)+(x._pos?' <span style="font-size:9px;color:#bba">'+medEsc(x._pos)+'</span>':'')+
+            ' <span style="font-size:10px;color:#1D9E75">+ registrar</span></button>';
+        }).join('')+
+      '</div></div>';
+  }
   if(!activas.length){
-    return html+'<div style="padding:24px;text-align:center;background:#f2fbf6;border:1px solid #cfe8dc;border-radius:9px">'+
-      '<div style="font-size:26px">✅</div><div style="font-size:13px;font-weight:700;color:#1D6B4F;margin-top:5px">Plantel completo</div>'+
-      '<div style="font-size:11px;color:#6b8a7a">No hay lesiones activas.</div></div>';
+    if(!sinFicha.length){
+      return html+'<div style="padding:24px;text-align:center;background:#f2fbf6;border:1px solid #cfe8dc;border-radius:9px">'+
+        '<div style="font-size:26px">✅</div><div style="font-size:13px;font-weight:700;color:#1D6B4F;margin-top:5px">Plantel completo</div>'+
+        '<div style="font-size:11px;color:#6b8a7a">No hay lesiones activas.</div></div>';
+    }
+    return html;
   }
   html+='<div style="display:flex;flex-direction:column;gap:8px">';
   activas.sort(function(a,b){ return (b._dias||0)-(a._dias||0); }).forEach(function(i){
@@ -26129,7 +26226,7 @@ function medViewHistorial(todas){
   var html='<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
     '<span style="font-size:10.5px;color:#8a93a5;font-weight:700">Jugador</span>'+
     '<select onchange="medSetJugador(this.value)" style="padding:5px 11px;border:1px solid #ccd3de;border-radius:6px;font-size:12px;font-weight:700;min-width:190px">'+
-      nombres.map(function(n){ return '<option'+(n===_medJugador?' selected':'')+'>'+medEsc(n)+' ('+jugadores[n].length+')</option>'; }).join('')+
+      nombres.map(function(n){ return '<option value="'+medEsc(n)+'"'+(n===_medJugador?' selected':'')+'>'+medEsc(n)+' ('+jugadores[n].length+')</option>'; }).join('')+
     '</select></div>';
   html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px">'+
     medKpi('Lesiones', mias.length, '#0D1B2A', 'registradas')+
