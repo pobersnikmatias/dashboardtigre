@@ -5767,9 +5767,16 @@ function mcExtraCalcPlayer(playerKey,exercises){
 // Respeta los locks individuales: si el usuario bloqueó un campo desde el editor
 // de perfiles (🔒), no se sobreescribe automáticamente.
 // ─────────────────────────────────────────────────────────────────────
-function mcUpdatePlayerProfilesFromSession(playerList){
+// v187: la Vmax se guarda SEPARADA por contexto. Un pico en entrenamiento y
+// uno en partido son datos distintos: el de partido marca el techo competitivo
+// y el de entrenamiento indica cuánto se exige en la semana. Antes había un
+// solo campo y el récord de una sesión de entrenamiento no se distinguía.
+// `vmax` se mantiene como el máximo absoluto, porque lo usan los cálculos de
+// referencia y los porcentajes de velocidad.
+function mcUpdatePlayerProfilesFromSession(playerList, esPartido){
   if(!playerList || !playerList.length) return 0;
   if(typeof PLAYER_PROFILES === 'undefined') return 0;
+  var campo = esPartido ? 'vmaxPartido' : 'vmaxEntren';
   var updates = 0;
   playerList.forEach(function(p){
     if(!p || !p.name || p.name.length < 2) return;
@@ -5777,7 +5784,12 @@ function mcUpdatePlayerProfilesFromSession(playerList){
     var ex = PLAYER_PROFILES[key] || {name: p.name.trim(), vmax: null, accmax: null, dccmax: null};
     var locks = ex.locks || {};
     var changed = false;
-    if(!locks.vmax   && p.vmax   && (!ex.vmax   || p.vmax   > ex.vmax  )){ ex.vmax   = p.vmax;   changed = true; }
+    if(!locks.vmax && p.vmax){
+      // Máximo absoluto (el que ya existía)
+      if(!ex.vmax || p.vmax > ex.vmax){ ex.vmax = p.vmax; changed = true; }
+      // Y el máximo del contexto correspondiente
+      if(!ex[campo] || p.vmax > ex[campo]){ ex[campo] = p.vmax; changed = true; }
+    }
     if(!locks.accmax && p.accmax && (!ex.accmax || p.accmax > ex.accmax)){ ex.accmax = p.accmax; changed = true; }
     if(!locks.dccmax && p.dccmax && (!ex.dccmax || p.dccmax > ex.dccmax)){ ex.dccmax = p.dccmax; changed = true; }
     if(changed){ PLAYER_PROFILES[key] = ex; updates++; }
@@ -5789,6 +5801,52 @@ function mcUpdatePlayerProfilesFromSession(playerList){
   return updates;
 }
 window.mcUpdatePlayerProfilesFromSession = mcUpdatePlayerProfilesFromSession;
+
+// v187: recalcula las Vmax separadas recorriendo TODO el histórico ya cargado.
+// Sirve para poblar los campos nuevos sin tener que reimportar nada, y para
+// corregirlos si se borró una sesión (el máximo tiene que poder bajar).
+function mcRecalcVmaxContextos(){
+  if(typeof PLAYER_PROFILES==='undefined')return 0;
+  var maxP={}, maxE={};
+  var _k=function(n){ return String(n||'').trim().toLowerCase(); };
+  // Sesiones de GPS
+  (typeof MICROCICLO!=='undefined'?MICROCICLO:[]).forEach(function(s){
+    if(!s)return;
+    var esMD=/^MD$/i.test(String(s.day||'').trim());
+    (s.players||[]).forEach(function(p){
+      if(!p||!p.name||!p.vmax)return;
+      var k=_k(p.name), v=Number(p.vmax);
+      if(!isFinite(v)||v<=0)return;
+      if(esMD){ if(!maxP[k]||v>maxP[k]) maxP[k]=v; }
+      else { if(!maxE[k]||v>maxE[k]) maxE[k]=v; }
+    });
+  });
+  // Partidos cargados en el fixture
+  (typeof MATCHES!=='undefined'?MATCHES:[]).forEach(function(m){
+    if(!m)return;
+    (m.players||[]).forEach(function(p){
+      if(!p||!p.name||!p.vmax)return;
+      var k=_k(p.name), v=Number(p.vmax);
+      if(!isFinite(v)||v<=0)return;
+      if(!maxP[k]||v>maxP[k]) maxP[k]=v;
+    });
+  });
+  var n=0;
+  Object.keys(PLAYER_PROFILES).forEach(function(k){
+    var pr=PLAYER_PROFILES[k];
+    if(!pr)return;
+    var locks=pr.locks||{};
+    if(locks.vmax)return;                       // respetar el candado
+    var vp=maxP[k]||null, ve=maxE[k]||null;
+    if(pr.vmaxPartido!==vp){ pr.vmaxPartido=vp; n++; }
+    if(pr.vmaxEntren!==ve){ pr.vmaxEntren=ve; n++; }
+    // El máximo absoluto es el mayor de los dos, sin bajar de lo ya registrado
+    var abs=Math.max(vp||0, ve||0);
+    if(abs>0 && (!pr.vmax || abs>pr.vmax)){ pr.vmax=abs; n++; }
+  });
+  return n;
+}
+window.mcRecalcVmaxContextos=mcRecalcVmaxContextos;
 
 function mcImport(){
   const txt=document.getElementById('mc-raw').value;const rows=mcParseCsv(txt);const msg=document.getElementById('mc-imp-msg');
@@ -5847,7 +5905,9 @@ function mcImport(){
   if(typeof mcWeekTombClear==='function') mcWeekTombClear(week);
   MICROCICLO.push({week,day,fecha,ref,pse,ua,players:allPlayers,_hasExtra:extraPlayers.length>0});
   // Actualizar PLAYER_PROFILES con nuevos máximos de Vmax/AccMáx/DccMáx
-  if(typeof mcUpdatePlayerProfilesFromSession==='function') mcUpdatePlayerProfilesFromSession(allPlayers);
+  // v187: el día MD es partido; el resto, entrenamiento
+  if(typeof mcUpdatePlayerProfilesFromSession==='function')
+    mcUpdatePlayerProfilesFromSession(allPlayers, /^MD$/i.test(String(day||'').trim()));
   saveData();mcRebuildWeekSel();
   document.getElementById('mc-week-view').value=week;
   mcRenderWeek();mcRenderLoad();
@@ -6827,7 +6887,8 @@ function mcEstSave(){
 
   // Actualizar PLAYER_PROFILES con nuevos máximos (sesiones estimadas raramente
   // tienen Vmax real, pero si alguna fuente lo trae, lo aplica)
-  if(typeof mcUpdatePlayerProfilesFromSession==='function') mcUpdatePlayerProfilesFromSession(allPlayers);
+  if(typeof mcUpdatePlayerProfilesFromSession==='function')
+    mcUpdatePlayerProfilesFromSession(allPlayers, /^MD$/i.test(String(day||'').trim()));
 
   saveData(); mcRebuildWeekSel();
   var weekSel=document.getElementById('mc-week-view');
@@ -9063,7 +9124,8 @@ function renderProfilesTable(){
     '<th style="text-align:left;padding:5px 8px;border-bottom:1px solid #ddd">Jugador</th>'+
     '<th style="padding:5px 8px;border-bottom:1px solid #ddd;text-align:center">Pos</th>'+
     '<th style="padding:5px 8px;border-bottom:1px solid #ddd;text-align:center">Estado</th>'+
-    '<th style="padding:5px 8px;border-bottom:1px solid #ddd;color:#E24B4A">Vmax</th>'+
+    '<th style="padding:5px 8px;border-bottom:1px solid #ddd;color:#E24B4A" title="Máxima velocidad alcanzada en partido (día MD)">Vmax<br><span style="font-size:8.5px;font-weight:500;opacity:.8">partido</span></th>'+
+    '<th style="padding:5px 8px;border-bottom:1px solid #ddd;color:#3B4D88" title="Máxima velocidad alcanzada en entrenamiento">Vmax<br><span style="font-size:8.5px;font-weight:500;opacity:.8">entren.</span></th>'+
     '<th style="padding:5px 8px;border-bottom:1px solid #ddd;color:#D85A30">AccMáx</th>'+
     '<th style="padding:5px 8px;border-bottom:1px solid #ddd;color:#D4537E">DccMáx</th>'+
     '<th style="padding:5px 8px;border-bottom:1px solid #ddd"></th>'+
@@ -9093,7 +9155,24 @@ function renderProfilesTable(){
             estadoInfo.label+
           '</button>'+
         '</td>'+
-        '<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center">'+badge(p.vmax,mxV,'#E24B4A')+((p.locks&&p.locks.vmax)?' <span title="Bloqueado contra updates GPS" style="font-size:10px">🔒</span>':'')+'</td>'+
+        // v187: Vmax de partido y de entrenamiento, por separado.
+        // Si sólo hay el valor histórico (sin contexto), se muestra en partido
+        // con un signo de interrogación, para no perder el dato.
+        (function(){
+          var vp=(p.vmaxPartido!=null)?p.vmaxPartido:null;
+          var ve=(p.vmaxEntren!=null)?p.vmaxEntren:null;
+          var lock=(p.locks&&p.locks.vmax)?' <span title="Bloqueado contra updates GPS" style="font-size:10px">🔒</span>':'';
+          var sinCtx=(vp==null&&ve==null&&p.vmax!=null);
+          var cel=function(v,col,extra){
+            return '<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center">'+
+              (v!=null?badge(v,mxV,col):'<span style="color:#ddd">—</span>')+(extra||'')+'</td>';
+          };
+          if(sinCtx){
+            return cel(p.vmax,'#E24B4A',' <span title="Registro anterior, sin distinguir el contexto" style="font-size:9px;color:#bbb">?</span>'+lock)+
+                   cel(null,'#3B4D88','');
+          }
+          return cel(vp,'#E24B4A',lock)+cel(ve,'#3B4D88','');
+        })()+
         '<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center">'+badge(p.accmax,mxA,'#D85A30')+((p.locks&&p.locks.accmax)?' <span title="Bloqueado contra updates GPS" style="font-size:10px">🔒</span>':'')+'</td>'+
         '<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center">'+badge(p.dccmax,mxD,'#D4537E')+((p.locks&&p.locks.dccmax)?' <span title="Bloqueado contra updates GPS" style="font-size:10px">🔒</span>':'')+'</td>'+
         '<td style="padding:4px 8px;border-bottom:0.5px solid #eee;text-align:center;white-space:nowrap">'+
@@ -34045,6 +34124,14 @@ function sbOnLoginSuccess(){
     // v147: guardián anti-zombies de la videoteca (refresca el registro de
     // borrados compartido y purga lo que reaparezca, en memoria y en la nube).
     try{ if(typeof drillGuardStart==='function'){ drillGuardStart(); drillGuardSweep(); } }catch(e){}
+    // v187: poblar las Vmax separadas con el histórico ya cargado
+    try{
+      if(typeof mcRecalcVmaxContextos==='function'){
+        var _nv=mcRecalcVmaxContextos();
+        if(_nv){ console.log('[Perfiles] Vmax por contexto actualizadas ('+_nv+' cambios).');
+          try{ if(typeof renderProfilesTable==='function')renderProfilesTable(); }catch(e){} }
+      }
+    }catch(e){}
     // v154: recuperar tests desde la copia dedicada y arrancar su sincronización
     try{
       if(typeof tstRecoverOnBoot==='function') tstRecoverOnBoot();
