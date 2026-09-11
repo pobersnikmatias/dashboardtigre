@@ -18714,6 +18714,8 @@ document.addEventListener('DOMContentLoaded',function(){
       </select>
     </label>
     <button class="btn bc" onclick="evalOpenImport()" style="font-size:11px;padding:5px 14px">📋 Importar desde Excel/Sheets</button>
+    <button class="btn bc" onclick="evGestOpen()" style="font-size:11px;padding:5px 14px" title="Unificar ejercicios repetidos y renombrarlos">🔧 Ejercicios</button>
+    <button class="btn bc" onclick="evalExportar()" style="font-size:11px;padding:5px 14px" title="Informe imprimible del jugador">📄 Informe</button>
     <button class="btn bc" onclick="evalToggleAliases()" style="font-size:11px;padding:5px 14px;color:#7F77DD;border-color:#7F77DD55" id="eval-alias-btn">🔗 Relacionar ejercicios</button>
     <button class="btn bc" onclick="evalOpenBatchDelete()" style="font-size:11px;padding:5px 14px;color:#E24B4A;border-color:#E24B4A55">🗑 Borrar evaluaciones</button>
   </div>
@@ -21885,6 +21887,448 @@ function evalDelete(pKey, id){
   saveData(); evalRender();
 }
 window.evalDelete = evalDelete;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GESTIÓN DE EJERCICIOS DE EVALUACIÓN (v188)
+// Permite unificar ejercicios cargados con nombres distintos y renombrarlos,
+// sin perder un solo registro. Toda la operación es reversible: se guarda un
+// respaldo antes de tocar nada.
+// ═══════════════════════════════════════════════════════════════════════════
+function evEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function evNorm(s){
+  return String(s||'').toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[.,_\-]/g,' ').replace(/\s+/g,' ');
+}
+window.evNorm=evNorm;
+
+// Todos los ejercicios presentes en las evaluaciones, con su conteo
+function evExerciseStats(){
+  var by={};
+  Object.keys(GYM_EVALS||{}).forEach(function(pk){
+    (GYM_EVALS[pk]||[]).forEach(function(e){
+      if(!e||!e.exercise)return;
+      var n=String(e.exercise).trim();
+      if(!by[n]) by[n]={name:n, n:0, jugadores:{}, min:null, max:null, desde:null, hasta:null};
+      by[n].n++;
+      by[n].jugadores[pk]=true;
+      var kg=Number(e.kg);
+      if(isFinite(kg)&&kg>0){
+        if(by[n].min==null||kg<by[n].min) by[n].min=kg;
+        if(by[n].max==null||kg>by[n].max) by[n].max=kg;
+      }
+      if(e.date){
+        if(!by[n].desde||e.date<by[n].desde) by[n].desde=e.date;
+        if(!by[n].hasta||e.date>by[n].hasta) by[n].hasta=e.date;
+      }
+    });
+  });
+  return Object.values(by).map(function(x){
+    x.nJug=Object.keys(x.jugadores).length;
+    return x;
+  }).sort(function(a,b){ return b.n-a.n || a.name.localeCompare(b.name,'es'); });
+}
+window.evExerciseStats=evExerciseStats;
+
+// Sugerencias de unificación: nombres que normalizan igual o muy parecidos
+function evSugerencias(){
+  var stats=evExerciseStats();
+  var grupos={};
+  stats.forEach(function(x){
+    var k=evNorm(x.name);
+    (grupos[k]=grupos[k]||[]).push(x);
+  });
+  var out=Object.values(grupos).filter(function(g){return g.length>1;});
+  // Además, pares muy parecidos con distinta normalización
+  var vistos={};
+  out.forEach(function(g){ g.forEach(function(x){ vistos[x.name]=true; }); });
+  var sueltos=stats.filter(function(x){ return !vistos[x.name]; });
+  for(var i=0;i<sueltos.length;i++){
+    for(var j=i+1;j<sueltos.length;j++){
+      var a=evNorm(sueltos[i].name), b=evNorm(sueltos[j].name);
+      if(!a||!b)continue;
+      var similar = (a.indexOf(b)>=0||b.indexOf(a)>=0) ||
+        (function(){
+          var wa=a.split(' ').filter(Boolean), wb=b.split(' ').filter(Boolean);
+          var com=wa.filter(function(w){return w.length>2&&wb.indexOf(w)>=0;}).length;
+          return com>0 && com>=Math.min(wa.length,wb.length);
+        })();
+      if(similar && !vistos[sueltos[i].name] && !vistos[sueltos[j].name]){
+        out.push([sueltos[i], sueltos[j]]);
+        vistos[sueltos[i].name]=true; vistos[sueltos[j].name]=true;
+      }
+    }
+  }
+  return out;
+}
+window.evSugerencias=evSugerencias;
+
+// ── Respaldo antes de cualquier operación destructiva ──
+function evBackup(etiqueta){
+  try{
+    var bks=JSON.parse(localStorage.getItem('evalBackups_v1')||'[]');
+    bks.unshift({
+      ts:Date.now(), etiqueta:etiqueta||'cambio',
+      data:JSON.parse(JSON.stringify(GYM_EVALS||{}))
+    });
+    while(bks.length>10) bks.pop();   // conservar los últimos 10
+    localStorage.setItem('evalBackups_v1', JSON.stringify(bks));
+    return true;
+  }catch(e){ console.warn('[Evaluaciones] respaldo:',e); return false; }
+}
+window.evBackup=evBackup;
+
+function evBackupList(){
+  try{ return JSON.parse(localStorage.getItem('evalBackups_v1')||'[]'); }catch(e){ return []; }
+}
+window.evBackupList=evBackupList;
+
+function evRestore(ts){
+  var bks=evBackupList();
+  var b=bks.find(function(x){ return String(x.ts)===String(ts); });
+  if(!b){ alert('No encontré ese respaldo.'); return false; }
+  var cuantos=0;
+  Object.keys(b.data||{}).forEach(function(pk){ cuantos+=(b.data[pk]||[]).length; });
+  if(!confirm('¿Restaurar el respaldo del '+new Date(b.ts).toLocaleString('es-AR')+'?\n\n'+
+    'Vuelve a '+cuantos+' evaluaciones. Los cambios posteriores se pierden.'))return false;
+  evBackup('antes de restaurar');
+  Object.keys(GYM_EVALS).forEach(function(k){ delete GYM_EVALS[k]; });
+  Object.keys(b.data||{}).forEach(function(pk){ GYM_EVALS[pk]=JSON.parse(JSON.stringify(b.data[pk])); });
+  saveData();
+  if(typeof sbScheduleTanda2aSync==='function'){ try{ sbScheduleTanda2aSync(); }catch(e){} }
+  if(typeof evalRender==='function') evalRender();
+  alert('Respaldo restaurado: '+cuantos+' evaluaciones.');
+  return true;
+}
+window.evRestore=evRestore;
+
+// ── UNIFICAR varios ejercicios en uno ──
+// No borra ningún registro: sólo reescribe el campo `exercise`.
+function evUnificar(nombres, destino){
+  if(!nombres||!nombres.length||!destino)return 0;
+  var setN={}; nombres.forEach(function(n){ setN[n]=true; });
+  // Contar antes, para verificar después
+  var antes=0;
+  Object.keys(GYM_EVALS||{}).forEach(function(pk){ antes+=(GYM_EVALS[pk]||[]).length; });
+  evBackup('unificar → '+destino);
+  var n=0;
+  Object.keys(GYM_EVALS||{}).forEach(function(pk){
+    (GYM_EVALS[pk]||[]).forEach(function(e){
+      if(!e||!e.exercise)return;
+      if(setN[String(e.exercise).trim()]){
+        if(e.exercise!==destino){
+          if(!e._exOrig) e._exOrig=e.exercise;   // rastro del nombre original
+          e.exercise=destino;
+          n++;
+        }
+      }
+    });
+  });
+  // Verificación: no se perdió ningún registro
+  var despues=0;
+  Object.keys(GYM_EVALS||{}).forEach(function(pk){ despues+=(GYM_EVALS[pk]||[]).length; });
+  if(despues!==antes){
+    console.error('[Evaluaciones] ¡Diferencia de registros! antes='+antes+' después='+despues);
+  }
+  saveData();
+  if(typeof sbScheduleTanda2aSync==='function'){ try{ sbScheduleTanda2aSync(); }catch(e){} }
+  return n;
+}
+window.evUnificar=evUnificar;
+
+// ── RENOMBRAR un ejercicio, entero o desde una fecha ──
+// Sirve para el caso "hace dos semanas paso a sentadilla profunda": los
+// registros anteriores conservan el nombre viejo y los nuevos toman el nuevo.
+function evRenombrar(viejo, nuevo, desdeFecha){
+  if(!viejo||!nuevo)return 0;
+  evBackup('renombrar '+viejo+' → '+nuevo);
+  var n=0;
+  Object.keys(GYM_EVALS||{}).forEach(function(pk){
+    (GYM_EVALS[pk]||[]).forEach(function(e){
+      if(!e||String(e.exercise).trim()!==String(viejo).trim())return;
+      if(desdeFecha && String(e.date||'')<String(desdeFecha))return;   // sólo desde esa fecha
+      if(!e._exOrig) e._exOrig=e.exercise;
+      e.exercise=nuevo;
+      n++;
+    });
+  });
+  saveData();
+  if(typeof sbScheduleTanda2aSync==='function'){ try{ sbScheduleTanda2aSync(); }catch(e){} }
+  return n;
+}
+window.evRenombrar=evRenombrar;
+
+// ── PESO CORPORAL: último registrado antes o en esa fecha ──
+function evPesoCorporal(pKey, fecha){
+  try{
+    var regs=(typeof NUTRITION_DATA!=='undefined'&&NUTRITION_DATA[pKey])||[];
+    var candidatos=regs.filter(function(r){
+      return r && r.peso>0 && (!fecha || String(r.date||'')<=String(fecha));
+    }).sort(function(a,b){ return String(b.date||'').localeCompare(String(a.date||'')); });
+    if(candidatos.length) return Number(candidatos[0].peso);
+    // Si no hay uno anterior, tomar el más cercano posterior
+    var post=regs.filter(function(r){return r&&r.peso>0;})
+      .sort(function(a,b){ return String(a.date||'').localeCompare(String(b.date||'')); });
+    return post.length?Number(post[0].peso):null;
+  }catch(e){ return null; }
+}
+window.evPesoCorporal=evPesoCorporal;
+
+// Fuerza relativa: kg levantados por kg de peso corporal
+function evRelativo(kg, pKey, fecha){
+  var pc=evPesoCorporal(pKey, fecha);
+  if(!pc||!kg)return null;
+  return kg/pc;
+}
+window.evRelativo=evRelativo;
+
+// ═══ PANEL DE GESTIÓN DE EJERCICIOS (v188) ═══════════════════════════════
+var _evSel={};   // ejercicios tildados para unificar
+
+function evGestOpen(){
+  _evSel={};
+  var old=document.getElementById('evgest'); if(old)old.remove();
+  var d=document.createElement('div');
+  d.id='evgest';
+  d.style.cssText='position:fixed;inset:0;background:rgba(10,16,28,.6);z-index:16000;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:#fff;border-radius:12px;width:min(97vw,800px);max-height:93vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.4)" onclick="event.stopPropagation()">'+
+    '<div style="background:#0D1B2A;padding:13px 16px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;gap:10px">'+
+      '<div><div style="color:#fff;font-size:14px;font-weight:800">🔧 Ejercicios de evaluación</div>'+
+      '<div style="color:#9fb3c8;font-size:11px;margin-top:2px">Unificar nombres repetidos y renombrar. Ningún registro se borra.</div></div>'+
+      '<button onclick="evGestClose()" style="border:none;background:none;color:#9fb3c8;font-size:20px;cursor:pointer;padding:0">✕</button></div>'+
+    '<div id="evgest-body" style="padding:15px 16px;overflow-y:auto;flex:1"></div>'+
+    '<div id="evgest-foot" style="padding:11px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"></div></div>';
+  d.onclick=evGestClose;
+  document.body.appendChild(d);
+  evGestRender();
+}
+window.evGestOpen=evGestOpen;
+function evGestClose(){ var m=document.getElementById('evgest'); if(m)m.remove(); }
+window.evGestClose=evGestClose;
+
+function evGestToggle(nombre){
+  if(_evSel[nombre]) delete _evSel[nombre]; else _evSel[nombre]=true;
+  evGestRender();
+}
+window.evGestToggle=evGestToggle;
+
+function evGestRender(){
+  var b=document.getElementById('evgest-body'), f=document.getElementById('evgest-foot');
+  if(!b)return;
+  var stats=evExerciseStats();
+  var sug=evSugerencias();
+  var sel=Object.keys(_evSel);
+  var total=stats.reduce(function(a,x){return a+x.n;},0);
+
+  var h='<div style="background:#eef3fb;border:1px solid #d5e0f0;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:11px;color:#334">'+
+    '<b>'+stats.length+'</b> ejercicios distintos · <b>'+total+'</b> evaluaciones en total</div>';
+
+  // Sugerencias automáticas
+  if(sug.length){
+    h+='<div style="font-size:11.5px;font-weight:800;color:#B26A00;margin-bottom:6px">⚠ Posibles duplicados detectados</div>';
+    sug.forEach(function(g){
+      var destino=g[0].name;   // el que más registros tiene
+      h+='<div style="background:#fff8ec;border:1px solid #f0e0c0;border-radius:8px;padding:8px 11px;margin-bottom:7px">'+
+        '<div style="font-size:11px;color:#7a6338;margin-bottom:5px">'+
+          g.map(function(x){ return '<b>'+evEsc(x.name)+'</b> <span style="color:#a89878">('+x.n+')</span>'; }).join(' · ')+
+        '</div>'+
+        '<button onclick="evGestUnifSug('+JSON.stringify(g.map(function(x){return x.name;})).replace(/"/g,'&quot;')+')" '+
+          'style="border:none;background:#1D9E75;color:#fff;border-radius:12px;padding:4px 12px;font-size:10px;font-weight:700;cursor:pointer">'+
+          'Unificar en «'+evEsc(destino)+'»</button></div>';
+    });
+    h+='<div style="height:10px"></div>';
+  }
+
+  // Lista completa
+  h+='<div style="font-size:11.5px;font-weight:800;color:#0D1B2A;margin-bottom:6px">Todos los ejercicios</div>'+
+     '<div style="font-size:10px;color:#8a93a5;margin-bottom:7px">Tildá dos o más para unificarlos, o usá ✎ para renombrar uno.</div>';
+  h+='<div style="border:1px solid #e8ebf2;border-radius:8px;overflow:hidden">';
+  stats.forEach(function(x){
+    var on=!!_evSel[x.name];
+    h+='<div style="display:flex;align-items:center;gap:9px;padding:7px 11px;border-bottom:1px solid #f2f4f8;background:'+(on?'#f2fbf6':'#fff')+'">'+
+      '<input type="checkbox" '+(on?'checked':'')+' onchange="evGestToggle('+JSON.stringify(x.name).replace(/"/g,'&quot;')+')" style="accent-color:#1D9E75;cursor:pointer">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:12px;font-weight:700;color:#0D1B2A">'+evEsc(x.name)+'</div>'+
+        '<div style="font-size:9.5px;color:#8a93a5">'+x.n+' evaluación'+(x.n===1?'':'es')+' · '+x.nJug+' jugador'+(x.nJug===1?'':'es')+
+          (x.min!=null?(' · '+x.min+'–'+x.max+' kg'):'')+
+          (x.desde?(' · desde '+String(x.desde).slice(8,10)+'/'+String(x.desde).slice(5,7)+'/'+String(x.desde).slice(2,4)):'')+'</div>'+
+      '</div>'+
+      '<button onclick="evGestRenombrar('+JSON.stringify(x.name).replace(/"/g,'&quot;')+')" title="Renombrar" '+
+        'style="border:1px solid #dde2ea;background:#fff;color:#3B4D88;border-radius:6px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer">✎</button>'+
+    '</div>';
+  });
+  h+='</div>';
+
+  // Respaldos
+  var bks=evBackupList();
+  if(bks.length){
+    h+='<details style="margin-top:12px"><summary style="font-size:10.5px;color:#8a93a5;font-weight:700;cursor:pointer">'+
+      '🛟 Respaldos automáticos ('+bks.length+')</summary>'+
+      '<div style="font-size:10px;color:#8a93a5;margin:5px 0">Se guarda uno antes de cada cambio. Podés volver atrás.</div>'+
+      bks.map(function(x){
+        var n=0; Object.keys(x.data||{}).forEach(function(k){ n+=(x.data[k]||[]).length; });
+        return '<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid #eef0f4;border-radius:6px;margin-bottom:4px">'+
+          '<span style="flex:1;font-size:10.5px;color:#4a5568">'+new Date(x.ts).toLocaleString('es-AR')+
+            ' <span style="color:#a3a9b6">· '+evEsc(x.etiqueta)+' · '+n+' registros</span></span>'+
+          '<button onclick="evRestore('+x.ts+');evGestRender()" style="border:1px solid #dde2ea;background:#fff;color:#3B4D88;border-radius:6px;padding:2px 9px;font-size:10px;font-weight:700;cursor:pointer">restaurar</button></div>';
+      }).join('')+'</details>';
+  }
+  b.innerHTML=h;
+
+  f.innerHTML=(sel.length>=2?
+    '<span style="margin-right:auto;font-size:10.5px;color:#8a93a5;align-self:center">'+sel.length+' seleccionados</span>'+
+    '<button onclick="evGestUnificar()" style="padding:7px 18px;border:none;background:#1D9E75;color:#fff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Unificar los '+sel.length+'</button>'
+    :'<span style="margin-right:auto;font-size:10.5px;color:#c3c9d4;align-self:center">Tildá 2 o más para unificar</span>')+
+    '<button onclick="evGestClose()" style="padding:7px 14px;border:1px solid #ddd;background:#fff;border-radius:7px;font-size:11px;cursor:pointer">Cerrar</button>';
+}
+window.evGestRender=evGestRender;
+
+function evGestUnifSug(nombres){
+  var destino=nombres[0];
+  var v=prompt('Unificar estos ejercicios:\n\n· '+nombres.join('\n· ')+
+    '\n\n¿Con qué nombre quedan? (podés escribir uno nuevo)', destino);
+  if(v===null)return;
+  v=String(v).trim();
+  if(!v){ alert('El nombre no puede quedar vacío.'); return; }
+  var n=evUnificar(nombres, v);
+  if(typeof evalRender==='function') evalRender();
+  evGestRender();
+  alert('✓ '+n+' evaluación(es) unificadas en «'+v+'».\n\nNo se borró ningún registro.');
+}
+window.evGestUnifSug=evGestUnifSug;
+
+function evGestUnificar(){
+  var nombres=Object.keys(_evSel);
+  if(nombres.length<2){ alert('Elegí al menos dos ejercicios.'); return; }
+  // Proponer el que más registros tiene
+  var stats=evExerciseStats().filter(function(x){ return _evSel[x.name]; });
+  var destino=stats.length?stats[0].name:nombres[0];
+  var total=stats.reduce(function(a,x){return a+x.n;},0);
+  var v=prompt('Unificar '+nombres.length+' ejercicios ('+total+' evaluaciones):\n\n· '+nombres.join('\n· ')+
+    '\n\n¿Con qué nombre quedan?', destino);
+  if(v===null)return;
+  v=String(v).trim();
+  if(!v){ alert('El nombre no puede quedar vacío.'); return; }
+  var n=evUnificar(nombres, v);
+  _evSel={};
+  if(typeof evalRender==='function') evalRender();
+  evGestRender();
+  alert('✓ '+n+' evaluación(es) unificadas en «'+v+'».\n\nNo se borró ningún registro. Si algo salió mal, podés restaurar el respaldo.');
+}
+window.evGestUnificar=evGestUnificar;
+
+function evGestRenombrar(nombre){
+  var st=evExerciseStats().find(function(x){return x.name===nombre;});
+  var v=prompt('Nuevo nombre para «'+nombre+'»'+(st?(' ('+st.n+' evaluaciones)'):'')+':', nombre);
+  if(v===null)return;
+  v=String(v).trim();
+  if(!v||v===nombre)return;
+  var desde=prompt('¿Desde qué fecha aplica el nombre nuevo?\n\n'+
+    'Dejalo VACÍO para renombrar todo el historial.\n'+
+    'O escribí una fecha (AAAA-MM-DD) si cambiaste el ejercicio a partir de ahí\n'+
+    '(por ejemplo: pasaste de sentadilla paralela a profunda).', '');
+  if(desde===null)return;
+  desde=String(desde).trim();
+  if(desde && !/^\d{4}-\d{2}-\d{2}$/.test(desde)){ alert('La fecha tiene que ser AAAA-MM-DD.'); return; }
+  var n=evRenombrar(nombre, v, desde||null);
+  if(typeof evalRender==='function') evalRender();
+  evGestRender();
+  alert('✓ '+n+' evaluación(es) renombradas a «'+v+'»'+
+    (desde?('\n\nSólo desde el '+desde+'. Las anteriores conservan «'+nombre+'».'):'')+'.');
+}
+window.evGestRenombrar=evGestRenombrar;
+
+// ═══ INFORME DE EVALUACIONES DE GIMNASIO (v188) ══════════════════════════
+// Incluye la progresión por ejercicio y los valores relativos al peso corporal.
+function evalExportar(){
+  var pKey=document.getElementById('eval-player-sel')?document.getElementById('eval-player-sel').value:'';
+  if(!pKey){ alert('Elegí un jugador primero.'); return; }
+  var evals=(GYM_EVALS[pKey]||[]).slice().sort(function(a,b){ return String(a.date).localeCompare(String(b.date)); });
+  if(!evals.length){ alert('Ese jugador no tiene evaluaciones.'); return; }
+  var prof=(typeof PLAYER_PROFILES!=='undefined'&&PLAYER_PROFILES[pKey])||{};
+  var nombre=prof.name||pKey;
+  var pc=evPesoCorporal(pKey, null);
+
+  // Agrupar por ejercicio
+  var byEx={};
+  evals.forEach(function(e){
+    var n=String(e.exercise||'—').trim();
+    (byEx[n]=byEx[n]||[]).push(e);
+  });
+  var exs=Object.keys(byEx).sort(function(a,b){ return byEx[b].length-byEx[a].length; });
+
+  var h='<html><head><meta charset="utf-8"><title>Evaluaciones — '+evEsc(nombre)+'</title>'+
+    (typeof tstExpCss==='function'?tstExpCss():'<style>body{font-family:system-ui;padding:24px}table{width:100%;border-collapse:collapse;font-size:11px}th{background:#0D1B2A;color:#fff;padding:6px}td{padding:5px;border-bottom:1px solid #eee}</style>')+
+    '</head><body>';
+  h+=(typeof tstExpHeader==='function'?tstExpHeader('Evaluaciones de fuerza', nombre+(prof.pos?' · '+prof.pos:'')+(pc?(' · '+pc+' kg'):''))
+     :'<h1>Evaluaciones — '+evEsc(nombre)+'</h1>');
+
+  h+='<div class="kpis">'+
+    '<div class="k"><div class="l">Ejercicios</div><div class="v">'+exs.length+'</div></div>'+
+    '<div class="k"><div class="l">Evaluaciones</div><div class="v">'+evals.length+'</div></div>'+
+    '<div class="k"><div class="l">Peso corporal</div><div class="v" style="font-size:17px">'+(pc?pc+' kg':'—')+'</div></div>'+
+    '<div class="k"><div class="l">Período</div><div class="v" style="font-size:12px;padding-top:5px">'+
+      String(evals[0].date||'').slice(8,10)+'/'+String(evals[0].date||'').slice(5,7)+' — '+
+      String(evals[evals.length-1].date||'').slice(8,10)+'/'+String(evals[evals.length-1].date||'').slice(5,7)+'</div></div>'+
+  '</div>';
+
+  exs.forEach(function(ex){
+    var serie=byEx[ex];
+    var mejor=serie.reduce(function(a,b){ return (Number(b.rm1||b.kg)>Number(a.rm1||a.kg))?b:a; }, serie[0]);
+    var ult=serie[serie.length-1], pri=serie[0];
+    var vU=Number(ult.rm1||ult.kg), vP=Number(pri.rm1||pri.kg);
+    var delta=(serie.length>1&&vP)?((vU-vP)/vP*100):null;
+    var relU=evRelativo(vU, pKey, ult.date);
+    var relM=evRelativo(Number(mejor.rm1||mejor.kg), pKey, mejor.date);
+
+    h+='<div class="card"><h3>'+evEsc(ex)+'</h3>'+
+      '<div class="u">'+serie.length+' evaluación'+(serie.length===1?'':'es')+'</div>'+
+      '<div class="kpis" style="margin-top:9px">'+
+        '<div class="k"><div class="l">Último 1RM</div><div class="v" style="color:#3B4D88">'+vU.toFixed(1)+'<span style="font-size:11px;color:#aaa"> kg</span></div>'+
+          '<div class="sub">'+String(ult.date||'').slice(8,10)+'/'+String(ult.date||'').slice(5,7)+'</div></div>'+
+        '<div class="k"><div class="l">Mejor</div><div class="v" style="color:#1D9E75">'+Number(mejor.rm1||mejor.kg).toFixed(1)+'<span style="font-size:11px;color:#aaa"> kg</span></div>'+
+          '<div class="sub">'+String(mejor.date||'').slice(8,10)+'/'+String(mejor.date||'').slice(5,7)+'</div></div>'+
+        (relU!=null?('<div class="k"><div class="l">Relativo</div><div class="v" style="color:#8a6d3b">'+relU.toFixed(2)+'</div>'+
+          '<div class="sub">× peso corporal</div></div>'):'')+
+        (delta!=null?('<div class="k"><div class="l">Evolución</div><div class="v" style="color:'+(delta>0?'#1D9E75':'#D9534F')+'">'+
+          (delta>0?'+':'')+delta.toFixed(1)+'%</div><div class="sub">vs. inicio</div></div>'):'')+
+      '</div>';
+
+    if(serie.length>1 && typeof tstExpBarras==='function'){
+      h+=tstExpBarras(serie.map(function(e){
+        var v=Number(e.rm1||e.kg);
+        return {n:String(e.date||'').slice(8,10)+'/'+String(e.date||'').slice(5,7), v:v,
+                lbl:v.toFixed(1)+' kg', col:(e===mejor)?'#1D9E75':'#3B4D88'};
+      }),{alto:19});
+    }
+
+    h+='<table><tr><th>Fecha</th><th class="c">Carga</th><th class="c">Método</th><th class="c">1RM est.</th>'+
+       '<th class="c">Rel. peso</th><th>Notas</th></tr>';
+    serie.slice().reverse().forEach(function(e){
+      var v=Number(e.rm1||e.kg);
+      var rel=evRelativo(v, pKey, e.date);
+      h+='<tr><td>'+String(e.date||'').slice(8,10)+'/'+String(e.date||'').slice(5,7)+'/'+String(e.date||'').slice(2,4)+'</td>'+
+        '<td class="c">'+Number(e.kg).toFixed(1)+' kg</td>'+
+        '<td class="c" style="font-size:10px;color:#8a93a5">'+evEsc(e.method||'—')+'</td>'+
+        '<td class="c" style="font-weight:800">'+v.toFixed(1)+'</td>'+
+        '<td class="c" style="color:#8a6d3b;font-weight:700">'+(rel!=null?rel.toFixed(2):'—')+'</td>'+
+        '<td style="font-size:10px;color:#6b7a90">'+evEsc(e.notes||'')+
+          (e._exOrig?'<span style="color:#c3c9d4"> (antes: '+evEsc(e._exOrig)+')</span>':'')+'</td></tr>';
+    });
+    h+='</table></div>';
+  });
+
+  if(!pc){
+    h+='<div class="nota">Sin peso corporal registrado en Antropometría, así que no se pudieron calcular los valores relativos.</div>';
+  }
+  h+=(typeof tstExpFooter==='function'?tstExpFooter():'')+'</body></html>';
+  if(typeof tstExpAbrir==='function') tstExpAbrir(h);
+  else { var w=window.open('','_blank'); if(w){ w.document.write(h); w.document.close(); } }
+}
+window.evalExportar=evalExportar;
+
+
+
 
 // ── Edición inline de una evaluación existente ──
 // Permite cambiar fecha, peso (kg) y VMP sin tener que re-importar todo.
