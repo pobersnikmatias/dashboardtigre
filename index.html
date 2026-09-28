@@ -14472,7 +14472,166 @@ window.planMergeAll=planMergeAll;
 // Antes esto sólo corría dentro de la pestaña Planificación, así que los
 // cambios de estado de jugadores (Perfiles / Hoy) nunca llegaban al otro sin
 // recargar. Ahora refresca planificación Y perfiles, en cualquier vista.
-var _planPollTimer=null, _planPollBusy=false;
+// ══ v190: MEDIDOR DE EGRESO ════════════════════════════════════════════════
+// Cuenta los bytes que baja el dashboard desde Supabase, por tabla. Sirve para
+// comprobar el consumo sin esperar al panel (que se actualiza cada hora).
+// En la consola: sbEgreso()  → resumen  ·  sbEgreso(true) → reinicia el contador
+(function(){
+  try{
+    if(window._sbMeterOn) return;
+    window._sbMeterOn=true;
+    var KEY='sb_egreso_v1';
+    function load(){
+      try{ var o=JSON.parse(localStorage.getItem(KEY)||'{}');
+           var hoy=new Date().toISOString().slice(0,10);
+           if(o.day!==hoy) o={day:hoy, by:{}, n:0};
+           return o; }catch(e){ return {day:new Date().toISOString().slice(0,10), by:{}, n:0}; }
+    }
+    var acc=load(), dirty=false;
+    function save(){ if(!dirty)return; dirty=false; try{ localStorage.setItem(KEY,JSON.stringify(acc)); }catch(e){} }
+    setInterval(save, 20000);
+    window.addEventListener('beforeunload', save);
+    var _f=window.fetch;
+    window.fetch=function(){
+      var url=''; try{ url=(typeof arguments[0]==='string')?arguments[0]:(arguments[0]&&arguments[0].url)||''; }catch(e){}
+      var p=_f.apply(this, arguments);
+      if(url.indexOf('supabase.co')<0) return p;
+      var tag='otros';
+      try{
+        var m=url.match(/\/rest\/v1\/([^?]+)/); if(m) tag=m[1];
+        else if(url.indexOf('/auth/')>=0) tag='auth';
+        else if(url.indexOf('/storage/')>=0) tag='storage';
+        if(tag==='app_settings'){ var k=url.match(/key=eq\.([^&]+)/); if(k) tag='app_settings:'+decodeURIComponent(k[1]); }
+        if(url.indexOf('select=')>=0 && url.indexOf('updated_at')>=0 && url.indexOf('select=*')<0) tag+=' (lista)';
+      }catch(e){}
+      return p.then(function(res){
+        try{
+          var cl=res.headers&&res.headers.get&&res.headers.get('content-length');
+          if(cl){ acc.by[tag]=(acc.by[tag]||0)+Number(cl); acc.n++; dirty=true; }
+          else{ res.clone().text().then(function(t){ acc.by[tag]=(acc.by[tag]||0)+(t?t.length:0); acc.n++; dirty=true; }).catch(function(){}); }
+        }catch(e){}
+        return res;
+      });
+    };
+    window.sbEgreso=function(reset){
+      if(reset){ acc={day:new Date().toISOString().slice(0,10), by:{}, n:0}; dirty=true; save(); console.log('Contador reiniciado.'); return; }
+      var rows=Object.keys(acc.by).map(function(k){ return {tabla:k, MB:+(acc.by[k]/1048576).toFixed(3)}; })
+                 .sort(function(a,b){ return b.MB-a.MB; });
+      var tot=rows.reduce(function(a,r){ return a+r.MB; },0);
+      console.log('Egreso desde '+acc.day+' en este navegador · '+acc.n+' requests · TOTAL '+tot.toFixed(2)+' MB');
+      console.table(rows);
+      return {total_MB:+tot.toFixed(2), requests:acc.n, detalle:rows};
+    };
+    setInterval(function(){
+      var tot=Object.keys(acc.by).reduce(function(a,k){ return a+acc.by[k]; },0);
+      console.log('[Egreso] '+(tot/1048576).toFixed(1)+' MB acumulados hoy en este navegador (sbEgreso() para el detalle)');
+    }, 10*60*1000);
+  }catch(e){}
+})();
+
+// ══ v189: SYNC LIVIANO — ahorro de egreso en Supabase ═══════════════════════
+// Antes, cada 15 s se descargaban COMPLETAS plan_weeks, player_profiles (con
+// fotos), drills_exercises (con imágenes y diagramas) y 21 días de wellness/PSE,
+// en cada dispositivo con la pestaña visible. Eso agotó la cuota de egreso.
+// Ahora:
+//  1) Se pide sólo la "lista liviana" (claves + updated_at) y se baja completa
+//     únicamente la fila que cambió. Las filas que desaparecen de la lista se
+//     quitan (así se siguen detectando los borrados del compañero).
+//  2) Cada 30 min (o al volver a la pestaña tras un rato) se hace una lectura
+//     completa de control, como red de seguridad.
+//  3) Si nadie toca el dashboard por 15 min, se pausan los refrescos pesados
+//     (los check-in siguen llegando). Al primer toque se refresca al instante.
+// El merge de datos NO cambia: recibe exactamente lo mismo que antes.
+var _sbDelta={};
+var SB_DELTA_FULL_MS=12*60*60*1000;   // v190: era 30 min → costaba ~8 MB cada media hora
+// Escalonado: que las tablas no hagan su lectura de control todas juntas
+function _sbDeltaFullMs(ck){
+  var h=0; for(var i=0;i<ck.length;i++) h=(h*31+ck.charCodeAt(i))%97;
+  return SB_DELTA_FULL_MS + h*60*1000;
+}
+function _sbDeltaKey(row,cols){
+  return cols.map(function(c){ return String(row[c]==null?'':row[c]); }).join('\u0001');
+}
+function sbDeltaSelect(table, keyCols, extra, opts){
+  opts=opts||{};
+  var ck=table+(opts.cacheTag?('#'+opts.cacheTag):'');
+  var c=_sbDelta[ck]||(_sbDelta[ck]={rows:null,stamp:null,lastFull:0});
+  function base(sel){
+    var q=sbClient.from(table).select(sel).eq('categoria',SB_CATEGORIA);
+    return extra?extra(q):q;
+  }
+  // Copias nuevas en cada entrega: nadie puede modificar la caché por referencia
+  function out(){
+    var arr=[]; Object.keys(c.rows).forEach(function(k){ arr.push(JSON.parse(c.rows[k])); });
+    return {data:arr, error:null};
+  }
+  function full(){
+    return base('*').then(function(r){
+      if(r&&!r.error&&Array.isArray(r.data)){
+        c.rows={}; c.stamp={};
+        r.data.forEach(function(row){
+          var k=_sbDeltaKey(row,keyCols);
+          c.rows[k]=JSON.stringify(row); c.stamp[k]=String(row.updated_at||'');
+        });
+        c.lastFull=Date.now();
+      }
+      return r;
+    });
+  }
+  if(!c.rows||opts.forceFull||window._sbDeltaForceFull||(Date.now()-c.lastFull)>_sbDeltaFullMs(ck)) return full();
+  return base(keyCols.join(',')+',updated_at').then(function(r){
+    if(!r||r.error||!Array.isArray(r.data)) return r;
+    var present={}, firstVals={}, nChanged=0;
+    r.data.forEach(function(lr){
+      var k=_sbDeltaKey(lr,keyCols); present[k]=true;
+      if(!c.rows[k] || c.stamp[k]!==String(lr.updated_at||'')){
+        firstVals[String(lr[keyCols[0]])]=true; nChanged++;
+      }
+    });
+    Object.keys(c.rows).forEach(function(k){ if(!present[k]){ delete c.rows[k]; delete c.stamp[k]; } });
+    if(!nChanged) return out();
+    var vals=Object.keys(firstVals);
+    if(vals.length>60) return full();
+    var chunks=[]; for(var i=0;i<vals.length;i+=30) chunks.push(vals.slice(i,i+30));
+    return Promise.all(chunks.map(function(ch){ return base('*').in(keyCols[0], ch); })).then(function(rs){
+      for(var j=0;j<rs.length;j++){ if(!rs[j]||rs[j].error||!Array.isArray(rs[j].data)) return full(); }
+      rs.forEach(function(x){ x.data.forEach(function(row){
+        var k=_sbDeltaKey(row,keyCols);
+        if(!present[k]) return;
+        c.rows[k]=JSON.stringify(row); c.stamp[k]=String(row.updated_at||'');
+      }); });
+      return out();
+    });
+  }).catch(function(e){ return {data:null, error:e}; });
+}
+window.sbDeltaSelect=sbDeltaSelect;
+
+// Inactividad: pausa los refrescos pesados si nadie usa el dashboard
+var _sbLastAct=Date.now(), _sbHiddenAt=0, SB_IDLE_MS=15*60*1000;
+function sbIsIdle(){ return (Date.now()-_sbLastAct)>SB_IDLE_MS; }
+window.sbIsIdle=sbIsIdle;
+(function(){
+  try{
+    var wake=function(){
+      var was=sbIsIdle(); _sbLastAct=Date.now();
+      if(was){ try{ if(typeof planPollOnce==='function') planPollOnce(); }catch(e){} }
+    };
+    ['pointerdown','keydown','wheel','touchstart'].forEach(function(ev){
+      document.addEventListener(ev, wake, {passive:true, capture:true});
+    });
+    document.addEventListener('visibilitychange', function(){
+      if(document.hidden){ _sbHiddenAt=Date.now(); return; }
+      // Volver tras más de 5 min oculta: próxima lectura completa (control)
+      if(_sbHiddenAt && Date.now()-_sbHiddenAt>5*60*1000){
+        Object.keys(_sbDelta).forEach(function(k){ _sbDelta[k].lastFull=0; });
+        window._tstForcePull=true;
+      }
+      _sbLastAct=Date.now();
+    });
+  }catch(e){}
+})();
+
+var _planPollTimer=null, _planPollBusy=false, _planPollTick=0;
 function planPollStart(){
   if(_planPollTimer)return;
   _planPollTimer=setInterval(planPollOnce, 15000);
@@ -14508,10 +14667,7 @@ function drillsPollOnce(){
   if(typeof D==='undefined'||!Array.isArray(D))return Promise.resolve(false);
   if(!window._sbDrillsSynced)return Promise.resolve(false);  // esperar la carga inicial
   _drPollBusy=true;
-  // v189: incremental (antes: select('*') de toda la biblioteca, con imágenes, cada 15 s)
-  var _q=(typeof _sbIncrFetch==='function')?_sbIncrFetch('drills_exercises')
-        :sbClient.from('drills_exercises').select('*').eq('categoria',SB_CATEGORIA);
-  return _q.then(function(r){
+  return sbDeltaSelect('drills_exercises',['id']).then(function(r){
     _drPollBusy=false;
     if(!r||r.error||!r.data)return false;
     var added=0, updated=0;
@@ -14550,20 +14706,28 @@ function wellPsePollOnce(){
   // Sólo los últimos 21 días: alcanza para el día a día y no pesa
   var since=new Date(); since.setDate(since.getDate()-21);
   var sinceISO=since.toISOString().slice(0,10);
-  // v189: incremental; se conserva la misma ventana de 21 días filtrando en local
-  var _win=function(p){ return p.then(function(r){
-    if(r&&r.data) return {data:r.data.filter(function(x){ return String(x.date||'')>=sinceISO; }), error:null};
-    return r;
-  }); };
-  var tasks=(typeof _sbIncrFetch==='function')?[
-    _win(_sbIncrFetch('wellness_data')),
-    _win(_sbIncrFetch('pse_data'))
-  ]:[
-    sbClient.from('wellness_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO),
-    sbClient.from('pse_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO)
-  ];
+  // v189: incremental. Sólo filas modificadas desde la última vista (con 15 min
+  // de margen por relojes desfasados). Cada 10 min, lectura completa de control.
+  var wpFull=!window._wpWm || (Date.now()-(window._wpLastFull||0))>60*60*1000;   // v190
+  var qW=sbClient.from('wellness_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO);
+  var qP=sbClient.from('pse_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO);
+  if(!wpFull){
+    var wmISO=new Date(window._wpWm-15*60*1000).toISOString();
+    qW=qW.gte('updated_at',wmISO); qP=qP.gte('updated_at',wmISO);
+  }
+  var tasks=[qW,qP];
   return Promise.all(tasks).then(function(res){
     _wpPollBusy=false;
+    try{
+      if(res[0]&&!res[0].error&&res[1]&&!res[1].error){
+        var mx=window._wpWm||0;
+        [res[0].data||[],res[1].data||[]].forEach(function(arr){ arr.forEach(function(row){
+          var t=Date.parse(row.updated_at); if(!isNaN(t)&&t>mx&&t<Date.now()+86400000) mx=t;
+        }); });
+        window._wpWm=mx||Date.now();
+        if(wpFull) window._wpLastFull=Date.now();
+      }
+    }catch(e){}
     var changed=0;
     // Wellness
     try{
@@ -14618,10 +14782,7 @@ window.wellPsePollOnce=wellPsePollOnce;
 
 function profPollOnce(){
   if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(false);
-  // v189: incremental (antes bajaba todos los perfiles —con fotos— cada 15 s)
-  var _q=(typeof _sbIncrFetch==='function')?_sbIncrFetch('player_profiles')
-        :sbClient.from('player_profiles').select('*').eq('categoria', SB_CATEGORIA);
-  return _q.then(function(r){
+  return sbDeltaSelect('player_profiles',['id']).then(function(r){
     if(!r||r.error||!r.data)return false;
     var changed=false, cloudIds={};
     r.data.forEach(function(row){
@@ -14664,8 +14825,7 @@ function hoyRefrescarAhora(btn){
     var ps=[];
     if(typeof wellPsePollOnce==='function') ps.push(wellPsePollOnce());
     if(typeof profPollOnce==='function') ps.push(profPollOnce());
-    window._pollForce=true;
-    try{ if(typeof planPollOnce==='function') ps.push(planPollOnce()); }finally{ window._pollForce=false; }
+    if(typeof planPollOnce==='function') ps.push(planPollOnce());
     if(typeof wellPseQueueFlush==='function'){ try{ wellPseQueueFlush(); }catch(e){} }
     Promise.all(ps.map(function(p){ return (p&&p.then)?p.catch(function(){}):Promise.resolve(); })).then(fin).catch(fin);
   }catch(e){ if(btn){ btn.textContent='🔄 Actualizar'; btn.disabled=false; } }
@@ -14676,15 +14836,10 @@ function planPollOnce(){
   if(_planPollBusy)return;
   if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return;
   if(typeof document!=='undefined'&&document.hidden)return;   // pestaña en segundo plano
-  // v189: foco + visibilidad + intervalo disparaban varios refrescos seguidos.
-  // Mínimo 4 s entre refrescos; si nadie usa la pantalla hace 5 min, cada 60 s.
-  if(!window._pollForce){
-    var _gap=Date.now()-(window._sbLastPollAt||0);
-    if(_gap<4000) return;
-    if(typeof _sbIsIdle==='function' && _sbIsIdle() && _gap<60000) return;
-  }
-  window._sbLastPollAt=Date.now();
+  // v189: sin uso por 15 min → sólo check-ins (liviano); el resto se pausa
+  if(sbIsIdle()){ try{ wellPsePollOnce(); }catch(e){} return; }
   _planPollBusy=true;
+  _planPollTick++;
   // Perfiles siempre (el estado de un jugador afecta a todas las vistas)
   profPollOnce();
   // v148: y los check-ins que cargan los jugadores desde el celular
@@ -14692,10 +14847,9 @@ function planPollOnce(){
   // v151: y los ejercicios nuevos de la biblioteca. Sin esto, un ejercicio que
   // creaba el compañero no llegaba hasta recargar la página, y la planificación
   // que lo usaba mostraba "(eliminado)".
-  drillsPollOnce();
-  var _qp=(typeof _sbIncrFetch==='function')?_sbIncrFetch('plan_weeks')
-         :sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA);
-  _qp.then(function(r){
+  // v189: la biblioteca cada 30 s (antes 15 s)
+  if(_planPollTick%2===1) drillsPollOnce();
+  sbDeltaSelect('plan_weeks',['name','created']).then(function(r){
     _planPollBusy=false;
     if(!r||r.error||!r.data)return;
     var cloud=r.data.map(_sbPlanWeekFromRow);
@@ -34428,246 +34582,6 @@ var sbClient = null;
 var sbCurrentUser = null;
 var sbReady = false; // true cuando hay sesión activa y la primera carga terminó
 
-// ═══════════════════════════════════════════════════════════════
-// v189 · AHORRO DE EGRESO (ancho de banda de Supabase)
-// ═══════════════════════════════════════════════════════════════
-// Diagnóstico que motivó esto (cuota de 5.5 GB superada, 10.48 GB usados):
-//  1) BUCLE INFINITO en el sync de planificación: se comparaba la semana local
-//     con la de la nube usando JSON.stringify, pero Postgres (JSONB) reordena
-//     las claves de los objetos. Las cadenas NUNCA coincidían, entonces cada
-//     sync subía todo → saveData() → nuevo sync → volvía a bajar plan_weeks,
-//     wellness y PSE COMPLETOS, gym, etc. cada ~2-3 segundos, sin parar,
-//     mientras hubiera una pestaña abierta.
-//  2) Refresco cada 15 s (y en cada foco/cambio de pestaña) que bajaba tablas
-//     enteras con select('*'): biblioteca de ejercicios (con imágenes),
-//     perfiles (con fotos), planificación y 21 días de check-ins.
-//  3) Cada guardado leía wellness y PSE HISTÓRICOS completos antes de subir.
-// Solución: un "espejo" en memoria de cada tabla. Se llena con la carga
-// inicial y después sólo se piden las filas cuyo updated_at cambió. Cada
-// cierto tiempo se pide una lista liviana (sólo claves + updated_at) para
-// detectar borrados y relojes desfasados. Los guardados sólo leen/suben lo
-// que realmente difiere de lo que ya está en la nube.
-// Consola: sbEgreso() muestra cuánto se descargó por tabla desde que abriste.
-var _SBM = {};
-var _SBM_CFG = {
-  drills_exercises: { keys:['id'],                      lightMs: 10*60000 },
-  player_profiles:  { keys:['id'],                      lightMs: 60000 },
-  plan_weeks:       { keys:['name','created'],          lightMs: 60000 },
-  // check-ins: lista liviana de los últimos 3 días cada minuto (atrapa celulares
-  // con la hora corrida) y de los 21 días cada 10 minutos
-  wellness_data:    { keys:['name','date'],             lightMs: 60000, lightDays: 3, fullLightMs: 10*60000, windowDays: 21, dateCol:'date' },
-  pse_data:         { keys:['name','date','week','day'],lightMs: 60000, lightDays: 3, fullLightMs: 10*60000, windowDays: 21, dateCol:'date' },
-  gym_exercises:    { keys:['id'] },
-  app_settings:     { keys:['key'] }
-};
-
-// Comparación independiente del orden de las claves (JSONB las reordena)
-function _sbSortDeep(v){
-  if(Array.isArray(v)) return v.map(_sbSortDeep);
-  if(v && typeof v==='object'){
-    var o={}; Object.keys(v).sort().forEach(function(k){ o[k]=_sbSortDeep(v[k]); }); return o;
-  }
-  return v;
-}
-function _sbStable(v){
-  try{ return JSON.stringify(_sbSortDeep(JSON.parse(JSON.stringify(v===undefined?null:v)))); }
-  catch(e){ return 'ERR'+Math.random(); }
-}
-window._sbStable=_sbStable;
-function _sbTs(v){ var t=Date.parse(v); return isNaN(t)?0:t; }
-function _sbmState(t){
-  if(!_SBM[t]) _SBM[t]={rows:{}, putAt:{}, hwm:0, lastLight:0, lastFullLight:0, seeded:false, busy:null};
-  return _SBM[t];
-}
-function _sbmKey(t, row){
-  var cfg=_SBM_CFG[t]||{keys:['id']};
-  return cfg.keys.map(function(c){ var v=row?row[c]:null; return (v==null)?'':String(v); }).join('\u0001');
-}
-function _sbmRecomputeHwm(t){
-  var st=_sbmState(t), m=0;
-  Object.keys(st.rows).forEach(function(k){ var x=_sbTs(st.rows[k].updated_at); if(x>m) m=x; });
-  st.hwm=m;
-}
-function _sbmSeed(t, rows){
-  var st=_sbmState(t);
-  st.rows={};
-  (rows||[]).forEach(function(r){ st.rows[_sbmKey(t,r)]=r; });
-  st.seeded=true; st.lastLight=st.lastFullLight=Date.now();
-  _sbmRecomputeHwm(t);
-}
-function _sbmSeeded(t){ return !!(_SBM[t]&&_SBM[t].seeded); }
-function _sbmRowsArr(t){ var st=_sbmState(t); return Object.keys(st.rows).map(function(k){ return st.rows[k]; }); }
-// Registrar en el espejo lo que YA se subió bien (no mueve la marca de agua)
-function _sbmPut(t, payloads){
-  if(!_SBM_CFG[t]) return;
-  var st=_sbmState(t), now=Date.now();
-  (payloads||[]).forEach(function(p){
-    if(!p) return;
-    var k=_sbmKey(t,p);
-    st.rows[k]=Object.assign({}, st.rows[k]||{}, p);
-    st.putAt[k]=now;
-  });
-}
-function _sbmDrop(t, keyVals){
-  var st=_sbmState(t);
-  (keyVals||[]).forEach(function(v){ delete st.rows[String(v)]; });
-}
-// ¿La nube (según el espejo) ya tiene exactamente este payload?
-function _sbmSame(t, p){
-  if(!p || !_sbmSeeded(t)) return false;
-  var row=_sbmState(t).rows[_sbmKey(t,p)];
-  if(!row) return false;
-  var ks=Object.keys(p);
-  for(var i=0;i<ks.length;i++){
-    var k=ks[i];
-    if(k==='updated_at') continue;
-    if(_sbStable(p[k])!==_sbStable(row[k])) return false;
-  }
-  return true;
-}
-function _sbPayloadSame(a, b){
-  var A=Object.assign({}, a||{}), B=Object.assign({}, b||{});
-  delete A.updated_at; delete B.updated_at;
-  return _sbStable(A)===_sbStable(B);
-}
-function _sbmSinceISO(days){ var d=new Date(); d.setDate(d.getDate()-days); return d.toISOString().slice(0,10); }
-function _sbUniq(a){ var s={}, o=[]; (a||[]).forEach(function(v){ var k=String(v); if(!s[k]){ s[k]=1; o.push(v); } }); return o; }
-function _sbChunks(a, n){ var o=[]; for(var i=0;i<a.length;i+=n) o.push(a.slice(i,i+n)); return o; }
-
-// Trae filas completas de una lista de claves (chunked)
-function _sbmFetchRows(t, need){
-  var st=_sbmState(t), cfg=_SBM_CFG[t];
-  if(!need.length) return Promise.resolve(null);
-  var total=Object.keys(st.rows).length;
-  if(need.length>20 && need.length>total*0.5){
-    return sbClient.from(t).select('*').eq('categoria',SB_CATEGORIA).then(function(r){
-      if(r.error) return r;
-      (r.data||[]).forEach(function(row){ st.rows[_sbmKey(t,row)]=row; });
-      return null;
-    });
-  }
-  var c0=cfg.keys[0], c1=cfg.keys[1];
-  var groups=_sbChunks(_sbUniq(need.map(function(x){ return x[c0]; })), 60);
-  return Promise.all(groups.map(function(vals){
-    var q=sbClient.from(t).select('*').eq('categoria',SB_CATEGORIA).in(c0, vals);
-    if(c1){
-      var v1=_sbUniq(need.filter(function(x){ return vals.indexOf(x[c0])>=0; }).map(function(x){ return x[c1]; }));
-      if(v1.length && v1.length<=60) q=q.in(c1, v1);
-    }
-    return q;
-  })).then(function(res){
-    var err=null;
-    res.forEach(function(r){
-      if(r.error){ err=r; return; }
-      (r.data||[]).forEach(function(row){ st.rows[_sbmKey(t,row)]=row; });
-    });
-    return err;
-  });
-}
-// Lista liviana (claves + updated_at): detecta borrados y cambios con reloj desfasado
-function _sbmLight(t, days){
-  var st=_sbmState(t), cfg=_SBM_CFG[t];
-  var q=sbClient.from(t).select(cfg.keys.concat(['updated_at']).join(',')).eq('categoria',SB_CATEGORIA);
-  var since=days?_sbmSinceISO(days):null;
-  if(since) q=q.gte(cfg.dateCol, since);
-  return q.then(function(r){
-    if(r.error) return r;
-    var seen={}, need=[], now=Date.now();
-    (r.data||[]).forEach(function(lr){
-      var k=_sbmKey(t,lr); seen[k]=1;
-      var c=st.rows[k];
-      if(!c || _sbTs(c.updated_at)!==_sbTs(lr.updated_at)) need.push(lr);
-    });
-    Object.keys(st.rows).forEach(function(k){
-      if(seen[k]) return;
-      if(st.putAt[k] && now-st.putAt[k]<60000) return;      // recién subido: esperar
-      if(since){ var row=st.rows[k]; var d=String((row&&row[cfg.dateCol])||'').slice(0,10); if(!d || d<since) return; }
-      delete st.rows[k];
-    });
-    st.lastLight=now;
-    if(!since || days>=(cfg.windowDays||0)) st.lastFullLight=now;
-    return _sbmFetchRows(t, need).then(function(e){ _sbmRecomputeHwm(t); return e; });
-  });
-}
-// Sólo lo modificado después de la fila más nueva que ya tengo. Lo que llegue
-// con la hora del dispositivo atrasada lo levanta la lista liviana.
-function _sbmIncr(t){
-  var st=_sbmState(t);
-  var since=new Date(st.hwm||0).toISOString();
-  return sbClient.from(t).select('*').eq('categoria',SB_CATEGORIA).gt('updated_at', since).then(function(r){
-    if(r.error) return r;
-    (r.data||[]).forEach(function(row){ st.rows[_sbmKey(t,row)]=row; });
-    _sbmRecomputeHwm(t);
-    return null;
-  });
-}
-// Reemplazo de sbClient.from(t).select('*').eq('categoria',...): devuelve
-// {data:[todas las filas], error} igual que antes, pero bajando sólo lo nuevo.
-function _sbIncrFetch(t){
-  if(typeof sbClient==='undefined'||!sbClient) return Promise.resolve({data:null, error:'sin cliente'});
-  var st=_sbmState(t), cfg=_SBM_CFG[t];
-  if(st.busy) return st.busy;
-  var p;
-  if(!st.seeded){
-    p=sbClient.from(t).select('*').eq('categoria',SB_CATEGORIA).then(function(r){
-      if(r.error) return r; _sbmSeed(t, r.data||[]); return null;
-    });
-  } else if(cfg.fullLightMs && (Date.now()-st.lastFullLight)>=cfg.fullLightMs){
-    p=_sbmLight(t, cfg.windowDays);
-  } else if(cfg.lightMs && (Date.now()-st.lastLight)>=cfg.lightMs){
-    p=_sbmLight(t, cfg.lightDays||cfg.windowDays||0);
-  } else {
-    p=_sbmIncr(t);
-  }
-  st.busy=p.then(function(e){
-    st.busy=null;
-    if(e && e.error) return {data:null, error:e.error};
-    return {data:_sbmRowsArr(t), error:null};
-  }, function(err){ st.busy=null; return {data:null, error:err}; });
-  return st.busy;
-}
-window._sbIncrFetch=_sbIncrFetch;
-
-// Actividad del usuario: si nadie toca la pantalla por 5 min, refrescar cada 60 s
-window._sbLastActivity=Date.now();
-(function(){
-  var mark=function(){ window._sbLastActivity=Date.now(); };
-  try{ ['pointerdown','keydown','touchstart','wheel'].forEach(function(ev){ document.addEventListener(ev, mark, {passive:true, capture:true}); }); }catch(e){}
-})();
-function _sbIsIdle(){ return (Date.now()-(window._sbLastActivity||0))>5*60000; }
-window._sbIsIdle=_sbIsIdle;
-
-// Contador de descarga (aprox., sin comprimir) por tabla
-var _SB_EGRESS={total:0, byTable:{}, since:Date.now()};
-function _sbCountingFetch(input, init){
-  var f=window.fetch(input, init);
-  try{
-    var url=(typeof input==='string')?input:(input&&input.url)||'';
-    var m=url.match(/\/rest\/v1\/([^?\/]+)/), tab=m?m[1]:(url.indexOf('/auth/')>=0?'auth':'otros');
-    f.then(function(res){
-      try{ res.clone().arrayBuffer().then(function(b){
-        var n=b.byteLength+400; // + cabeceras aprox.
-        _SB_EGRESS.total+=n;
-        var e=_SB_EGRESS.byTable[tab]||(_SB_EGRESS.byTable[tab]={bytes:0, req:0});
-        e.bytes+=n; e.req++;
-      }).catch(function(){}); }catch(e){}
-    }).catch(function(){});
-  }catch(e){}
-  return f;
-}
-window.sbEgreso=function(){
-  var min=Math.max(1,(Date.now()-_SB_EGRESS.since)/60000);
-  var rows={};
-  Object.keys(_SB_EGRESS.byTable).sort(function(a,b){ return _SB_EGRESS.byTable[b].bytes-_SB_EGRESS.byTable[a].bytes; }).forEach(function(k){
-    var e=_SB_EGRESS.byTable[k]; rows[k]={KB:Math.round(e.bytes/1024), pedidos:e.req};
-  });
-  try{ console.table(rows); }catch(e){ console.log(rows); }
-  var mb=_SB_EGRESS.total/1048576;
-  console.log('Total: '+mb.toFixed(2)+' MB en '+min.toFixed(0)+' min  (≈ '+(mb/min*60).toFixed(1)+' MB/hora con esta pestaña abierta)');
-  return {MB:+mb.toFixed(2), minutos:+min.toFixed(0)};
-};
-
-
 function sbInit(){
   if(typeof window.supabase === 'undefined' || !window.supabase.createClient){
     console.error('[Supabase] SDK no cargado. ¿Hay conexión a internet?');
@@ -34682,8 +34596,7 @@ function sbInit(){
       persistSession: true,    // recordar el login en localStorage
       autoRefreshToken: true,  // renovar token automáticamente
       detectSessionInUrl: false
-    },
-    global: { fetch: _sbCountingFetch }   // v189: medir egreso (sbEgreso() en consola)
+    }
   });
   // Chequear si hay sesión guardada
   sbClient.auth.getSession().then(function(res){
@@ -35597,7 +35510,6 @@ function wellPseQueueFlush(){
       return 0;
     }
     console.log('[Check-in] '+q.length+' registro(s) pendientes subidos a la nube.');
-    try{ if(typeof wp!=='undefined'&&wp) _sbmPut('wellness_data', wp); if(typeof pp!=='undefined'&&pp) _sbmPut('pse_data', pp); }catch(e){}
     try{ localStorage.setItem('wellPsePending_v1','[]'); }catch(e){}
     return q.length;
   }).catch(function(){ return 0; });
@@ -35645,24 +35557,13 @@ function sbScheduleWellPseSync(){
       // completo tal como estaba en memoria: si el compañero tenía una copia
       // vieja, su sync borraba de la nube los minutos que vos acababas de
       // cargar. Ahora sólo sube lo que es más nuevo que lo que ya está.
-      // v189: sólo los registros que difieren de la nube; y leer sólo esos
-      var _wAll = WELLNESS_DATA.map(_sbWellnessToPayload).filter(function(p){ return p.date; });
-      var _wCand = _wAll.filter(function(p){ return !_sbmSame('wellness_data', p); });
-      if(!_wCand.length){ console.log('[Supabase] Wellness sin cambios para subir.'); }
-      else {
-      var _wD = _wCand.map(function(p){ return p.date; }).sort();
-      var _wq = sbClient.from('wellness_data').select('*').eq('categoria', SB_CATEGORIA)
-        .gte('date', _wD[0]).lte('date', _wD[_wD.length-1]);
-      var _wN = _sbUniq(_wCand.map(function(p){ return p.name||''; }));
-      if(_wN.length<=60) _wq = _wq.in('name', _wN);
-      _wq.then(function(cw){
-        if(cw && cw.error){ console.warn('[Supabase] Lectura wellness:', cw.error.message||cw.error); setTimeout(sbScheduleWellPseSync, 10000); return; }
+      sbClient.from('wellness_data').select('*').eq('categoria', SB_CATEGORIA).then(function(cw){
         var enNube={};
         if(cw && cw.data) cw.data.forEach(function(row){
           var r=_sbWellnessFromRow(row);
           enNube[(r.name||'')+'|'+(r.date||'')]=Number((row.fields&&row.fields._upd)||0);
         });
-        var wPayload = _wCand.filter(function(p){
+        var wPayload = WELLNESS_DATA.map(_sbWellnessToPayload).filter(function(p){
           if(!p.date)return false;
           var k=(p.name||'')+'|'+(p.date||'');
           if(!(k in enNube))return true;                       // no está: subir
@@ -35672,31 +35573,19 @@ function sbScheduleWellPseSync(){
         console.log('[Supabase] Sync wellness (' + wPayload.length + ' de ' + WELLNESS_DATA.length + ')');
         sbClient.from('wellness_data').upsert(wPayload, { onConflict: 'name,date,categoria' }).then(function(res){
           if(res.error){ console.error('[Supabase] Sync wellness error:', res.error); setTimeout(sbScheduleWellPseSync, 10000); }
-          else { console.log('[Supabase] Sync wellness OK'); try{ _sbmPut('wellness_data', wPayload); }catch(e){} }
+          else console.log('[Supabase] Sync wellness OK');
         });
       });
-      }
     }
     // PSE
     if(typeof PSE_DATA!=='undefined' && Array.isArray(PSE_DATA) && PSE_DATA.length){
-      // v189: ídem wellness
-      var _pAll = PSE_DATA.map(_sbPseToPayload).filter(function(p){ return p.date; });
-      var _pCandP = _pAll.filter(function(p){ return !_sbmSame('pse_data', p); });
-      if(!_pCandP.length){ console.log('[Supabase] PSE sin cambios para subir.'); }
-      else {
-      var _pD = _pCandP.map(function(p){ return p.date; }).sort();
-      var _pqP = sbClient.from('pse_data').select('*').eq('categoria', SB_CATEGORIA)
-        .gte('date', _pD[0]).lte('date', _pD[_pD.length-1]);
-      var _pN = _sbUniq(_pCandP.map(function(p){ return p.name||''; }));
-      if(_pN.length<=60) _pqP = _pqP.in('name', _pN);
-      _pqP.then(function(cp){
-        if(cp && cp.error){ console.warn('[Supabase] Lectura PSE:', cp.error.message||cp.error); setTimeout(sbScheduleWellPseSync, 10000); return; }
+      sbClient.from('pse_data').select('*').eq('categoria', SB_CATEGORIA).then(function(cp){
         var enNubeP={};
         if(cp && cp.data) cp.data.forEach(function(row){
           var k=(row.name||'')+'|'+(row.date||'')+'|'+(row.week||'')+'|'+(row.day||'');
           enNubeP[k]=Number((row.fields&&row.fields._upd)||0);
         });
-        var pPayload = _pCandP.filter(function(p){
+        var pPayload = PSE_DATA.map(_sbPseToPayload).filter(function(p){
           if(!p.date)return false;
           var k=(p.name||'')+'|'+(p.date||'')+'|'+(p.week||'')+'|'+(p.day||'');
           if(!(k in enNubeP))return true;
@@ -35706,10 +35595,9 @@ function sbScheduleWellPseSync(){
         console.log('[Supabase] Sync PSE (' + pPayload.length + ' de ' + PSE_DATA.length + ')');
         sbClient.from('pse_data').upsert(pPayload, { onConflict: 'name,date,week,day,categoria' }).then(function(res){
           if(res.error){ console.error('[Supabase] Sync PSE error:', res.error); setTimeout(sbScheduleWellPseSync, 10000); }
-          else { console.log('[Supabase] Sync PSE OK'); try{ _sbmPut('pse_data', pPayload); }catch(e){} }
+          else console.log('[Supabase] Sync PSE OK');
         });
       });
-      }
     }
   }, 1500);
 }
@@ -36009,32 +35897,12 @@ function sbScheduleTanda1Sync(){
       // v143: no subir el array completo a ciegas. Primero se lee la nube y se
       // fusiona día por día; recién ahí se sube lo que corresponde. Sin esto,
       // el dispositivo que guardaba último pisaba el trabajo del otro.
-      // v189: sólo las semanas que difieren de lo que ya está en la nube
-      var _pmReady = (typeof _sbmSeeded==='function') && _sbmSeeded('plan_weeks');
-      var _pCand = _pmReady ? PLAN_WEEKS.filter(function(w){
-        if(planTombHas(planWeekKey(w))) return false;
-        return !_sbmSame('plan_weeks', _sbPlanWeekToPayload(w));
-      }) : PLAN_WEEKS;
-      var _pTombRows = _pmReady ? _sbmRowsArr('plan_weeks').filter(function(row){
-        return planTombHas(planWeekKey(_sbPlanWeekFromRow(row)));
-      }) : [];
-      if(_pmReady && !_pCand.length && !_pTombRows.length){
-        console.log('[Supabase] plan_weeks sin cambios para subir.');
-      } else {
-      var _pq = sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA);
-      if(_pmReady){
-        var _uids={}; _pCand.forEach(function(w){ if(w.uid) _uids[w.uid]=1; });
-        var _names=_pCand.map(function(w){ return w.name||'(sin nombre)'; })
-          .concat(_pTombRows.map(function(row){ return row.name; }))
-          .concat(_sbmRowsArr('plan_weeks').filter(function(row){ return row.data&&row.data.uid&&_uids[row.data.uid]; }).map(function(row){ return row.name; }));
-        _pq = _pq.in('name', _sbUniq(_names));
-      }
-      _pq.then(function(r){
+      sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
         var cloud = (r && r.data) ? r.data.map(_sbPlanWeekFromRow) : [];
         var cloudByKey = {};
         cloud.forEach(function(cw){ cloudByKey[planWeekKey(cw)] = cw; });
         var toUpload = [];
-        _pCand.forEach(function(mine){
+        PLAN_WEEKS.forEach(function(mine){
           var k = planWeekKey(mine);
           if(planTombHas(k)) return;
           var theirs = cloudByKey[k];
@@ -36043,9 +35911,7 @@ function sbScheduleTanda1Sync(){
           // Reflejar el merge en memoria para no perder lo del compañero
           var idx = PLAN_WEEKS.indexOf(mine);
           if(idx>=0) PLAN_WEEKS[idx] = merged;
-          // v189: comparar SIN importar el orden de las claves. JSONB reordena,
-          // y con JSON.stringify esto daba siempre "distinto" → bucle infinito.
-          if(!_sbPayloadSame(_sbPlanWeekToPayload(merged), _sbPlanWeekToPayload(theirs))) toUpload.push(merged);
+          if(JSON.stringify(merged) !== JSON.stringify(theirs)) toUpload.push(merged);
         });
         if(typeof planPreserveEditing==='function') planPreserveEditing();
         // Borrar de la nube lo que se eliminó acá
@@ -36056,7 +35922,7 @@ function sbScheduleTanda1Sync(){
             if(!planTombHas(k))return;
             sbClient.from('plan_weeks').delete()
               .eq('name', cw.name||'').eq('created', cw.created||'').eq('categoria', SB_CATEGORIA)
-              .then(function(dr){ if(!(dr&&dr.error)){ try{ _sbmDrop('plan_weeks', [_sbmKey('plan_weeks', {name:cw.name||'', created:cw.created||''})]); }catch(e){} } });
+              .then(function(){});
           });
         }
         if(!toUpload.length){ console.log('[Supabase] plan_weeks sin cambios para subir.'); return; }
@@ -36066,7 +35932,6 @@ function sbScheduleTanda1Sync(){
           if(res.error) console.error('[Supabase] Sync plan_weeks error:', res.error);
           else {
             console.log('[Supabase] Sync plan_weeks OK');
-            try{ _sbmPut('plan_weeks', pPayload); }catch(e){}
             // v146: limpiar la marca de "pendiente de subir". Si no se limpia,
             // el poller nunca puede detectar que el compañero borró una semana.
             toUpload.forEach(function(w){ delete w._dirty; });
@@ -36075,7 +35940,6 @@ function sbScheduleTanda1Sync(){
           }
         });
       });
-      }
     }
     // GYM_SESSIONS
     if(typeof GYM_SESSIONS!=='undefined' && Array.isArray(GYM_SESSIONS) && GYM_SESSIONS.length){
@@ -36346,15 +36210,9 @@ function sbScheduleTanda2aSync(){
       // dispositivo con copia vieja no borre lo que el otro acaba de cargar.
       var _gymCloudUpd={};
       var ePayload = GYM_EXERCISES.map(_sbGymExerciseToPayload).filter(function(p){return p.id;});
-      // v189: sólo los que difieren de la nube
-      ePayload = ePayload.filter(function(p){ return !_sbmSame('gym_exercises', p); });
-      if(!ePayload.length) console.log('[Supabase] gym_exercises sin cambios para subir.');
       if(ePayload.length){
         // v172: comparar contra la nube antes de subir
-        var _eIds = ePayload.map(function(p){ return p.id; });
-        var _eq = sbClient.from('gym_exercises').select('*').eq('categoria', SB_CATEGORIA);
-        if(_eIds.length<=100) _eq = _eq.in('id', _eIds);
-        _eq.then(function(ce){
+        sbClient.from('gym_exercises').select('*').eq('categoria', SB_CATEGORIA).then(function(ce){
           if(ce && ce.data) ce.data.forEach(function(row){
             _gymCloudUpd[String(row.id)] = Number((row.data&&row.data._upd)||0);
           });
@@ -36367,7 +36225,7 @@ function sbScheduleTanda2aSync(){
           console.log('[Supabase] Sync gym_exercises (' + envío.length + ' de ' + ePayload.length + ')');
           sbClient.from('gym_exercises').upsert(envío, { onConflict: 'id' }).then(function(res){
             if(res.error) console.error('[Supabase] Sync gym_exercises error:', res.error);
-            else { console.log('[Supabase] Sync gym_exercises OK'); try{ _sbmPut('gym_exercises', envío); }catch(e){} }
+            else console.log('[Supabase] Sync gym_exercises OK');
           });
         });
       }
@@ -36942,9 +36800,6 @@ function drillGuardSweep(){
   if(_drillGuardBusy) return Promise.resolve(0);
   if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser) return Promise.resolve(0);
   if(typeof document!=='undefined'&&document.hidden) return Promise.resolve(0);
-  // v189: sin actividad, barrer cada 5 min en vez de cada 30 s
-  if(typeof _sbIsIdle==='function' && _sbIsIdle() && (Date.now()-(window._sbLastGuardAt||0))<300000) return Promise.resolve(0);
-  window._sbLastGuardAt=Date.now();
   _drillGuardBusy=true;
   try{ if(typeof drillIdHwmFetch==='function') drillIdHwmFetch(); }catch(e){}
   return _drillTombCloudFetch().then(function(cloudTomb){
@@ -36975,29 +36830,23 @@ function drillGuardSweep(){
     // v151: traer la fila COMPLETA para poder comparar su sello con la fecha
     // del borrado. Antes se borraba por id a ciegas y eso eliminaba de la nube
     // los ejercicios nuevos del compañero que reciclaban un id.
-    // v189: usar el espejo incremental (antes bajaba filas completas, con imagen, cada 30 s)
-    var _idSet={}; ids.forEach(function(n){ _idSet[n]=1; });
-    var _qg=(typeof _sbIncrFetch==='function')
-      ? _sbIncrFetch('drills_exercises').then(function(r){
-          if(r&&r.data) return {data:r.data.filter(function(row){ return _idSet[Number(row.id)]; }), error:null};
-          return r||{data:null,error:'sin datos'};
-        })
-      : sbClient.from('drills_exercises').select('*').eq('categoria',SB_CATEGORIA).in('id',ids);
-    return _qg
+    // v189: sólo id, nombre y sellos de tiempo (antes bajaba la fila completa,
+    // con imágenes, cada 30 s)
+    return sbClient.from('drills_exercises').select('id,n,updated_at,upd:data->_upd,cre:data->_created').eq('categoria',SB_CATEGORIA).in('id',ids)
       .then(function(res){
         _drillGuardBusy=false;
         if(res.error||!res.data||!res.data.length) return removed.length;
         var stillThere=[];
         res.data.forEach(function(row){
-          var d=(typeof _sbDrillFromRow==='function')?_sbDrillFromRow(row):Object.assign({id:row.id,n:row.n},row.data||{});
+          var u=(row.upd!=null)?Number(row.upd):(row.updated_at?Date.parse(row.updated_at):null);
+          var d={id:row.id, n:row.n, _upd:(isNaN(u)?null:u), _created:(row.cre!=null?Number(row.cre):undefined)};
           if(drillIsDeletedRow(d)) stillThere.push(Number(row.id));
           else console.log('[Anti-zombie] id '+row.id+' reutilizado por un ejercicio MÁS NUEVO ("'+(d.n||'')+'"): se respeta.');
         });
         if(!stillThere.length) return removed.length;
         console.warn('[Anti-zombie] '+stillThere.length+' ejercicio(s) borrados seguían en la nube. Purgando: '+stillThere.join(', '));
         sbClient.from('drills_exercises').delete().eq('categoria',SB_CATEGORIA).in('id',stillThere)
-          .then(function(d){ if(d.error)console.warn('[Anti-zombie] purga:',d.error.message||d.error);
-            else { try{ _sbmDrop('drills_exercises', stillThere); }catch(e){} } });
+          .then(function(d){ if(d.error)console.warn('[Anti-zombie] purga:',d.error.message||d.error); });
         return removed.length+stillThere.length;
       }).catch(function(){ _drillGuardBusy=false; return removed.length; });
   }).catch(function(){ _drillGuardBusy=false; return 0; });
@@ -37253,32 +37102,15 @@ function sbScheduleTanda2bSync(){
             console.log('[Supabase] Reconciliación drills: borrando ' + finalDeletes.length + ' borrados confirmados ('+finalDeletes.join(',')+')');
             sbClient.from('drills_exercises').delete().eq('categoria', SB_CATEGORIA).in('id', finalDeletes).then(function(dres){
               if(dres.error) console.error('[Supabase] Error borrando drills obsoletos:', dres.error);
-              else { try{ _sbmDrop('drills_exercises', finalDeletes); }catch(e){} }
             });
           }
           // 3) Subir el estado actual (nunca incluye ids borrados)
-          // v189: sólo lo que falta en la nube o cambió. Antes se resubía la
-          // biblioteca entera con fecha nueva en cada guardado, y eso hacía que
-          // todos los dispositivos la volvieran a bajar completa.
-          var _cloudSet={}; cloudIds.forEach(function(id){ _cloudSet[id]=1; });
-          var _allD = dPayload;
-          dPayload = dPayload.filter(function(p){ return !_cloudSet[Number(p.id)] || !_sbmSame('drills_exercises', p); });
-          if(!dPayload.length && _allD.length){
-            console.log('[Supabase] drills_exercises sin cambios para subir.');
-            try{
-              var _okIds={}; _allD.forEach(function(x){ if(_cloudSet[Number(x.id)]) _okIds[Number(x.id)]=true; });
-              var _pnd=JSON.parse(localStorage.getItem('drills_pending')||'[]');
-              var _pnd2=_pnd.filter(function(id){ return !_okIds[Number(id)]; });
-              if(_pnd2.length!==_pnd.length) localStorage.setItem('drills_pending', JSON.stringify(_pnd2));
-            }catch(e){}
-          }
           if(dPayload.length){
             console.log('[Supabase] Sync drills_exercises (' + dPayload.length + ')');
             sbClient.from('drills_exercises').upsert(dPayload, { onConflict: 'id' }).then(function(r2){
               if(r2.error) console.error('[Supabase] Sync drills_exercises error:', r2.error);
               else {
                 console.log('[Supabase] Sync drills_exercises OK');
-                try{ _sbmPut('drills_exercises', dPayload); }catch(e){}
                 // v140: NO vaciar la lista completa de pendientes. Antes se
                 // hacía `drills_pending=[]` y eso borraba marcas de ejercicios
                 // modificados mientras el batch viajaba; después la carga
@@ -37783,17 +37615,10 @@ function sbScheduleTanda3Sync(){
       console.log('[Supabase] Sync settings: nada para subir (todas vacías)');
       return;
     }
-    // v189: subir sólo las claves que cambiaron respecto de la nube
-    payloads = payloads.filter(function(p){ return !_sbmSame('app_settings', p); });
-    if(!payloads.length){ console.log('[Supabase] app_settings sin cambios para subir.'); return; }
     console.log('[Supabase] Sync app_settings (' + payloads.length + ' keys)');
     sbClient.from('app_settings').upsert(payloads, { onConflict: 'key,categoria' }).then(function(res){
       if(res.error) console.error('[Supabase] Sync app_settings error:', res.error);
-      else {
-        console.log('[Supabase] Sync app_settings OK');
-        try{ _sbmPut('app_settings', payloads);
-          payloads.forEach(function(p){ if(p.key==='TST_DATA') window._tstLastCloudTs=p.updated_at; }); }catch(e){}
-      }
+      else console.log('[Supabase] Sync app_settings OK');
     });
   }, 1500);
 }
@@ -37817,11 +37642,7 @@ function sbForceSyncSettings(){
   console.log('[Supabase] Force sync app_settings (' + payloads.length + ' keys)');
   return sbClient.from('app_settings').upsert(payloads, { onConflict: 'key,categoria' }).then(function(res){
     if(res.error) console.error('[Supabase] Force sync error:', res.error);
-    else {
-      console.log('[Supabase] Force sync OK');
-      try{ _sbmPut('app_settings', payloads);
-        payloads.forEach(function(p){ if(p.key==='TST_DATA') window._tstLastCloudTs=p.updated_at; }); }catch(e){}
-    }
+    else console.log('[Supabase] Force sync OK');
   });
 }
 window.sbForceSyncSettings = sbForceSyncSettings;
@@ -37938,28 +37759,6 @@ function sbInjectMigrateButton(){
   // Por defecto no inyecta nada en la UI.
   return;
 }
-
-
-// v189: la carga inicial ya baja las tablas completas → sembrar el espejo con
-// esas mismas filas, así el primer refresco no vuelve a bajar todo.
-(function(){
-  var MAP={
-    sbDrillsFetchAll:'drills_exercises', sbProfilesFetchAll:'player_profiles',
-    sbPlanWeeksFetchAll:'plan_weeks', sbWellnessFetchAll:'wellness_data',
-    sbPseFetchAll:'pse_data', sbGymExercisesFetchAll:'gym_exercises',
-    sbSettingsFetchAll:'app_settings'
-  };
-  Object.keys(MAP).forEach(function(fn){
-    var orig=window[fn];
-    if(typeof orig!=='function') return;
-    window[fn]=function(){
-      return orig.apply(this, arguments).then(function(rows){
-        try{ if(Array.isArray(rows)) _sbmSeed(MAP[fn], rows); }catch(e){}
-        return rows;
-      });
-    };
-  });
-})();
 
 // ═══════════════════════════════════════════════════════════════
 // INIT
@@ -38531,13 +38330,11 @@ function tstCloudPush(force){
       TST_DATA.length=0;
       merged.forEach(function(r){ TST_DATA.push(r); });
       tstStoreSave();
-      var _tstRow={key:'TST_DATA', value:merged, categoria:SB_CATEGORIA, updated_at:new Date().toISOString()};
       return sbClient.from('app_settings').upsert(
-        _tstRow,
+        {key:'TST_DATA', value:merged, categoria:SB_CATEGORIA, updated_at:new Date().toISOString()},
         {onConflict:'key,categoria'}
       ).then(function(r2){
         _tstPushBusy=false;
-        if(!r2.error){ window._tstLastCloudTs=_tstRow.updated_at; try{ _sbmPut('app_settings',[_tstRow]); }catch(e){} }
         if(r2.error){
           console.error('[Tests] No se pudo subir:', r2.error.message||r2.error);
           tstSaveIndicator('error');
@@ -38561,26 +38358,36 @@ window.tstCloudPush=tstCloudPush;
 
 // ── BAJADA desde la nube (unión, nunca reemplazo) ──
 var _tstPullBusy=false;
-function tstCloudPull(){
+// v189: primero se consulta sólo updated_at; los datos completos se bajan
+// únicamente si cambiaron (o cada 30 min como control).
+function tstCloudPull(force){
   if(_tstPullBusy)return Promise.resolve(0);
   if(typeof sbClient==='undefined'||!sbClient||!sbCurrentUser)return Promise.resolve(0);
+  if(!force && !window._tstForcePull && typeof sbIsIdle==='function' && sbIsIdle()) return Promise.resolve(0);
+  var needFull = force || window._tstForcePull || !window._tstCloudStamp ||
+                 (Date.now()-(window._tstLastFull||0))>12*60*60*1000;   // v190
+  if(needFull) return _tstCloudPullFull();
   _tstPullBusy=true;
-  // v189: antes bajaba TODOS los registros de tests cada 30 s. Ahora primero
-  // consulta sólo la fecha de modificación y baja el contenido si cambió.
   return sbClient.from('app_settings').select('updated_at')
     .eq('key','TST_DATA').eq('categoria',SB_CATEGORIA).maybeSingle()
     .then(function(h){
-      var ts=h&&h.data&&h.data.updated_at;
-      if(h && !h.error && ts && window._tstLastCloudTs && _sbTs(ts)===_sbTs(window._tstLastCloudTs)){
-        return {_sinCambios:true};
-      }
-      return sbClient.from('app_settings').select('value,updated_at')
-        .eq('key','TST_DATA').eq('categoria',SB_CATEGORIA).maybeSingle();
-    })
+      _tstPullBusy=false;
+      var st=h&&h.data&&h.data.updated_at;
+      if(h&&!h.error&&String(st||'')===String(window._tstCloudStamp)) return 0;
+      return _tstCloudPullFull();
+    }).catch(function(){ _tstPullBusy=false; return 0; });
+}
+function _tstCloudPullFull(){
+  if(_tstPullBusy)return Promise.resolve(0);
+  _tstPullBusy=true;
+  return sbClient.from('app_settings').select('value,updated_at')
+    .eq('key','TST_DATA').eq('categoria',SB_CATEGORIA).maybeSingle()
     .then(function(res){
       _tstPullBusy=false;
-      if(res && res._sinCambios) return 0;
-      try{ if(res && res.data && res.data.updated_at) window._tstLastCloudTs=res.data.updated_at; }catch(e){}
+      if(res&&!res.error){
+        window._tstCloudStamp=String((res.data&&res.data.updated_at)||'');
+        window._tstLastFull=Date.now(); window._tstForcePull=false;
+      }
       var cloud=[];
       try{ if(res&&res.data&&Array.isArray(res.data.value)) cloud=res.data.value; }catch(e){}
       if(!cloud.length)return 0;
