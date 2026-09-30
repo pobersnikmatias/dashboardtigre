@@ -14472,6 +14472,72 @@ window.planMergeAll=planMergeAll;
 // Antes esto sólo corría dentro de la pestaña Planificación, así que los
 // cambios de estado de jugadores (Perfiles / Hoy) nunca llegaban al otro sin
 // recargar. Ahora refresca planificación Y perfiles, en cualquier vista.
+// ══ v192: FIN DEL BUCLE DE SINCRONIZACIÓN ═════════════════════════════════
+// Problema detectado en consola: al terminar un sync se llamaba a saveData(),
+// que volvía a disparar los cinco syncs → el dashboard se sincronizaba en
+// bucle sin parar, resubiendo TODAS las filas cada vez (1159 wellness, 986 PSE,
+// 148 ejercicios...). Eso saturaba la base (timeouts 57014) y quemaba cuota.
+// Ahora: guardar desde dentro de un sync NO vuelve a programar syncs.
+window._sbNoSchedule = false;
+function sbSaveLocalOnly(){
+  window._sbNoSchedule = true;
+  try{ if(typeof saveData==='function') saveData(); }
+  catch(e){ console.warn('sbSaveLocalOnly:', e); }
+  finally{ window._sbNoSchedule = false; }
+}
+window.sbSaveLocalOnly = sbSaveLocalOnly;
+
+// Comparación estable: el mismo contenido con las claves en otro orden dejaba
+// de coincidir y se resubía eternamente. Se ignoran las marcas internas.
+function sbCanon(o){
+  if(o===null||typeof o!=='object') return JSON.stringify(o===undefined?null:o);
+  if(Array.isArray(o)) return '['+o.map(sbCanon).join(',')+']';
+  return '{'+Object.keys(o).sort().filter(function(k){ return k!=='_dirty'&&k!=='_upd'; })
+    .map(function(k){ return JSON.stringify(k)+':'+sbCanon(o[k]); }).join(',')+'}';
+}
+window.sbCanon=sbCanon;
+
+// Quita filas repetidas ANTES de subirlas. Dos registros del mismo jugador y
+// fecha en un mismo upsert hacen que Postgres rechace el lote entero (21000).
+function sbDedupe(rows, keyFn, stampFn){
+  var by={}, order=[], dups=0;
+  (rows||[]).forEach(function(r){
+    var k=keyFn(r);
+    if(!(k in by)){ by[k]=r; order.push(k); return; }
+    dups++;
+    var a=stampFn?Number(stampFn(by[k])||0):0, b=stampFn?Number(stampFn(r)||0):0;
+    if(b>=a) by[k]=r;
+  });
+  if(dups) console.warn('[Supabase] '+dups+' fila(s) duplicada(s) unificada(s) antes de subir.');
+  return order.map(function(k){ return by[k]; });
+}
+window.sbDedupe=sbDedupe;
+
+// Sube por tandas: un upsert de 148 filas con imágenes excede el tiempo máximo
+// de Postgres (57014). En tandas chicas entra sin problema.
+function sbUpsertChunked(table, rows, opts, chunk){
+  chunk = chunk || 25;
+  var lotes=[];
+  for(var i=0;i<rows.length;i+=chunk) lotes.push(rows.slice(i,i+chunk));
+  var primerError=null;
+  return lotes.reduce(function(p, lote){
+    return p.then(function(){
+      return sbClient.from(table).upsert(lote, opts).then(function(r){
+        if(r&&r.error&&!primerError) primerError=r.error;
+      });
+    });
+  }, Promise.resolve()).then(function(){ return {data:null, error:primerError}; });
+}
+window.sbUpsertChunked=sbUpsertChunked;
+
+// ¿Hay que subir esta fila? Sólo si es MÁS NUEVA que la nube, o si no está.
+// Antes usaba >=, así que con sellos iguales resubía todo en cada vuelta.
+function sbDebeSubir(sello, selloNube, existeEnNube){
+  if(!existeEnNube) return true;
+  return Number(sello||0) > Number(selloNube||0);
+}
+window.sbDebeSubir=sbDebeSubir;
+
 // ══ v190: MEDIDOR DE EGRESO ════════════════════════════════════════════════
 // Cuenta los bytes que baja el dashboard desde Supabase, por tabla. Sirve para
 // comprobar el consumo sin esperar al panel (que se actualiza cada hora).
@@ -35036,6 +35102,7 @@ window.sbMigrateProfilesLocalToCloud = sbMigrateProfilesLocalToCloud;
 // Para no saturar: hacemos debounce de 1500ms.
 var _sbProfileSyncTimer = null;
 function sbScheduleProfileSync(){
+  if(window._sbNoSchedule) return;   // v192: no re-disparar desde dentro de un sync
   if(!sbReady) return;
   if(_sbProfileSyncTimer) clearTimeout(_sbProfileSyncTimer);
   _sbProfileSyncTimer = setTimeout(function(){
@@ -35240,6 +35307,7 @@ window.mcDelQueuePending=mcDelQueuePending;
 // ═══════════════════════════════════════════════════════════════
 var _sbMicroSyncTimer = null;
 function sbScheduleMicrocicloSync(){
+  if(window._sbNoSchedule) return;   // v192: no re-disparar desde dentro de un sync
   if(!sbReady) return;
   if(_sbMicroSyncTimer) clearTimeout(_sbMicroSyncTimer);
   _sbMicroSyncTimer = setTimeout(function(){
@@ -35257,7 +35325,7 @@ function sbScheduleMicrocicloSync(){
     console.log('[Supabase] Sync de microciclos (' + _toUp.length + ')');
     // Batch upsert: subimos todas las sesiones de una vez
     var payload = _toUp.map(_sbMicrocicloToPayload);
-    sbClient.from('microciclo').upsert(payload, { onConflict: 'week,day,categoria' }).then(function(res){
+    sbUpsertChunked('microciclo', sbDedupe(payload, function(p){ return (p.week||'')+'|'+(p.day||''); }), { onConflict: 'week,day,categoria' }, 30).then(function(res){
       if(res.error){
         console.error('[Supabase] Sync microciclos error:', res.error);
       } else {
@@ -35550,7 +35618,22 @@ function wellPseQueueStart(){
 }
 window.wellPseQueueStart=wellPseQueueStart;
 
+// v192: si falla, se reintenta con espera creciente y se abandona tras 5
+// intentos, en lugar de machacar la base cada 10 s indefinidamente.
+var _sbWpFallos=0;
+function sbReintentoWellPse(qué){
+  _sbWpFallos++;
+  if(_sbWpFallos>5){
+    console.warn('[Supabase] '+qué+': 5 intentos fallidos. Se deja de reintentar hasta el próximo cambio. Los datos siguen guardados localmente.');
+    return;
+  }
+  var espera=Math.min(10000*Math.pow(2,_sbWpFallos-1), 300000);
+  console.warn('[Supabase] '+qué+': reintento en '+Math.round(espera/1000)+' s.');
+  setTimeout(function(){ sbScheduleWellPseSync(); }, espera);
+}
+window.sbReintentoWellPse=sbReintentoWellPse;
 function sbScheduleWellPseSync(){
+  if(window._sbNoSchedule) return;   // v192
   if(!sbReady){
     if(_sbWellPseRetries<30){
       _sbWellPseRetries++;
@@ -35578,13 +35661,15 @@ function sbScheduleWellPseSync(){
         var wPayload = WELLNESS_DATA.map(_sbWellnessToPayload).filter(function(p){
           if(!p.date)return false;
           var k=(p.name||'')+'|'+(p.date||'');
-          if(!(k in enNube))return true;                       // no está: subir
-          return Number((p.fields&&p.fields._upd)||0) >= enNube[k];   // sólo si soy igual o más nuevo
+          // v192: sólo si soy MÁS NUEVO (con >= se resubían las 1159 filas siempre)
+          return sbDebeSubir((p.fields&&p.fields._upd), enNube[k], (k in enNube));
         });
-        if(!wPayload.length){ console.log('[Supabase] Wellness sin cambios para subir.'); return; }
+        wPayload = sbDedupe(wPayload, function(p){ return (p.name||'')+'|'+(p.date||''); },
+                            function(p){ return (p.fields&&p.fields._upd)||0; });
+        if(!wPayload.length){ _sbWpFallos=0; console.log('[Supabase] Wellness sin cambios para subir.'); return; }
         console.log('[Supabase] Sync wellness (' + wPayload.length + ' de ' + WELLNESS_DATA.length + ')');
-        sbClient.from('wellness_data').upsert(wPayload, { onConflict: 'name,date,categoria' }).then(function(res){
-          if(res.error){ console.error('[Supabase] Sync wellness error:', res.error); setTimeout(sbScheduleWellPseSync, 10000); }
+        sbUpsertChunked('wellness_data', wPayload, { onConflict: 'name,date,categoria' }, 200).then(function(res){
+          if(res.error){ console.error('[Supabase] Sync wellness error:', res.error); sbReintentoWellPse('wellness'); }
           else console.log('[Supabase] Sync wellness OK');
         });
       });
@@ -35601,13 +35686,14 @@ function sbScheduleWellPseSync(){
         var pPayload = PSE_DATA.map(_sbPseToPayload).filter(function(p){
           if(!p.date)return false;
           var k=(p.name||'')+'|'+(p.date||'')+'|'+(p.week||'')+'|'+(p.day||'');
-          if(!(k in enNubeP))return true;
-          return Number((p.fields&&p.fields._upd)||0) >= enNubeP[k];
+          return sbDebeSubir((p.fields&&p.fields._upd), enNubeP[k], (k in enNubeP));   // v192
         });
+        pPayload = sbDedupe(pPayload, function(p){ return (p.name||'')+'|'+(p.date||'')+'|'+(p.week||'')+'|'+(p.day||''); },
+                            function(p){ return (p.fields&&p.fields._upd)||0; });
         if(!pPayload.length){ console.log('[Supabase] PSE sin cambios para subir.'); return; }
         console.log('[Supabase] Sync PSE (' + pPayload.length + ' de ' + PSE_DATA.length + ')');
-        sbClient.from('pse_data').upsert(pPayload, { onConflict: 'name,date,week,day,categoria' }).then(function(res){
-          if(res.error){ console.error('[Supabase] Sync PSE error:', res.error); setTimeout(sbScheduleWellPseSync, 10000); }
+        sbUpsertChunked('pse_data', pPayload, { onConflict: 'name,date,week,day,categoria' }, 200).then(function(res){
+          if(res.error){ console.error('[Supabase] Sync PSE error:', res.error); sbReintentoWellPse('PSE'); }
           else console.log('[Supabase] Sync PSE OK');
         });
       });
@@ -35901,6 +35987,7 @@ window.sbGymSessionDelete=sbGymSessionDelete;
 // ── SYNC con debounce (Tanda 1 — los 4 juntos) ──
 var _sbTanda1SyncTimer = null;
 function sbScheduleTanda1Sync(){
+  if(window._sbNoSchedule) return;   // v192: no re-disparar desde dentro de un sync
   if(!sbReady) return;
   if(_sbTanda1SyncTimer) clearTimeout(_sbTanda1SyncTimer);
   _sbTanda1SyncTimer = setTimeout(function(){
@@ -35924,7 +36011,7 @@ function sbScheduleTanda1Sync(){
           // Reflejar el merge en memoria para no perder lo del compañero
           var idx = PLAN_WEEKS.indexOf(mine);
           if(idx>=0) PLAN_WEEKS[idx] = merged;
-          if(JSON.stringify(merged) !== JSON.stringify(theirs)) toUpload.push(merged);
+          if(sbCanon(merged) !== sbCanon(theirs)) toUpload.push(merged);   // v192: orden de claves estable
         });
         if(typeof planPreserveEditing==='function') planPreserveEditing();
         // Borrar de la nube lo que se eliminó acá
@@ -35941,14 +36028,14 @@ function sbScheduleTanda1Sync(){
         if(!toUpload.length){ console.log('[Supabase] plan_weeks sin cambios para subir.'); return; }
         var pPayload = toUpload.map(_sbPlanWeekToPayload);
         console.log('[Supabase] Sync plan_weeks (' + pPayload.length + ' de ' + PLAN_WEEKS.length + ')');
-        sbClient.from('plan_weeks').upsert(pPayload, { onConflict: 'name,created,categoria' }).then(function(res){
+        sbUpsertChunked('plan_weeks', sbDedupe(pPayload, function(p){ return (p.name||'')+'|'+(p.created||''); }), { onConflict: 'name,created,categoria' }, 10).then(function(res){
           if(res.error) console.error('[Supabase] Sync plan_weeks error:', res.error);
           else {
             console.log('[Supabase] Sync plan_weeks OK');
             // v146: limpiar la marca de "pendiente de subir". Si no se limpia,
             // el poller nunca puede detectar que el compañero borró una semana.
             toUpload.forEach(function(w){ delete w._dirty; });
-            try{ if(typeof saveData==='function') saveData(); }catch(e){}
+            sbSaveLocalOnly();   // v192
             try{ if(typeof planRenderWeeksList==='function') planRenderWeeksList(); }catch(e){}
           }
         });
@@ -36213,6 +36300,7 @@ function _sbEvalAliasesToPayloads(obj){
 // ── SYNC con debounce (Tanda 2a — los 4 juntos) ──
 var _sbTanda2aSyncTimer = null;
 function sbScheduleTanda2aSync(){
+  if(window._sbNoSchedule) return;   // v192: no re-disparar desde dentro de un sync
   if(!sbReady) return;
   if(_sbTanda2aSyncTimer) clearTimeout(_sbTanda2aSyncTimer);
   _sbTanda2aSyncTimer = setTimeout(function(){
@@ -36232,12 +36320,12 @@ function sbScheduleTanda2aSync(){
           });
           var envío = ePayload.filter(function(p){
             var k=String(p.id);
-            if(!(k in _gymCloudUpd)) return true;                       // no está: subir
-            return Number((p.data&&p.data._upd)||0) >= _gymCloudUpd[k];  // sólo si soy igual o más nuevo
+            return sbDebeSubir((p.data&&p.data._upd), _gymCloudUpd[k], (k in _gymCloudUpd));   // v192
           });
+          envío = sbDedupe(envío, function(p){ return String(p.id); }, function(p){ return (p.data&&p.data._upd)||0; });
           if(!envío.length){ console.log('[Supabase] gym_exercises sin cambios para subir.'); return; }
           console.log('[Supabase] Sync gym_exercises (' + envío.length + ' de ' + ePayload.length + ')');
-          sbClient.from('gym_exercises').upsert(envío, { onConflict: 'id' }).then(function(res){
+          sbUpsertChunked('gym_exercises', envío, { onConflict: 'id' }, 15).then(function(res){
             if(res.error) console.error('[Supabase] Sync gym_exercises error:', res.error);
             else console.log('[Supabase] Sync gym_exercises OK');
           });
@@ -37063,6 +37151,7 @@ function _sbMatchFromRow(row){
 window._sbDrillsSynced = false;
 var _sbTanda2bSyncTimer = null;
 function sbScheduleTanda2bSync(){
+  if(window._sbNoSchedule) return;   // v192: no re-disparar desde dentro de un sync
   if(!sbReady) return;
   if(_sbTanda2bSyncTimer) clearTimeout(_sbTanda2bSyncTimer);
   _sbTanda2bSyncTimer = setTimeout(function(){
@@ -37121,7 +37210,7 @@ function sbScheduleTanda2bSync(){
           // 3) Subir el estado actual (nunca incluye ids borrados)
           if(dPayload.length){
             console.log('[Supabase] Sync drills_exercises (' + dPayload.length + ')');
-            sbClient.from('drills_exercises').upsert(dPayload, { onConflict: 'id' }).then(function(r2){
+            sbUpsertChunked('drills_exercises', sbDedupe(dPayload, function(p){return String(p.id);}, function(p){return (p.data&&p.data._upd)||0;}), { onConflict: 'id' }, 15).then(function(r2){
               if(r2.error) console.error('[Supabase] Sync drills_exercises error:', r2.error);
               else {
                 console.log('[Supabase] Sync drills_exercises OK');
@@ -37616,6 +37705,7 @@ function _sbApplySettingRow(row){
 var _sbTanda3SyncTimer = null;
 var _sbTanda3Retries = 0;
 function sbScheduleTanda3Sync(){
+  if(window._sbNoSchedule) return;   // v192
   if(!sbReady){
     if(_sbTanda3Retries < 30){ _sbTanda3Retries++; setTimeout(sbScheduleTanda3Sync, 4000); }
     return;
