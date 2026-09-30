@@ -14555,7 +14555,15 @@ function _sbDeltaKey(row,cols){
 function sbDeltaSelect(table, keyCols, extra, opts){
   opts=opts||{};
   var ck=table+(opts.cacheTag?('#'+opts.cacheTag):'');
-  var c=_sbDelta[ck]||(_sbDelta[ck]={rows:null,stamp:null,lastFull:0});
+  var c=_sbDelta[ck]||(_sbDelta[ck]={rows:null,stamp:null,lastFull:0,inflight:null});
+  // v191: el guardado y el refresco automático piden la misma tabla casi a la
+  // vez. Si ya hay una consulta en curso, se comparte en lugar de duplicarla.
+  // Cada uno recibe SU PROPIA copia: si compartieran el mismo objeto, lo que
+  // modifica el merge de uno alteraría los datos del otro.
+  if(c.inflight) return c.inflight.then(function(r){
+    if(!r||!r.data) return r;
+    return {data: JSON.parse(JSON.stringify(r.data)), error: r.error||null};
+  });
   function base(sel){
     var q=sbClient.from(table).select(sel).eq('categoria',SB_CATEGORIA);
     return extra?extra(q):q;
@@ -14578,8 +14586,12 @@ function sbDeltaSelect(table, keyCols, extra, opts){
       return r;
     });
   }
-  if(!c.rows||opts.forceFull||window._sbDeltaForceFull||(Date.now()-c.lastFull)>_sbDeltaFullMs(ck)) return full();
-  return base(keyCols.join(',')+',updated_at').then(function(r){
+  function done(r){ c.inflight=null; return r; }
+  if(!c.rows||opts.forceFull||window._sbDeltaForceFull||(Date.now()-c.lastFull)>_sbDeltaFullMs(ck)){
+    c.inflight=full().then(done, function(e){ c.inflight=null; throw e; });
+    return c.inflight;
+  }
+  c.inflight=base(keyCols.join(',')+',updated_at').then(function(r){
     if(!r||r.error||!Array.isArray(r.data)) return r;
     var present={}, firstVals={}, nChanged=0;
     r.data.forEach(function(lr){
@@ -14602,7 +14614,8 @@ function sbDeltaSelect(table, keyCols, extra, opts){
       }); });
       return out();
     });
-  }).catch(function(e){ return {data:null, error:e}; });
+  }).then(done, function(e){ c.inflight=null; return {data:null, error:e}; });
+  return c.inflight;
 }
 window.sbDeltaSelect=sbDeltaSelect;
 
@@ -34823,9 +34836,7 @@ function sbInjectUserBadge(){
 
 function sbProfilesFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('player_profiles')
-    .select('*')
-    .eq('categoria', SB_CATEGORIA)
+  return sbDeltaSelect('player_profiles',['id'])   // v191: deja la caché lista
     .then(function(res){
       if(res.error) throw res.error;
       return res.data || [];
@@ -35557,11 +35568,12 @@ function sbScheduleWellPseSync(){
       // completo tal como estaba en memoria: si el compañero tenía una copia
       // vieja, su sync borraba de la nube los minutos que vos acababas de
       // cargar. Ahora sólo sube lo que es más nuevo que lo que ya está.
-      sbClient.from('wellness_data').select('*').eq('categoria', SB_CATEGORIA).then(function(cw){
+      // v191: sólo nombre, fecha y sello. Antes bajaba TODO el historial de
+      // wellness en cada guardado.
+      sbClient.from('wellness_data').select('name,date,upd:fields->_upd').eq('categoria', SB_CATEGORIA).then(function(cw){
         var enNube={};
         if(cw && cw.data) cw.data.forEach(function(row){
-          var r=_sbWellnessFromRow(row);
-          enNube[(r.name||'')+'|'+(r.date||'')]=Number((row.fields&&row.fields._upd)||0);
+          enNube[(row.name||'')+'|'+(row.date||'')]=Number(row.upd||0);
         });
         var wPayload = WELLNESS_DATA.map(_sbWellnessToPayload).filter(function(p){
           if(!p.date)return false;
@@ -35579,11 +35591,12 @@ function sbScheduleWellPseSync(){
     }
     // PSE
     if(typeof PSE_DATA!=='undefined' && Array.isArray(PSE_DATA) && PSE_DATA.length){
-      sbClient.from('pse_data').select('*').eq('categoria', SB_CATEGORIA).then(function(cp){
+      // v191: sólo las claves y el sello (antes, todo el historial de PSE)
+      sbClient.from('pse_data').select('name,date,week,day,upd:fields->_upd').eq('categoria', SB_CATEGORIA).then(function(cp){
         var enNubeP={};
         if(cp && cp.data) cp.data.forEach(function(row){
           var k=(row.name||'')+'|'+(row.date||'')+'|'+(row.week||'')+'|'+(row.day||'');
-          enNubeP[k]=Number((row.fields&&row.fields._upd)||0);
+          enNubeP[k]=Number(row.upd||0);
         });
         var pPayload = PSE_DATA.map(_sbPseToPayload).filter(function(p){
           if(!p.date)return false;
@@ -35729,7 +35742,7 @@ window.sbMigrateWellPseLocalToCloud = sbMigrateWellPseLocalToCloud;
 // Supabase: tabla plan_weeks con (name, created, data jsonb), UNIQUE(name, created, categoria)
 function sbPlanWeeksFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA)
+  return sbDeltaSelect('plan_weeks',['name','created'])   // v191
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbPlanWeekToPayload(p){
@@ -35897,7 +35910,7 @@ function sbScheduleTanda1Sync(){
       // v143: no subir el array completo a ciegas. Primero se lee la nube y se
       // fusiona día por día; recién ahí se sube lo que corresponde. Sin esto,
       // el dispositivo que guardaba último pisaba el trabajo del otro.
-      sbClient.from('plan_weeks').select('*').eq('categoria', SB_CATEGORIA).then(function(r){
+      sbDeltaSelect('plan_weeks',['name','created']).then(function(r){   // v191
         var cloud = (r && r.data) ? r.data.map(_sbPlanWeekFromRow) : [];
         var cloudByKey = {};
         cloud.forEach(function(cw){ cloudByKey[planWeekKey(cw)] = cw; });
@@ -36212,9 +36225,10 @@ function sbScheduleTanda2aSync(){
       var ePayload = GYM_EXERCISES.map(_sbGymExerciseToPayload).filter(function(p){return p.id;});
       if(ePayload.length){
         // v172: comparar contra la nube antes de subir
-        sbClient.from('gym_exercises').select('*').eq('categoria', SB_CATEGORIA).then(function(ce){
+        // v191: sólo id y sello (antes bajaba los ejercicios con sus imágenes)
+        sbClient.from('gym_exercises').select('id,upd:data->_upd').eq('categoria', SB_CATEGORIA).then(function(ce){
           if(ce && ce.data) ce.data.forEach(function(row){
-            _gymCloudUpd[String(row.id)] = Number((row.data&&row.data._upd)||0);
+            _gymCloudUpd[String(row.id)] = Number(row.upd||0);
           });
           var envío = ePayload.filter(function(p){
             var k=String(p.id);
@@ -36444,7 +36458,7 @@ window.sbMigrateTanda2aLocalToCloud = sbMigrateTanda2aLocalToCloud;
 // Supabase: tabla drills_exercises con id INTEGER PK
 function sbDrillsFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('drills_exercises').select('*').eq('categoria', SB_CATEGORIA)
+  return sbDeltaSelect('drills_exercises',['id'])   // v191
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbDrillToPayload(d){
