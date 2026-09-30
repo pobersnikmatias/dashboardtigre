@@ -7768,10 +7768,14 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <label class="btn bb" style="font-size:10px;padding:5px 12px;cursor:pointer;margin:0">📂 Importar XLSX<input id="nut-xlsx-file" type="file" accept=".xlsx,.xls" onchange="nutXlsxLoad(event)" style="display:none"></label>
         <button id="nut-map-toggle-btn" class="btn bc" onclick="nutMapToggle()" style="font-size:10px;padding:5px 12px" title="Configurar qué fila del Excel corresponde a cada métrica">⚙ Mapeo de filas</button>
+        <button class="btn bc" onclick="nutImpToggle()" style="font-size:10px;padding:5px 12px" title="Ver las últimas cargas de Excel y deshacer una">🕘 Últimas cargas</button>
         <button class="btn bg" onclick="nutAddManualStart()" style="font-size:10px;padding:5px 12px">➕ Nueva medición manual</button>
         <button class="btn bc" onclick="nutClearAll()" style="font-size:10px;padding:5px 12px;color:#E24B4A;border-color:#E24B4A55">🗑 Borrar todo</button>
       </div>
     </div>
+
+    <!-- Últimas cargas de Excel (oculto por defecto) -->
+    <div id="nut-imp-area" style="display:none;margin-bottom:12px;background:#fffdf5;border:1px solid #f0e2c0;border-radius:6px;padding:10px 12px"></div>
 
     <!-- Mapeo de filas (oculto por defecto) -->
     <div id="nut-map-area" style="display:none;margin-bottom:12px;background:#f8faff;border:1px solid #d0dff5;border-radius:6px;padding:10px 12px">
@@ -32182,6 +32186,105 @@ function nutMatchPlayer(rawName){
   return null;
 }
 
+// ══ v193: LECTURA ROBUSTA DE NÚMEROS DEL EXCEL ════════════════════════════
+// Causa del "4,0 en todos los jugadores": parseFloat("4,37") devuelve 4, porque
+// corta en la coma. Si el Excel (o una exportación suya) guarda los decimales
+// con coma o como texto, todas las métricas quedaban truncadas — y en IM/O se
+// notaba porque 4,37 → 4. Esta función entiende ambos separadores.
+function nutNum(v){
+  if(v==null||v==='') return NaN;
+  if(typeof v==='number') return isFinite(v)?v:NaN;
+  if(v instanceof Date) return NaN;
+  var t=String(v).trim().replace(/\s|%/g,'');
+  if(!t) return NaN;
+  var coma=t.lastIndexOf(','), punto=t.lastIndexOf('.');
+  if(coma>=0 && punto>=0){
+    // El separador decimal es el que aparece último: "1.234,56" o "1,234.56"
+    if(coma>punto) t=t.replace(/\./g,'').replace(',','.');
+    else t=t.replace(/,/g,'');
+  } else if(coma>=0){
+    // Una sola coma: decimal ("4,37"), salvo que sea separador de miles ("1,234")
+    t=(/,\d{3}$/.test(t) && t.replace(/[^\d]/g,'').length>3) ? t.replace(/,/g,'') : t.replace(',','.');
+  }
+  var n=parseFloat(t);
+  return isFinite(n)?n:NaN;
+}
+window.nutNum=nutNum;
+
+// ── Historial de importaciones (para poder deshacer la última carga) ──
+// Se guarda sólo en este dispositivo: es una red de seguridad local, no hace
+// falta sincronizarla ni consume cuota.
+var NUT_IMP_KEY='nut_import_hist_v1', NUT_IMP_MAX=5;
+function nutImpHist(){
+  try{ var h=JSON.parse(localStorage.getItem(NUT_IMP_KEY)||'[]'); return Array.isArray(h)?h:[]; }
+  catch(e){ return []; }
+}
+function nutImpGuardar(entrada){
+  try{
+    var h=nutImpHist(); h.unshift(entrada);
+    while(h.length>NUT_IMP_MAX) h.pop();
+    localStorage.setItem(NUT_IMP_KEY, JSON.stringify(h));
+  }catch(e){
+    console.warn('No se pudo guardar el historial de importaciones (espacio lleno):', e);
+    try{ localStorage.setItem(NUT_IMP_KEY, JSON.stringify([entrada])); }catch(e2){}
+  }
+}
+function nutDeshacerImport(id){
+  var h=nutImpHist(), i=h.findIndex(function(x){ return String(x.id)===String(id); });
+  if(i<0){ alert('No encontré esa carga en el historial.'); return; }
+  var e=h[i];
+  var cuando=new Date(e.id).toLocaleString('es-AR');
+  if(!confirm('Deshacer la carga del '+cuando+'\n\nArchivo: '+(e.file||'(sin nombre)')+'\n'+
+              e.imported+' mediciones · '+e.players+' jugadores\n\n'+
+              'Los datos nutricionales vuelven a como estaban ANTES de esa carga.\n'+
+              (i>0?('\n⚠ También se deshacen las '+i+' carga(s) posteriores.\n'):'')+
+              '\n¿Continuar?')) return;
+  try{
+    NUTRITION_DATA=JSON.parse(e.antes);
+  }catch(err){ alert('El respaldo de esa carga está dañado. No se deshizo nada.'); return; }
+  // Se descartan esta carga y las posteriores
+  try{ localStorage.setItem(NUT_IMP_KEY, JSON.stringify(h.slice(i+1))); }catch(err){}
+  saveData();
+  if(typeof nutRender==='function') nutRender();
+  alert('Listo. Los datos nutricionales volvieron al estado previo a esa carga.');
+}
+window.nutDeshacerImport=nutDeshacerImport;
+
+// Panel "Últimas cargas"
+function nutImpToggle(){
+  var p=document.getElementById('nut-imp-area'); if(!p) return;
+  var abrir=p.style.display==='none';
+  p.style.display=abrir?'block':'none';
+  if(abrir) nutImpRender();
+}
+window.nutImpToggle=nutImpToggle;
+function nutImpRender(){
+  var p=document.getElementById('nut-imp-area'); if(!p) return;
+  var h=nutImpHist();
+  var esc=function(t){ return String(t==null?'':t).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+  var html='<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px">'+
+    '<div style="font-size:11px;font-weight:700;color:#0C447C">🕘 Últimas cargas de Excel</div>'+
+    '<button class="btn bc" onclick="nutImpToggle()" style="font-size:10px;padding:3px 10px">✕ Cerrar</button></div>';
+  if(!h.length){
+    html+='<div style="font-size:11px;color:#666">Todavía no hay cargas registradas en este dispositivo. '+
+          'A partir de ahora, cada importación queda acá y se puede deshacer.</div>';
+  } else {
+    html+='<div style="font-size:10px;color:#666;margin-bottom:6px">Deshacer una carga devuelve los datos nutricionales al estado anterior. Se guardan las últimas '+NUT_IMP_MAX+'.</div>';
+    h.forEach(function(e,i){
+      html+='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:5px;margin-bottom:5px;background:'+(i===0?'#f4f9ff':'#fff')+'">'+
+        '<div style="font-size:11px;color:#0D1B2A;min-width:0">'+
+          '<strong>'+esc(e.file||'(sin nombre)')+'</strong>'+(i===0?' <span style="color:#1D9E75;font-size:10px">· última</span>':'')+
+          '<div style="font-size:10px;color:#666">'+esc(new Date(e.id).toLocaleString('es-AR'))+' · '+e.imported+' mediciones · '+e.players+' jugadores'+
+          (e.aviso?'<br><span style="color:#B45309">⚠ '+esc(e.aviso)+'</span>':'')+'</div>'+
+        '</div>'+
+        '<button class="btn bc" onclick="nutDeshacerImport(\''+esc(e.id)+'\')" style="font-size:10px;padding:4px 10px;color:#E24B4A;border-color:#E24B4A55;white-space:nowrap">↩ Deshacer</button>'+
+      '</div>';
+    });
+  }
+  p.innerHTML=html;
+}
+window.nutImpRender=nutImpRender;
+
 // ── Importar XLSX ──
 function nutXlsxLoad(ev){
   var file=ev.target.files[0]; if(!file){ev.target.value='';return;}
@@ -32190,7 +32293,7 @@ function nutXlsxLoad(ev){
   r.onload=function(e){
     try{
       var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true});
-      nutXlsxProcess(wb);
+      nutXlsxProcess(wb, file.name);   // v193: guardamos el nombre para el historial
     }catch(err){
       console.error(err);
       alert('Error leyendo el Excel: '+err.message);
@@ -32284,10 +32387,15 @@ function nutMapUpdateBtnBadge(){
   btn.innerHTML='⚙ Mapeo de filas'+(n>0?' <span style="background:#EF9F27;color:#fff;border-radius:8px;padding:0 5px;font-size:9px;margin-left:3px">'+n+'</span>':'');
 }
 
-function nutXlsxProcess(wb){
+function nutXlsxProcess(wb, fileName){
   // Saltar las 3 primeras hojas (REFERENCIAS, COMPARACIÓN, SEMAFORO)
   var sheets=wb.SheetNames.slice(3);
   var imported=0, players_matched=0, players_skip=[], dates_added={};
+  // v193: respaldo del estado previo, para poder deshacer esta carga entera
+  var _antes=JSON.stringify(NUTRITION_DATA||{});
+  // v193: control de decimales. Si TODOS los IM/O y pesos llegan enteros, es
+  // señal de que el archivo trae los decimales con coma como texto.
+  var _chk={imo:[], peso:[], adiposa:[]};
 
   // Mapeo de filas configurable. Cae al default si NUT_COL_MAP está vacío.
   // 1-indexed (como Excel) → convertimos a 0-indexed (idx en array).
@@ -32339,13 +32447,16 @@ function nutXlsxProcess(wb){
     for(var c=1;c<dateRow.length;c++){
       var iso=toISO(dateRow[c]);
       if(!iso)continue; // sin fecha válida
-      var adiposa =parseFloat(adipoRow[c]);
-      var muscular=parseFloat(muscRow[c]);
-      var residual=parseFloat(residRow[c]);
-      var osea    =parseFloat(oseaRow[c]);
-      var peso    =parseFloat(pesoRow[c]);
-      var imo     =parseFloat(imoRow[c]);
-      var suma6   =parseFloat(suma6Row[c]);
+      var adiposa =nutNum(adipoRow[c]);   // v193: entiende "4,37" y "4.37"
+      var muscular=nutNum(muscRow[c]);
+      var residual=nutNum(residRow[c]);
+      var osea    =nutNum(oseaRow[c]);
+      var peso    =nutNum(pesoRow[c]);
+      var imo     =nutNum(imoRow[c]);
+      var suma6   =nutNum(suma6Row[c]);
+      if(!isNaN(imo))_chk.imo.push(imo);
+      if(!isNaN(peso))_chk.peso.push(peso);
+      if(!isNaN(adiposa))_chk.adiposa.push(adiposa);
       // Si todos los valores son inválidos, saltar
       var hasAny=[adiposa,muscular,residual,osea,peso,imo,suma6].some(function(v){return !isNaN(v)&&v!==0;});
       if(!hasAny)continue;
@@ -32371,7 +32482,28 @@ function nutXlsxProcess(wb){
   });
 
   saveData();
+
+  // v193: aviso si los decimales se perdieron (todos los valores enteros)
+  var aviso='';
+  function todosEnteros(a){ return a.length>=5 && a.every(function(v){ return Math.abs(v-Math.round(v))<1e-9; }); }
+  if(todosEnteros(_chk.imo) || (todosEnteros(_chk.peso)&&todosEnteros(_chk.adiposa))){
+    aviso='Todos los valores llegaron sin decimales (por ejemplo, IM/O en 4,0). '+
+          'Suele pasar cuando el Excel guarda los números como texto. '+
+          'Revisá la carga y, si está mal, deshacela desde "Últimas cargas".';
+  }
+  var fueraRango=_chk.imo.filter(function(v){ return v<2||v>7; }).length;
+  if(!aviso && fueraRango>0 && _chk.imo.length){
+    aviso=fueraRango+' valor(es) de IM/O fuera del rango esperable (2 a 7). Verificá el mapeo de filas.';
+  }
+
+  // v193: queda registrada la carga, con el estado previo, para poder deshacerla
+  nutImpGuardar({ id:Date.now(), file:fileName||'', imported:imported,
+                  players:players_matched, aviso:aviso, antes:_antes });
+  if(typeof nutImpRender==='function' && document.getElementById('nut-imp-area') &&
+     document.getElementById('nut-imp-area').style.display!=='none') nutImpRender();
+
   var msg=imported+' medicion'+(imported!==1?'es':'')+' importadas · '+players_matched+' jugadores matcheados · '+Object.keys(dates_added).length+' fechas distintas.';
+  if(aviso) msg='⚠ '+aviso+'\n\n'+msg;
   if(players_skip.length){
     msg+='\n\n⚠ Hojas saltadas:\n'+players_skip.join('\n');
     msg+='\n\nLos nombres no matcheados los podés crear primero en la pestaña de perfiles, o ajustar el nombre del perfil para que coincida.';
