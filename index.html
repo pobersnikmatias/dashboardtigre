@@ -14619,13 +14619,140 @@ function _sbDeltaFullMs(ck){
   var h=0; for(var i=0;i<ck.length;i++) h=(h*31+ck.charCodeAt(i))%97;
   return SB_DELTA_FULL_MS + h*60*1000;
 }
+// ══ v194: CACHÉ PERSISTENTE (IndexedDB) ═══════════════════════════════════
+// Hasta ahora la caché de sincronización vivía en memoria: al recargar la
+// página se perdía y había que bajar de nuevo la biblioteca entera (~3 MB por
+// las imágenes de los ejercicios). Era el 71% del egreso medido.
+// Ahora las filas quedan guardadas en el navegador junto con su updated_at.
+// Al recargar se pide sólo la lista liviana y se descargan únicamente los
+// ejercicios que cambiaron desde la última vez: ~20 KB en lugar de 3 MB.
+// Si la caché está vieja, corrupta o incompleta, se descarta y se baja todo:
+// nunca puede mostrar datos que la nube ya no tenga.
+var SB_CACHE_DB='sbDeltaCache', SB_CACHE_STORE='tablas', SB_CACHE_VER=1;
+var SB_CACHE_MAX_DIAS=7;          // más vieja que esto: se ignora
+var SB_CACHE_MAX_BYTES=12*1024*1024;
+var _sbCacheDbP=null;
+function _sbCacheDb(){
+  if(_sbCacheDbP) return _sbCacheDbP;
+  _sbCacheDbP=new Promise(function(res,rej){
+    try{
+      if(typeof indexedDB==='undefined') return rej(new Error('sin IndexedDB'));
+      var rq=indexedDB.open(SB_CACHE_DB, SB_CACHE_VER);
+      rq.onupgradeneeded=function(){
+        var db=rq.result;
+        if(!db.objectStoreNames.contains(SB_CACHE_STORE)) db.createObjectStore(SB_CACHE_STORE);
+      };
+      rq.onsuccess=function(){ res(rq.result); };
+      rq.onerror=function(){ rej(rq.error||new Error('IndexedDB')); };
+    }catch(e){ rej(e); }
+  }).catch(function(e){ console.warn('[Caché] IndexedDB no disponible:', e&&e.message); return null; });
+  return _sbCacheDbP;
+}
+// Backend reemplazable (las pruebas inyectan uno en memoria)
+var _sbCacheBackend={
+  load:function(k){
+    return _sbCacheDb().then(function(db){
+      if(!db) return null;
+      return new Promise(function(res){
+        try{
+          var tx=db.transaction(SB_CACHE_STORE,'readonly'), rq=tx.objectStore(SB_CACHE_STORE).get(k);
+          rq.onsuccess=function(){ res(rq.result||null); };
+          rq.onerror=function(){ res(null); };
+        }catch(e){ res(null); }
+      });
+    }).catch(function(){ return null; });
+  },
+  save:function(k,v){
+    return _sbCacheDb().then(function(db){
+      if(!db) return false;
+      return new Promise(function(res){
+        try{
+          var tx=db.transaction(SB_CACHE_STORE,'readwrite');
+          tx.objectStore(SB_CACHE_STORE).put(v,k);
+          tx.oncomplete=function(){ res(true); };
+          tx.onerror=function(){ res(false); };
+          tx.onabort=function(){ res(false); };
+        }catch(e){ res(false); }
+      });
+    }).catch(function(){ return false; });
+  },
+  clear:function(){
+    return _sbCacheDb().then(function(db){
+      if(!db) return false;
+      return new Promise(function(res){
+        try{
+          var tx=db.transaction(SB_CACHE_STORE,'readwrite');
+          tx.objectStore(SB_CACHE_STORE).clear();
+          tx.oncomplete=function(){ res(true); };
+          tx.onerror=function(){ res(false); };
+        }catch(e){ res(false); }
+      });
+    }).catch(function(){ return false; });
+  }
+};
+function _sbCacheBe(){ return window._sbCacheBackendTest || _sbCacheBackend; }
+
+// Clave: tabla + categoría + proyecto. Así no se mezclan categorías ni bases.
+function _sbCacheKey(ck){
+  var proy='';
+  try{ proy=(typeof SUPABASE_URL!=='undefined'&&SUPABASE_URL)?String(SUPABASE_URL).slice(-28):''; }catch(e){}
+  return ck+'::'+(typeof SB_CATEGORIA!=='undefined'?SB_CATEGORIA:'')+'::'+proy;
+}
+// Leer del disco a memoria. Una sola vez por tabla y sesión.
+function _sbCacheHidratar(ck, c){
+  if(c.hidratada) return Promise.resolve(c);
+  if(c._hidP) return c._hidP;
+  c._hidP=_sbCacheBe().load(_sbCacheKey(ck)).then(function(g){
+    c.hidratada=true; c._hidP=null;
+    if(!g||!g.rows||typeof g.rows!=='object') return c;
+    var edad=Date.now()-Number(g.savedAt||0);
+    if(!(edad>=0) || edad>SB_CACHE_MAX_DIAS*86400000) return c;   // vieja: se descarta
+    if(g.ver!==SB_CACHE_VER) return c;
+    c.rows=g.rows; c.stamp=g.stamp||{};
+    c.lastFull=Number(g.lastFull||0);
+    // Coherencia: toda fila guardada necesita su sello; si no, se descarta todo
+    var ok=Object.keys(c.rows).every(function(k){ return typeof c.rows[k]==='string' && (k in c.stamp); });
+    if(!ok){ c.rows=null; c.stamp=null; c.lastFull=0; }
+    return c;
+  }).catch(function(){ c.hidratada=true; c._hidP=null; return c; });
+  return c._hidP;
+}
+// Escribir a disco, agrupando ráfagas de cambios
+function _sbCachePersistir(ck, c){
+  if(c._guardaT) clearTimeout(c._guardaT);
+  c._guardaT=setTimeout(function(){
+    c._guardaT=null;
+    if(!c.rows) return;
+    var bytes=0, k;
+    for(k in c.rows){ bytes+=c.rows[k].length; if(bytes>SB_CACHE_MAX_BYTES) return; }
+    _sbCacheBe().save(_sbCacheKey(ck), {
+      ver:SB_CACHE_VER, rows:c.rows, stamp:c.stamp, lastFull:c.lastFull, savedAt:Date.now()
+    });
+  }, 3000);
+}
+// Vaciar la caché a mano (consola): sbCacheBorrar()
+function sbCacheBorrar(){
+  Object.keys(_sbDelta).forEach(function(k){
+    var c=_sbDelta[k]; c.rows=null; c.stamp=null; c.lastFull=0; c.hidratada=false;
+  });
+  return _sbCacheBe().clear().then(function(ok){
+    console.log(ok?'Caché local borrada. La próxima lectura baja todo de nuevo.':'No se pudo borrar la caché.');
+    return ok;
+  });
+}
+window.sbCacheBorrar=sbCacheBorrar;
+
 function _sbDeltaKey(row,cols){
   return cols.map(function(c){ return String(row[c]==null?'':row[c]); }).join('\u0001');
 }
 function sbDeltaSelect(table, keyCols, extra, opts){
   opts=opts||{};
   var ck=table+(opts.cacheTag?('#'+opts.cacheTag):'');
-  var c=_sbDelta[ck]||(_sbDelta[ck]={rows:null,stamp:null,lastFull:0,inflight:null});
+  var c=_sbDelta[ck]||(_sbDelta[ck]={rows:null,stamp:null,lastFull:0,inflight:null,hidratada:false});
+  // v194: primero intentamos reusar lo guardado en el navegador
+  if(!c.hidratada && !c.rows){
+    return _sbCacheHidratar(ck,c).then(function(){ return sbDeltaSelect(table,keyCols,extra,opts); });
+  }
   // v191: el guardado y el refresco automático piden la misma tabla casi a la
   // vez. Si ya hay una consulta en curso, se comparte en lugar de duplicarla.
   // Cada uno recibe SU PROPIA copia: si compartieran el mismo objeto, lo que
@@ -14652,6 +14779,7 @@ function sbDeltaSelect(table, keyCols, extra, opts){
           c.rows[k]=JSON.stringify(row); c.stamp[k]=String(row.updated_at||'');
         });
         c.lastFull=Date.now();
+        _sbCachePersistir(ck,c);   // v194
       }
       return r;
     });
@@ -14670,8 +14798,9 @@ function sbDeltaSelect(table, keyCols, extra, opts){
         firstVals[String(lr[keyCols[0]])]=true; nChanged++;
       }
     });
-    Object.keys(c.rows).forEach(function(k){ if(!present[k]){ delete c.rows[k]; delete c.stamp[k]; } });
-    if(!nChanged) return out();
+    var borradas=0;
+    Object.keys(c.rows).forEach(function(k){ if(!present[k]){ delete c.rows[k]; delete c.stamp[k]; borradas++; } });
+    if(!nChanged){ if(borradas) _sbCachePersistir(ck,c); return out(); }
     var vals=Object.keys(firstVals);
     if(vals.length>60) return full();
     var chunks=[]; for(var i=0;i<vals.length;i+=30) chunks.push(vals.slice(i,i+30));
@@ -14682,6 +14811,7 @@ function sbDeltaSelect(table, keyCols, extra, opts){
         if(!present[k]) return;
         c.rows[k]=JSON.stringify(row); c.stamp[k]=String(row.updated_at||'');
       }); });
+      _sbCachePersistir(ck,c);   // v194
       return out();
     });
   }).then(done, function(e){ c.inflight=null; return {data:null, error:e}; });
