@@ -38967,7 +38967,7 @@ function vbtRMConfianza(prof){
   var rango=prof.maxW-prof.minW;
   var extrapol=prof.oneRM/prof.maxW;          // cuántas veces el peso más alto medido
   var problemas=[];
-  if(prof.n<3) problemas.push('sólo '+prof.n+' cargas');
+  if(prof.n<3) problemas.push('sólo '+prof.n+' carga'+(prof.n===1?'':'s')+' distinta'+(prof.n===1?'':'s'));
   if(rango<25) problemas.push('rango de pesos estrecho ('+Math.round(rango)+' kg)');
   if(extrapol>2.2) problemas.push('extrapola '+extrapol.toFixed(1)+'× el peso más alto');
   if(prof.r2<0.9 && prof.n>2) problemas.push('ajuste bajo');
@@ -38976,29 +38976,144 @@ function vbtRMConfianza(prof){
 }
 window.vbtRMConfianza=vbtRMConfianza;
 
+// ══ v195: %1RM DESDE LA TABLA + PERFIL ROBUSTO ════════════════════════════
+// Tres cambios pedidos:
+//  1) El %1RM de la calculadora sale de la tabla Jovanovic/VBT del ejercicio
+//     (la misma de Sesiones). Para una velocidad objetivo, el % es IGUAL para
+//     todos: lo único que cambia entre jugadores son los kg.
+//  2) El 1RM del perfil se proyecta hasta la velocidad que la tabla marca como
+//     100% (0,32 m/s en Back Squat), no hasta el 0,17 genérico de antes, que
+//     extrapolaba de más e inflaba el 1RM.
+//  3) El perfil agrupa las series por peso y usa la MEDIANA de MPV ponderada
+//     por recencia: una repetición con un descenso raro ya no arrastra la recta,
+//     y las sesiones recientes pesan más que las viejas.
+
+// Velocidad a la que la tabla del ejercicio ubica el 100% del 1RM
+function vbtMpvAl100(ex){
+  var t=(typeof getVbtTable==='function')?getVbtTable(ex):null;
+  if(t&&t.length){
+    for(var i=0;i<t.length;i++){ if(Number(t[i].pct)===100 && t[i].vmp!=null) return Number(t[i].vmp); }
+    // Sin fila de 100%: se extrapola desde las dos filas de mayor %
+    var ord=t.filter(function(r){return r.vmp!=null;}).slice().sort(function(a,b){return b.pct-a.pct;});
+    if(ord.length>=2){
+      var p1=ord[0], p2=ord[1];
+      var m=(p1.vmp-p2.vmp)/(p1.pct-p2.pct);
+      var v=p1.vmp+m*(100-p1.pct);
+      if(v>0) return v;
+    }
+  }
+  return (typeof vbtV1rmOf==='function')?vbtV1rmOf(ex):0.3;
+}
+window.vbtMpvAl100=vbtMpvAl100;
+
+// %1RM que corresponde a una MPV, según la tabla del ejercicio.
+// Interpola entre las filas publicadas; fuera de rango, extrapola con la
+// pendiente del tramo del borde y lo marca como fuera de tabla.
+function vbtPctDesdeMpv(mpv, ex){
+  var v=Number(mpv);
+  if(!(v>0)) return null;
+  var t=(typeof getVbtTable==='function')?getVbtTable(ex):null;
+  if(!t||!t.length) return null;
+  var f=t.filter(function(r){ return r.vmp!=null; })
+         .map(function(r){ return {pct:Number(r.pct), vmp:Number(r.vmp)}; })
+         .sort(function(a,b){ return a.vmp-b.vmp; });   // de más pesado a más liviano
+  if(f.length<2) return null;
+  var lo=f[0], hi=f[f.length-1];
+  function interp(p1,p2){
+    var m=(p2.pct-p1.pct)/(p2.vmp-p1.vmp);
+    return p1.pct+m*(v-p1.vmp);
+  }
+  if(v<=lo.vmp)  return {pct:interp(f[0],f[1]),               fuera:v<lo.vmp, min:lo.vmp, max:hi.vmp};
+  if(v>=hi.vmp)  return {pct:interp(f[f.length-2],f[f.length-1]), fuera:v>hi.vmp, min:lo.vmp, max:hi.vmp};
+  for(var i=0;i<f.length-1;i++){
+    if(v>=f[i].vmp && v<=f[i+1].vmp) return {pct:interp(f[i],f[i+1]), fuera:false, min:lo.vmp, max:hi.vmp};
+  }
+  return null;
+}
+window.vbtPctDesdeMpv=vbtPctDesdeMpv;
+
+// Mediana ponderada: ordena los valores y corta donde se acumula la mitad del peso
+function vbtMedianaPond(vals, pesos){
+  if(!vals.length) return null;
+  var idx=vals.map(function(v,i){ return {v:Number(v), w:Number(pesos&&pesos[i]!=null?pesos[i]:1)}; })
+              .filter(function(x){ return isFinite(x.v)&&x.w>0; })
+              .sort(function(a,b){ return a.v-b.v; });
+  if(!idx.length) return null;
+  if(idx.length===1) return idx[0].v;
+  var tot=idx.reduce(function(a,x){ return a+x.w; },0), acum=0;
+  for(var i=0;i<idx.length;i++){
+    acum+=idx[i].w;
+    if(acum>=tot/2){
+      // Si el corte cae justo en el borde, se promedia con el siguiente (mediana par)
+      if(Math.abs(acum-tot/2)<1e-9 && i+1<idx.length) return (idx[i].v+idx[i+1].v)/2;
+      return idx[i].v;
+    }
+  }
+  return idx[idx.length-1].v;
+}
+window.vbtMedianaPond=vbtMedianaPond;
+
+// Peso por recencia: una sesión de hace VBT_VIDA_MEDIA días vale la mitad
+var VBT_VIDA_MEDIA_DIAS=45;
+function vbtPesoRecencia(fecha, hoyMs){
+  var t=Date.parse(fecha);
+  if(isNaN(t)) return 0.5;                       // sin fecha: peso intermedio
+  var dias=(( hoyMs||Date.now() )-t)/86400000;
+  if(dias<0) dias=0;
+  return Math.pow(0.5, dias/VBT_VIDA_MEDIA_DIAS);
+}
+window.vbtPesoRecencia=vbtPesoRecencia;
+
 function vbtProfile(sets, name, ex){
-  var pts=(sets||[]).filter(function(s){
+  var crudos=(sets||[]).filter(function(s){
     return !s.excl && s.name===name && s.ex===ex && s.w>0 && s.mpv>0;
-  }).map(function(s){ return {w:Number(s.w), mpv:Number(s.mpv)}; });
-  if(pts.length<2) return {ok:false, n:pts.length, pts:pts};
-  var n=pts.length;
-  var sx=0, sy=0, sxy=0, sxx=0;
-  pts.forEach(function(p){ sx+=p.w; sy+=p.mpv; sxy+=p.w*p.mpv; sxx+=p.w*p.w; });
-  var den=(n*sxx - sx*sx);
-  if(!den) return {ok:false, n:n, pts:pts};
-  var b=(n*sxy - sx*sy)/den;          // pendiente (negativa: más peso, menos velocidad)
-  var a=(sy - b*sx)/n;                // intercepto
-  // R²
-  var my=sy/n, ssTot=0, ssRes=0;
+  }).map(function(s){ return {w:Number(s.w), mpv:Number(s.mpv), date:s._date}; });
+  if(crudos.length<1) return {ok:false, n:0, pts:[], ptsRaw:[]};
+
+  // v195: una sola observación por peso = MEDIANA ponderada por recencia.
+  // Antes cada repetición entraba como punto suelto y un descenso raro movía
+  // la recta entera.
+  var hoy=Date.now(), grupos={};
+  crudos.forEach(function(p){
+    var k=(Math.round(p.w*2)/2).toFixed(1);      // agrupa por peso (0,5 kg)
+    (grupos[k]||(grupos[k]={w:Math.round(p.w*2)/2, vals:[], pesos:[], nSets:0, last:0}));
+    var g=grupos[k], rec=vbtPesoRecencia(p.date, hoy);
+    g.vals.push(p.mpv); g.pesos.push(rec); g.nSets++;
+    var t=Date.parse(p.date); if(!isNaN(t)&&t>g.last) g.last=t;
+  });
+  var pts=Object.keys(grupos).map(function(k){
+    var g=grupos[k];
+    return {w:g.w, mpv:vbtMedianaPond(g.vals,g.pesos), nSets:g.nSets, last:g.last,
+            peso:Math.max.apply(null,g.pesos)};     // peso del grupo = su serie más reciente
+  }).filter(function(p){ return p.mpv!=null && isFinite(p.mpv); })
+    .sort(function(a,b){ return a.w-b.w; });
+
+  if(pts.length<2) return {ok:false, n:pts.length, pts:pts, ptsRaw:crudos, nRaw:crudos.length};
+
+  // Regresión ponderada: las sesiones recientes y los pesos con más series pesan más
+  var sw=0, sx=0, sy=0, sxy=0, sxx=0;
+  pts.forEach(function(p){
+    var w=Math.max(p.peso,0.02)*Math.min(p.nSets,4);
+    p._w=w; sw+=w; sx+=w*p.w; sy+=w*p.mpv; sxy+=w*p.w*p.mpv; sxx+=w*p.w*p.w;
+  });
+  var den=(sw*sxx - sx*sx);
+  if(!den) return {ok:false, n:pts.length, pts:pts, ptsRaw:crudos, nRaw:crudos.length};
+  var b=(sw*sxy - sx*sy)/den;          // pendiente (negativa: más peso, menos velocidad)
+  var a=(sy - b*sx)/sw;                // intercepto
+  // R² ponderado
+  var my=sy/sw, ssTot=0, ssRes=0;
   pts.forEach(function(p){
     var pred=a+b*p.w;
-    ssTot+=(p.mpv-my)*(p.mpv-my);
-    ssRes+=(p.mpv-pred)*(p.mpv-pred);
+    ssTot+=p._w*(p.mpv-my)*(p.mpv-my);
+    ssRes+=p._w*(p.mpv-pred)*(p.mpv-pred);
   });
   var r2=ssTot>0?(1-ssRes/ssTot):0;
-  var v1rm=vbtV1rmOf(ex);
+  // v195: el 1RM se proyecta hasta la velocidad que la TABLA marca como 100%
+  var v1rm=vbtMpvAl100(ex);
   var oneRM=(b!==0)?((v1rm-a)/b):null;
-  return {ok:true, a:a, b:b, r2:r2, n:n, pts:pts, oneRM:oneRM, v1rm:v1rm,
+  if(!(oneRM>0)||!isFinite(oneRM)) oneRM=null;
+  return {ok:true, a:a, b:b, r2:r2, n:pts.length, pts:pts, ptsRaw:crudos, nRaw:crudos.length,
+          oneRM:oneRM, v1rm:v1rm,
           minW:Math.min.apply(null,pts.map(function(p){return p.w;})),
           maxW:Math.max.apply(null,pts.map(function(p){return p.w;}))};
 }
@@ -39254,9 +39369,15 @@ function vbtViewPerfil(){
       'Hacen falta al menos 2 series con pesos distintos de <b>'+vbtEsc(_vbtPlayer)+'</b> en '+vbtEsc(_vbtEx)+'.'+
       (prof.n?' (hay '+prof.n+')':'')+'</div>';
   }
-  var pts=prof.pts.map(function(p){
-    return {x:p.w, y:p.mpv, tip:p.w+' kg → MPV '+p.mpv.toFixed(2), lbl:p.mpv.toFixed(2)};
-  });
+  // v195: en gris las series individuales; en azul la mediana usada por peso
+  var pts=(prof.ptsRaw||[]).map(function(p){
+    return {x:p.w, y:p.mpv, r:3.2, col:'#c3cad6',
+            tip:p.w+' kg → MPV '+Number(p.mpv).toFixed(2)+(p.date?' ('+p.date+')':'')};
+  }).concat(prof.pts.map(function(p){
+    return {x:p.w, y:p.mpv, r:5.5,
+            tip:p.w+' kg → mediana '+p.mpv.toFixed(2)+' m/s · '+p.nSets+' serie'+(p.nSets===1?'':'s'),
+            lbl:p.mpv.toFixed(2)};
+  }));
   var r2col=prof.r2>=0.95?'#1D9E75':(prof.r2>=0.85?'#EF9F27':'#D9534F');
   var kpi=function(l,v,c,sub){
     return '<div style="flex:1;min-width:100px;background:#f8faff;border:1px solid #e8ecf5;border-radius:8px;padding:8px 11px">'+
@@ -39268,14 +39389,14 @@ function vbtViewPerfil(){
     (function(){
       var cf=vbtRMConfianza(prof);
       var col=cf.nivel==='alta'?'#0D1B2A':(cf.nivel==='media'?'#EF9F27':'#D9534F');
-      var sub=cf.nivel==='alta'?('a MPV '+prof.v1rm):('⚠ '+cf.problemas[0]);
+      var sub=cf.nivel==='alta'?('proyectado a '+Number(prof.v1rm).toFixed(2)+' m/s (tabla)'):('⚠ '+cf.problemas[0]);
       return kpi('1RM estimado', Math.round(prof.oneRM)+' <span style="font-size:11px;color:#aaa">kg</span>', col, sub);
     })()+
     kpi('Ajuste (R²)', prof.r2.toFixed(3), r2col, prof.r2>=0.95?'excelente':(prof.r2>=0.85?'aceptable':'revisar series'))+
-    kpi('Series usadas', prof.n, '#3B4D88', prof.minW+'–'+prof.maxW+' kg')+
+    kpi('Cargas usadas', prof.n, '#3B4D88', prof.minW+'–'+prof.maxW+' kg · '+(prof.nRaw||prof.n)+' series')+
     kpi('Pendiente', prof.b.toFixed(4), '#8a93a5', 'MPV por kg')+
   '</div>';
-  html+='<div style="font-size:10.5px;color:#8a93a5;margin-bottom:5px">Cada punto es una serie. La recta es su relación carga-velocidad.</div>';
+  html+='<div style="font-size:10.5px;color:#8a93a5;margin-bottom:5px">Los puntos grises son cada serie; los azules, la <b>mediana por peso</b> ponderada por recencia (vida media '+VBT_VIDA_MEDIA_DIAS+' días), que es la que usa la recta. Así una repetición con un descenso distinto no arrastra el perfil.</div>';
   html+=vbtScatter(pts,{line:{a:prof.a,b:prof.b}, height:250,
     xFmt:function(v){return Math.round(v)+'kg';}, yFmt:function(v){return v.toFixed(2);}});
   if(prof.r2<0.85){
@@ -39414,6 +39535,14 @@ function vbtViewCalc(){
         'style="width:78px;padding:5px 8px;border:1px solid #ccd3de;border-radius:6px;font-size:13px;font-weight:800;text-align:center;color:#0D1B2A">'+
       '<span style="font-size:11px;color:#8a93a5">m/s</span>'+
       (z?'<span style="font-size:10.5px;font-weight:800;color:#fff;background:'+z.col+';border-radius:11px;padding:3px 11px">'+z.lbl+'</span>':'')+
+      (function(){
+        var t=vbtPctDesdeMpv(_vbtCalcMpv,_vbtEx);
+        if(!t) return '';
+        return '<span style="font-size:11px;color:#4a5568;font-weight:600;margin-left:4px">equivale a</span>'+
+          '<span style="font-size:14px;font-weight:800;color:#0D1B2A">'+Math.round(t.pct)+'%</span>'+
+          '<span style="font-size:11px;color:#8a93a5">del 1RM</span>'+
+          (t.fuera?'<span title="La velocidad está fuera del rango publicado de la tabla ('+t.min.toFixed(2)+'–'+t.max.toFixed(2)+' m/s): el % es una extrapolación" style="color:#EF9F27;font-size:12px">⚠</span>':'');
+      })()+
       '<span style="margin-left:auto;display:flex;gap:4px">'+
         VBT_ZONES.slice().reverse().map(function(zz){
           var mid=(zz.max>9?1.15:(zz.min+zz.max)/2);
@@ -39421,20 +39550,23 @@ function vbtViewCalc(){
         }).join('')+
       '</span>'+
     '</div></div>';
+  // v195: el % lo fija la TABLA del ejercicio, así que es el mismo para todos.
+  // Lo único que cambia entre jugadores son los kg: % × su 1RM individual.
+  var tb=vbtPctDesdeMpv(_vbtCalcMpv,_vbtEx);
+  var pctTabla=tb?tb.pct:null;
   var filas=pls.map(function(p){
     var prof=vbtProfile(sets,p,_vbtEx);
     if(!prof.ok) return {name:p, w:null, n:prof.n};
-    var w=vbtWeightForVelocity(prof,_vbtCalcMpv);
-    var pct=(prof.oneRM&&w)?(w/prof.oneRM*100):null;
-    // Fuera del rango medido = extrapolación
+    var w=(pctTabla!=null && prof.oneRM) ? (prof.oneRM*pctTabla/100)
+                                         : vbtWeightForVelocity(prof,_vbtCalcMpv);
     var extrap=(w!=null&&(w<prof.minW*0.75||w>prof.maxW*1.25));
-    return {name:p, w:w, oneRM:prof.oneRM, pct:pct, r2:prof.r2, extrap:extrap, n:prof.n};
+    return {name:p, w:w, oneRM:prof.oneRM, pct:pctTabla, r2:prof.r2, extrap:extrap, n:prof.n};
   });
   html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'+
     '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
       '<th style="padding:8px 11px;text-align:left;font-weight:700;color:#555">Jugador</th>'+
       '<th style="padding:8px 9px;text-align:center;font-weight:800;color:#0D1B2A">Peso sugerido</th>'+
-      '<th style="padding:8px 9px;text-align:center;font-weight:700;color:#555">% del 1RM</th>'+
+      '<th style="padding:8px 9px;text-align:center;font-weight:700;color:#555" title="Lo fija la tabla del ejercicio para la velocidad objetivo: es el mismo para todos">% del 1RM <span style="font-weight:400;color:#aaa">(tabla)</span></th>'+
       '<th style="padding:8px 9px;text-align:center;font-weight:700;color:#555">1RM est.</th>'+
       '<th style="padding:8px 9px;text-align:center;font-weight:700;color:#555">Ajuste</th>'+
     '</tr></thead><tbody>';
@@ -39458,7 +39590,7 @@ function vbtViewCalc(){
   html+='</tbody></table></div>';
   html+='<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:11px">'+
     '<button onclick="vbtPrintSession()" style="padding:7px 16px;border:none;border-radius:7px;background:#0D1B2A;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer">🖨 Planilla para el gimnasio</button>'+
-    '<span style="font-size:10px;color:#a3a9b6;flex:1;min-width:200px">Los pesos se redondean a 2,5 kg. El símbolo ⚠ marca extrapolaciones fuera del rango medido: conviene verificarlas en la primera serie.</span>'+
+    '<span style="font-size:10px;color:#a3a9b6;flex:1;min-width:200px">El % sale de la tabla del ejercicio ('+vbtEsc(typeof getVbtSource==='function'?getVbtSource(_vbtEx):'')+') y es el mismo para todos; los kg son de cada jugador (% × su 1RM). Pesos redondeados a 2,5 kg. El ⚠ marca extrapolaciones fuera del rango medido: conviene verificarlas en la primera serie.</span>'+
   '</div>';
   return html;
 }
@@ -39907,12 +40039,14 @@ function vbtPrintSession(){
   var sets=vbtAllSets();
   var pls=vbtPlayers(_vbtEx).filter(function(p){ return !_vbtPosFilter || vbtPosOf(p)===_vbtPosFilter; });
   var z=vbtZoneOf(_vbtCalcMpv);
+  var tbP=vbtPctDesdeMpv(_vbtCalcMpv,_vbtEx);            // v195: % de tabla, igual para todos
+  var pctP=tbP?Math.round(tbP.pct):null;
   var filas=pls.map(function(p){
     var pr=vbtProfile(sets,p,_vbtEx);
     if(!pr.ok) return null;
-    var w=vbtWeightForVelocity(pr,_vbtCalcMpv);
+    var w=(tbP&&pr.oneRM)?(pr.oneRM*tbP.pct/100):vbtWeightForVelocity(pr,_vbtCalcMpv);
     if(w==null)return null;
-    return {name:p, pos:vbtPosOf(p), w:Math.round(w/2.5)*2.5, pct:pr.oneRM?Math.round(w/pr.oneRM*100):null,
+    return {name:p, pos:vbtPosOf(p), w:Math.round(w/2.5)*2.5, pct:pctP,
             oneRM:Math.round(pr.oneRM), extrap:(w<pr.minW*0.75||w>pr.maxW*1.25)};
   }).filter(Boolean);
   if(!filas.length){ alert('No hay jugadores con perfil calculado para este ejercicio.'); return; }
@@ -39926,7 +40060,7 @@ function vbtPrintSession(){
     '.w{font-size:17px;font-weight:800}.chk{width:26px;height:26px;border:2px solid #ccc;border-radius:4px;display:inline-block}'+
     '.nota{font-size:10px;color:#8a93a5;margin-top:14px}'+
     '@media print{body{padding:10px}}</style></head><body>'+
-    '<h1>'+vbtEsc(_vbtEx)+' — velocidad objetivo '+_vbtCalcMpv.toFixed(2)+' m/s</h1>'+
+    '<h1>'+vbtEsc(_vbtEx)+' — velocidad objetivo '+_vbtCalcMpv.toFixed(2)+' m/s'+(pctP!=null?' ('+pctP+'% del 1RM)':'')+'</h1>'+
     '<h2>'+(z?z.lbl+' · ':'')+hoy+(_vbtPosFilter?' · '+_vbtPosFilter:'')+' · '+filas.length+' jugadores</h2>'+
     '<table><thead><tr><th>Jugador</th><th>Pos.</th><th>Peso</th><th>% 1RM</th><th>Series realizadas</th></tr></thead><tbody>'+
     filas.map(function(f){
@@ -39937,7 +40071,7 @@ function vbtPrintSession(){
         '<td><span class="chk"></span> <span class="chk"></span> <span class="chk"></span> <span class="chk"></span></td></tr>';
     }).join('')+
     '</tbody></table>'+
-    '<div class="nota">Pesos calculados con el perfil carga-velocidad individual de cada jugador. '+
+    '<div class="nota">El % sale de la tabla del ejercicio y es el mismo para todos; los kg salen del perfil carga-velocidad individual de cada jugador. '+
     'El símbolo ⚠ marca extrapolaciones fuera del rango medido: verificar en la primera serie y ajustar si la velocidad real difiere.</div>'+
     '</body></html>';
   var w=window.open('','_blank');
