@@ -4778,7 +4778,11 @@ function _buildFullPayload(stripImages){
     WELLNESS_LAYOUT:(typeof WELLNESS_LAYOUT!=='undefined' && WELLNESS_LAYOUT)?JSON.parse(JSON.stringify(WELLNESS_LAYOUT)):null,
     PSE_LAYOUT:(typeof PSE_LAYOUT!=='undefined' && PSE_LAYOUT)?JSON.parse(JSON.stringify(PSE_LAYOUT)):null,
     CARGA_NAME_ALIASES:(typeof CARGA_NAME_ALIASES!=='undefined')?{...CARGA_NAME_ALIASES}:{},
-    CARGA_LOAD_CONFIG:(typeof CARGA_LOAD_CONFIG!=='undefined')?CARGA_LOAD_CONFIG:null
+    CARGA_LOAD_CONFIG:(typeof CARGA_LOAD_CONFIG!=='undefined')?CARGA_LOAD_CONFIG:null,
+    // v196: el registro de asistencia vivía sólo en localStorage y se poda a
+    // 120 días. Ahora que alimenta reportes, viaja también en el backup.
+    HOY_ASIST:(typeof HOY_ASIST!=='undefined' && HOY_ASIST)?JSON.parse(JSON.stringify(HOY_ASIST)):{},
+    HOY_ASIST_TS:(typeof HOY_ASIST_TS!=='undefined' && HOY_ASIST_TS)?JSON.parse(JSON.stringify(HOY_ASIST_TS)):{}
   };
 }
 
@@ -4986,7 +4990,8 @@ function importData(ev){
         'Wellness: '+cnt(p.WELLNESS_DATA)+'\n'+
         'PSE: '+cnt(p.PSE_DATA)+'\n'+
         'Gym sesiones: '+cnt(p.GYM_SESSIONS)+'\n'+
-        'Plan: '+cnt(p.PLAN_WEEKS);
+        'Plan: '+cnt(p.PLAN_WEEKS)+'\n'+
+        'Días de asistencia: '+cnt(p.HOY_ASIST);
       var warn='';
       if(isOldFormat){
         warn='\n\n⚠ Este archivo es de un formato viejo (anterior a v2). Solo contiene Ejercicios + Partidos + algunos colores. Si lo importás, NO se van a perder tus datos actuales de Wellness/PSE/Microciclo/etc. — esos campos faltantes simplemente se mantienen como están ahora.';
@@ -5017,6 +5022,11 @@ function importData(ev){
       if(p.NUT_COL_MAP && typeof NUT_COL_MAP!=='undefined')Object.assign(NUT_COL_MAP,p.NUT_COL_MAP);
       if(p.MOB_COL_MAP && typeof MOB_COL_MAP!=='undefined')Object.assign(MOB_COL_MAP,p.MOB_COL_MAP);
       if(p.EVAL_ALIASES)Object.assign(EVAL_ALIASES,p.EVAL_ALIASES);
+      // v196: la asistencia se FUSIONA, no se reemplaza: el backup puede traer
+      // días que la poda de 120 ya borró, y lo marcado hoy no se debe perder.
+      if(p.HOY_ASIST && typeof hoyAsistMerge==='function'){
+        try{ hoyAsistMerge(p.HOY_ASIST, p.HOY_ASIST_TS||null); }catch(e){ console.warn('Asistencia al importar:',e); }
+      }
       if(p.PLAN_WEEKS){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});if(typeof planMigrateAll==='function')planMigrateAll();if(typeof planPreserveEditing==='function')planPreserveEditing();}
       if(p.WELLNESS_DATA && typeof WELLNESS_DATA!=='undefined'){WELLNESS_DATA.length=0;p.WELLNESS_DATA.forEach(function(r){WELLNESS_DATA.push(r);});}
       if(p.PSE_DATA && typeof PSE_DATA!=='undefined'){PSE_DATA.length=0;p.PSE_DATA.forEach(function(r){PSE_DATA.push(r);});}
@@ -7669,8 +7679,18 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
   <button id="prof-subtab-competencia" onclick="profSetSubtab('competencia')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🏆 Perfil de competencia</button>
   <button id="prof-subtab-nutricional" onclick="profSetSubtab('nutricional')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🥗 Nutricional</button>
   <button id="prof-subtab-movilidad" onclick="profSetSubtab('movilidad')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🦵 Movilidad</button>
+  <button id="prof-subtab-asistencia" onclick="profSetSubtab('asistencia')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">📋 Asistencia</button>
   <button id="prof-subtab-medica" onclick="profSetSubtab('medica')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">🏥 Área médica</button>
   <button id="prof-subtab-informes" onclick="profSetSubtab('informes')" style="background:none;border:none;padding:7px 14px;font-size:11px;font-weight:700;color:#aaa;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">📄 Informes</button>
+</div>
+
+<!-- SUBTAB: Asistencia (recuento y estadística por tipo) -->
+<div id="prof-subview-asistencia" style="display:none">
+  <div class="panel"><div class="panel-body" style="padding:12px 14px">
+    <div style="font-size:12px;font-weight:700;color:#0D1B2A;margin-bottom:3px">📋 Asistencia — recuento del plantel</div>
+    <div style="font-size:11px;color:#666;margin-bottom:11px">Se arma con las marcas diarias de la pestaña <b>Hoy</b>, contando sólo los días que figuran como entrenamiento en <b>Planificación</b>. Los días libres no generan ausencias.</div>
+    <div id="asis-container"></div>
+  </div></div>
 </div>
 
 <!-- SUBTAB: Informes (ficha élite del jugador) -->
@@ -8048,6 +8068,16 @@ function profRenameEverywhere(oldKey, oldName, newName){
   var newN=(typeof cargaNormName==='function')?cargaNormName(newName):String(newName||'').toLowerCase().trim();
   if(oldN && newN && oldN!==newN){
     try{
+      // v196: los sellos de tiempo acompañan a la marca. Si se quedaban con el
+      // nombre viejo, el merge con la nube devolvía las entradas anteriores.
+      if(typeof HOY_ASIST_TS!=='undefined'&&HOY_ASIST_TS){
+        Object.keys(HOY_ASIST_TS).forEach(function(d){
+          var day=HOY_ASIST_TS[d]; if(!day||day[oldN]===undefined)return;
+          if(day[newN]===undefined) day[newN]=day[oldN];
+          delete day[oldN];
+        });
+        try{ localStorage.setItem('hoyAsistTs_v1', JSON.stringify(HOY_ASIST_TS)); }catch(e){}
+      }
       if(typeof HOY_ASIST!=='undefined'&&HOY_ASIST){
         Object.keys(HOY_ASIST).forEach(function(d){
           var day=HOY_ASIST[d]; if(!day||day[oldN]===undefined)return;
@@ -14322,6 +14352,22 @@ function planRemoveGroup(gi){
 }
 window.planRemoveGroup=planRemoveGroup;
 
+// v196: faltaba definir esta función. El campo de la etiqueta MD de cada día
+// la llamaba al editarlo y tiraba "planSetMdLabel is not defined", así que la
+// etiqueta no se podía cambiar. Importa además porque la subpestaña Asistencia
+// usa mdLabel para reconocer el día de partido.
+function planSetMdLabel(di,val){
+  if(!_planEditData||!_planEditData.days||!_planEditData.days[di])return;
+  var v=String(val==null?'':val).trim().slice(0,10);
+  if(!v) v=(typeof PLAN_MD_DEFAULTS!=='undefined'&&PLAN_MD_DEFAULTS[di])||('MD-'+di);
+  _planEditData.days[di].mdLabel=v;
+  planTouchDay(di);
+  planRenderDays();
+  planRenderWeekSummary();
+  planAutoSave();
+}
+window.planSetMdLabel=planSetMdLabel;
+
 function planSetExGroup(di,bi,ei,group){
   if(!_planEditData) return;
   _planEditData.days[di].blocks[bi].exercises[ei].group=group;
@@ -19394,6 +19440,11 @@ document.addEventListener('DOMContentLoaded',function(){
 #view-hoy .hoy-pl.o{background:#f0f2f7;border-color:#c7cede;opacity:0.75}
 #view-hoy .hoy-pl.o-les{background:#faf0f0;border-color:#dcb9b9}
 #view-hoy .hoy-pl.o-nod{background:#f2f2f2;border-color:#c9c9c9}
+#view-hoy .hoy-aus{display:flex;gap:3px;margin-top:5px;justify-content:center}
+#view-hoy .hoy-aus-b{flex:1;min-width:0;border:1px solid #ddd;background:#fff;border-radius:6px;padding:3px 0;font-size:12px;line-height:1.35;cursor:pointer;filter:grayscale(.55);opacity:.8}
+#view-hoy .hoy-aus-b.on{filter:none;opacity:1}
+#view-hoy .hoy-aus-b:active{transform:scale(.90)}
+#view-hoy .hoy-pl:active:has(.hoy-aus-b:active){transform:none}
 #view-hoy .hoy-alert{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px dashed #e8e8e8;font-size:12px;color:#444;line-height:1.4}
 #view-hoy .hoy-alert:first-of-type{border-top:none;padding-top:2px}
 #view-hoy .hoy-alert .ic{flex-shrink:0;width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px}
@@ -31721,6 +31772,10 @@ function profSetSubtab(t){
   if(bc){bc.style.color=t==='competencia'?'#0D1B2A':'#aaa';bc.style.borderBottomColor=t==='competencia'?'#304483':'transparent';}
   if(bn){bn.style.color=t==='nutricional'?'#0D1B2A':'#aaa';bn.style.borderBottomColor=t==='nutricional'?'#304483':'transparent';}
   if(bm){bm.style.color=t==='movilidad'?'#0D1B2A':'#aaa';bm.style.borderBottomColor=t==='movilidad'?'#304483':'transparent';}
+  var av=document.getElementById('prof-subview-asistencia'); if(av)av.style.display=t==='asistencia'?'':'none';
+  var ba=document.getElementById('prof-subtab-asistencia');
+  if(ba){ba.style.color=t==='asistencia'?'#0D1B2A':'#aaa';ba.style.borderBottomColor=t==='asistencia'?'#304483':'transparent';}
+  if(t==='asistencia'){ try{ asisRender(); }catch(e){ console.warn('Asistencia:',e); } }
   var mv2=document.getElementById('prof-subview-medica'); if(mv2)mv2.style.display=t==='medica'?'':'none';
   var bmed=document.getElementById('prof-subtab-medica');
   if(bmed){bmed.style.color=t==='medica'?'#0D1B2A':'#aaa';bmed.style.borderBottomColor=t==='medica'?'#304483':'transparent';}
@@ -31846,14 +31901,60 @@ function infWellStats(norm){
   var avg=function(a){return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null;};
   return {n:wl.length+ps.length, readiness:avg(rd), pse:avg(pv)};
 }
+// v196: la asistencia del jugador para el informe individual. Usa el mismo
+// criterio que la subpestaña Asistencia: cruza con las jornadas de
+// Planificación (los días libres no cuentan) y separa las ausencias por motivo.
 function infAsistStats(norm){
   if(typeof HOY_ASIST==='undefined')return null;
-  var p=0,t=0;
+  var f=null;
+  try{
+    if(typeof asisCalcular==='function'){
+      var d=asisCalcular();
+      f=(d.filas||[]).find(function(x){ return x.nameL===norm; });
+    }
+  }catch(e){ f=null; }
+  if(f && f.registradas){
+    return {pct:Math.round(f.pct), t:f.registradas, aus:f.ausencias,
+            AM:f.AM, AK:f.AK, AI:f.AI, A:f.A, P:f.P, D:f.D, K:f.K,
+            desde:(typeof asisRango==='function'?asisRango().desde:null)};
+  }
+  // Sin jornadas calculables, se cuenta sobre los días que tengan marca
+  var p=0,t=0,aus=0;
   Object.keys(HOY_ASIST).forEach(function(d){
-    var v=HOY_ASIST[d][norm]; if(!v)return;
-    t++; if(v==='P')p++;
+    var v=(HOY_ASIST[d]||{})[norm]; if(!v)return;
+    t++;
+    if(typeof hoyEsAsistencia==='function'){ if(hoyEsAsistencia(v))p++; else aus++; }
+    else if(v==='P')p++;
   });
-  return t?{pct:Math.round(p*100/t),t:t}:null;
+  return t?{pct:Math.round(p*100/t),t:t,aus:aus}:null;
+}
+
+// Bloque de asistencia para el informe individual
+function infAsistHtml(norm){
+  var a=infAsistStats(norm);
+  if(!a||!a.t) return '<div style="font-size:10px;color:#aaa">Sin registro de asistencia.</div>';
+  var col=a.pct>=90?'#1D9E75':(a.pct>=75?'#E8A13C':'#D9534F');
+  var h='<div style="display:flex;gap:6px;align-items:stretch;margin-bottom:5px">'+
+    '<div style="flex:0 0 78px;text-align:center;background:'+col+'12;border:1px solid '+col+'44;border-radius:7px;padding:5px 4px">'+
+      '<div style="font-size:19px;font-weight:800;color:'+col+';line-height:1.1">'+a.pct+'%</div>'+
+      '<div style="font-size:7.5px;font-weight:700;color:#888;text-transform:uppercase">asistencia</div>'+
+      '<div style="font-size:7.5px;color:#bbb">'+a.t+' jornadas</div>'+
+    '</div><div style="flex:1;min-width:0">';
+  h+=infRow('Presente', (a.P!=null?a.P:'—'));
+  if(a.D!=null) h+=infRow('Trabajo diferenciado', a.D);
+  if(a.K!=null) h+=infRow('Kinesio / médico en el club', a.K);
+  h+='</div></div>';
+  if(a.aus){
+    var partes=[];
+    if(a.AM) partes.push(a.AM+' médica'+(a.AM===1?'':'s'));
+    if(a.AK) partes.push(a.AK+' kinesiológica'+(a.AK===1?'':'s'));
+    if(a.AI) partes.push(a.AI+' injustificada'+(a.AI===1?'':'s'));
+    if(a.A)  partes.push(a.A+' sin especificar');
+    h+=infRow('Ausencias', a.aus, partes.length?partes.join(' · '):'');
+  } else {
+    h+=infRow('Ausencias', '0');
+  }
+  return h;
 }
 function infSec(title,inner,color){
   return '<div style="margin-bottom:13px;break-inside:avoid">'+
@@ -32017,6 +32118,7 @@ function infRender(){
         infSec('🏋️ Fuerza — mejores cargas', gymRows||'<div style="font-size:10px;color:#aaa">Sin evaluaciones de gimnasio.</div>')+
         infSec('🥗 Composición corporal', nutRows||'<div style="font-size:10px;color:#aaa">Sin mediciones nutricionales.</div>')+
         infSec('🦵 Movilidad', mobRows||'<div style="font-size:10px;color:#aaa">Sin mediciones de movilidad.</div>')+
+        infSec('📋 Asistencia', infAsistHtml(norm))+
       '</div>'+
     '</div>'+
     // ── Pie institucional ──
@@ -46539,9 +46641,10 @@ function hoyPlayerStatus(name, todayISO, profMap){
 
   // Asistencia del día: A = fuera del día; K = rojo; D = amarillo
   var asist=hoyAsistGet(todayISO, nameL);
-  if(asist==='A'){
-    return {name:name, nameL:nameL, level:'out', out:'ausente',
-            reasons:[{t:'out', txt:'⬜ Ausente (asistencia de hoy)'}],
+  if(hoyEsAusencia(asist)){
+    var mAus=HOY_ASIST_META[asist];
+    return {name:name, nameL:nameL, level:'out', out:'ausente', asist:asist,
+            reasons:[{t:'out', txt:mAus.ico+' '+mAus.lbl+' (asistencia de hoy)'}],
             wellness:hoyWellnessToday(nameL, todayISO), acwr:null, flag:flag||null};
   }
   if(asist==='K'){ level='red'; reasons.push({t:'red', txt:'🚑 En kinesiología/médico (asistencia de hoy)'}); }
@@ -46677,17 +46780,36 @@ function hoyTodoKey(ev){ if(ev.key==='Enter'){ ev.preventDefault(); hoyTodoAdd()
 window.hoyTodoKey=hoyTodoKey;
 
 // ── Asistencia diaria en 1 toque ──
-// HOY_ASIST = { 'YYYY-MM-DD': { nombreNormalizado: 'P'|'D'|'K'|'A' } }
-// P Presente · D Diferenciado · K Kinesio/Médico · A Ausente
+// HOY_ASIST = { 'YYYY-MM-DD': { nombreNormalizado: 'P'|'D'|'K'|'A'|'AM'|'AK'|'AI' } }
+// Vino al club:  P Presente · D Diferenciado · K Kinesio/Médico en el club
+// No vino:       AM Aus. médica · AK Aus. kinesiológica · AI Aus. injustificada
+//                A  Ausente sin especificar (marcas anteriores a la v196)
 var HOY_ASIST={};
 try{ HOY_ASIST=JSON.parse(localStorage.getItem('hoyAsist_v1')||'{}')||{}; }catch(e){ HOY_ASIST={}; }
 var HOY_ASIST_STATES=['P','D','K','A'];
+// v196: la ausencia se abre en tres motivos. 'A' queda como "sin especificar"
+// para no perder el historial ya cargado; las marcas nuevas eligen el tipo.
 var HOY_ASIST_META={
-  P:{lbl:'Presente',     ico:'✅', col:'#1D9E75', bg:'#edfaf3', bd:'#1D9E7555'},
-  D:{lbl:'Diferenciado', ico:'🟡', col:'#9A6A1B', bg:'#fdf3e2', bd:'#E8A13C77'},
-  K:{lbl:'Kinesio/Méd.', ico:'🚑', col:'#D9534F', bg:'#fdeeee', bd:'#D9534F66'},
-  A:{lbl:'Ausente',      ico:'⬜', col:'#888',    bg:'#f2f2f2', bd:'#ccc'}
+  P: {lbl:'Presente',      ico:'✅', col:'#1D9E75', bg:'#edfaf3', bd:'#1D9E7555'},
+  D: {lbl:'Diferenciado',  ico:'🟡', col:'#9A6A1B', bg:'#fdf3e2', bd:'#E8A13C77'},
+  K: {lbl:'Kinesio/Méd.',  ico:'🚑', col:'#D9534F', bg:'#fdeeee', bd:'#D9534F66'},
+  A: {lbl:'Ausente',       ico:'⬜', col:'#888',    bg:'#f2f2f2', bd:'#ccc',     aus:true, corto:'s/esp.'},
+  AM:{lbl:'Aus. médica',   ico:'🩺', col:'#B4542F', bg:'#fdf1ea', bd:'#D9824F66', aus:true, corto:'Médica'},
+  AK:{lbl:'Aus. kinesio',  ico:'🦵', col:'#6B4FA8', bg:'#f3f0fb', bd:'#8A6FD066', aus:true, corto:'Kinesio'},
+  AI:{lbl:'Aus. injust.',  ico:'⛔', col:'#C0392B', bg:'#fdecea', bd:'#C0392B55', aus:true, corto:'Injust.'}
 };
+// Tipos que se ofrecen al marcar una ausencia (en el orden de los botones)
+var HOY_AUS_TIPOS=['AM','AK','AI'];
+// ¿Esta marca es una ausencia (no vino)? Sirve en todo el dashboard.
+function hoyEsAusencia(code){
+  return !!(code && HOY_ASIST_META[code] && HOY_ASIST_META[code].aus);
+}
+window.hoyEsAusencia=hoyEsAusencia;
+// ¿Vino al club? Presente, diferenciado y kinesio en el club cuentan como asistencia.
+function hoyEsAsistencia(code){
+  return code==='P'||code==='D'||code==='K';
+}
+window.hoyEsAsistencia=hoyEsAsistencia;
 // ═══ SELLOS DE TIEMPO EN ASISTENCIA (v186) ═══════════════════════════════
 // El merge de HOY_ASIST conservaba SIEMPRE el valor local y sólo incorporaba
 // lo que faltaba. Trabajando con varios dispositivos eso revierte cambios: si
@@ -46766,6 +46888,8 @@ function hoyAsistCycle(nameL){
   var next;
   if(!cur){
     next=esLesion?'D':'P';
+  } else if(hoyEsAusencia(cur)){
+    next='P';                  // v196: desde cualquier tipo de ausencia, vuelve a Presente
   } else {
     next=HOY_ASIST_STATES[(HOY_ASIST_STATES.indexOf(cur)+1)%HOY_ASIST_STATES.length];
   }
@@ -46774,6 +46898,18 @@ function hoyAsistCycle(nameL){
   hoySaveAsist(); hoyRender();
 }
 window.hoyAsistCycle=hoyAsistCycle;
+
+// v196: elegir el motivo de la ausencia sin pasar por el ciclo.
+// Si se vuelve a tocar el tipo ya marcado, se queda como ausencia sin especificar.
+function hoyAsistSetTipo(nameL, code){
+  if(!HOY_ASIST_META[code])return;
+  var today=hoyLocalISO();
+  if(!HOY_ASIST[today])HOY_ASIST[today]={};
+  HOY_ASIST[today][nameL]=(HOY_ASIST[today][nameL]===code)?'A':code;
+  hoyAsistStamp(today,nameL);
+  hoySaveAsist(); hoyRender();
+}
+window.hoyAsistSetTipo=hoyAsistSetTipo;
 // ── v133: "Todos presentes" ahora SÍ marca a todos ────────────────────────
 // Antes usaba `if(!HOY_ASIST[today][nameL])`, así que en cuanto había alguna
 // marca previa (o el botón ya se había tocado una vez) parecía no hacer nada.
@@ -46783,7 +46919,7 @@ function hoyAsistAllPresent(){
   var today=hoyLocalISO();
   if(!HOY_ASIST[today])HOY_ASIST[today]={};
   var profMap=hoyProfileByNorm();
-  var n=0;
+  var n=0, conservadas=0;
   hoyRoster().forEach(function(nm){
     var nameL=hoyNorm(nm);
     var prof=profMap[nameL];
@@ -46791,10 +46927,15 @@ function hoyAsistAllPresent(){
     // Los que no están disponibles en el plantel (Primera/Reserva/Lesión/No disp.)
     // no participan del entrenamiento, así que no se marcan.
     if(HOY_ESTADOS[est])return;
+    // v196: no pisar una ausencia ya cargada. Tipificarla cuesta dos toques y
+    // alimenta los reportes; si de verdad hay que reiniciar el día está
+    // "↺ Limpiar". Diferenciado y kinesio sí se sobrescriben, como antes.
+    if(hoyEsAusencia(HOY_ASIST[today][nameL])){ conservadas++; return; }
     HOY_ASIST[today][nameL]='P';
     hoyAsistStamp(today,nameL);   // v186
     n++;
   });
+  if(conservadas) console.log('[Asistencia] '+conservadas+' ausencia(s) ya marcadas se conservaron.');
   hoySaveAsist(); hoyRender();
 }
 window.hoyAsistAllPresent=hoyAsistAllPresent;
@@ -46808,6 +46949,414 @@ function hoyAsistClear(){
   hoySaveAsist(); hoyRender();
 }
 window.hoyAsistClear=hoyAsistClear;
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASISTENCIA (v196) — recuento y estadística por tipo
+// ───────────────────────────────────────────────────────────────────────────
+// Lee HOY_ASIST (las marcas diarias de la pestaña Hoy) y las cruza con las
+// semanas de Planificación para saber qué días SE ENTRENA. Un día libre no
+// cuenta como ausencia de nadie: sin ese cruce, los porcentajes mienten.
+//
+// Un día cuenta como JORNADA si la semana de planificación que lo cubre tiene
+// trabajo cargado ese día (o es el día de partido). Si ningún plan lo cubre
+// pero hay marcas de asistencia, se deduce que se entrenó y se avisa.
+// ═══════════════════════════════════════════════════════════════════════════
+var _asisRango='60';          // '30' | '60' | '90' | 'todo' | 'custom'
+var _asisDesde='', _asisHasta='';
+var _asisKComoAsist=true;     // ¿Kinesio en el club cuenta como asistencia?
+var _asisContarMD=true;       // ¿El día de partido cuenta como jornada?
+var _asisJugador='';          // detalle individual
+
+function asisEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function asisArg(t){
+  return asisEsc(String(t==null?'':t).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+}
+function asisISO(d){
+  var dt=(d instanceof Date)?d:new Date(d);
+  return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+}
+function asisShift(iso,n){
+  if(typeof planShiftISO==='function') return planShiftISO(iso,n);
+  var d=new Date(iso+'T12:00:00'); d.setDate(d.getDate()+n); return asisISO(d);
+}
+function asisNorm(n){ return (typeof hoyNorm==='function')?hoyNorm(n):String(n||'').toLowerCase().trim(); }
+
+// ¿El día de la planificación tiene trabajo cargado?
+function asisDiaConTrabajo(day){
+  if(!day) return false;
+  var blocks = Array.isArray(day) ? [{exercises:day}] : (day.blocks||[]);
+  for(var i=0;i<blocks.length;i++){
+    if(((blocks[i]||{}).exercises||[]).length) return true;
+  }
+  return false;
+}
+window.asisDiaConTrabajo=asisDiaConTrabajo;
+
+// Mapa fecha → jornada, armado desde las semanas de Planificación.
+// Si dos semanas se pisan, manda la creada más tarde.
+function asisMapaPlan(){
+  var mapa={};
+  var weeks=(typeof PLAN_WEEKS!=='undefined'&&Array.isArray(PLAN_WEEKS))?PLAN_WEEKS:[];
+  weeks.slice().sort(function(a,b){
+    return String(a&&a.created||'').localeCompare(String(b&&b.created||''));
+  }).forEach(function(w){
+    if(!w||!w.startDate)return;
+    var len=parseInt(w.weekLen,10)||7;
+    var days=w.days||[];
+    for(var i=0;i<len;i++){
+      var iso=asisShift(w.startDate,i);
+      var day=days[i]||null;
+      var esMD=!!(day&&String(day.mdLabel||'').toUpperCase()==='MD');
+      var trabajo=asisDiaConTrabajo(day);
+      mapa[iso]={
+        jornada: trabajo || (esMD && _asisContarMD),
+        md: day?(day.mdLabel||day.label||''):'',
+        etiqueta: day?(day.label||''):'',
+        semana: w.name||'',
+        esMD: esMD,
+        conTrabajo: trabajo,
+        origen: 'plan'
+      };
+    }
+  });
+  return mapa;
+}
+window.asisMapaPlan=asisMapaPlan;
+
+// Rango de fechas elegido
+function asisRango(){
+  var hoy=(typeof hoyLocalISO==='function')?hoyLocalISO():asisISO(new Date());
+  if(_asisRango==='custom' && _asisDesde && _asisHasta){
+    return _asisDesde<=_asisHasta ? {desde:_asisDesde, hasta:_asisHasta}
+                                  : {desde:_asisHasta, hasta:_asisDesde};
+  }
+  if(_asisRango==='todo'){
+    var ks=Object.keys((typeof HOY_ASIST!=='undefined'&&HOY_ASIST)?HOY_ASIST:{}).sort();
+    return {desde: ks.length?ks[0]:hoy, hasta: hoy};
+  }
+  var n=parseInt(_asisRango,10)||60;
+  return {desde: asisShift(hoy,-(n-1)), hasta: hoy};
+}
+
+// ── Núcleo del cálculo ──
+// Devuelve las jornadas del período y, por jugador, el recuento por tipo.
+function asisCalcular(){
+  var r=asisRango();
+  var plan=asisMapaPlan();
+  var ASIST=(typeof HOY_ASIST!=='undefined'&&HOY_ASIST)?HOY_ASIST:{};
+
+  // 1) Qué días del período son jornada
+  var jornadas=[], sinPlan=0;
+  var fechasConMarcas={};
+  Object.keys(ASIST).forEach(function(d){
+    if(d>=r.desde && d<=r.hasta && ASIST[d] && Object.keys(ASIST[d]).length) fechasConMarcas[d]=true;
+  });
+  var cur=r.desde, guard=0;
+  while(cur<=r.hasta && guard++<1000){
+    var p=plan[cur];
+    if(p){
+      if(p.jornada) jornadas.push({fecha:cur, md:p.md, semana:p.semana, origen:'plan', esMD:p.esMD});
+    } else if(fechasConMarcas[cur]){
+      // Sin planificación que lo cubra, pero alguien marcó asistencia
+      jornadas.push({fecha:cur, md:'', semana:'', origen:'marcas', esMD:false});
+      sinPlan++;
+    }
+    cur=asisShift(cur,1);
+  }
+  var jornadaSet={}; jornadas.forEach(function(j){ jornadaSet[j.fecha]=j; });
+
+  // 2) Días con marcas que NO son jornada (se entrenó en un día libre, o quedó
+  //    una marca vieja). Se informan aparte y no entran en los porcentajes.
+  var marcasFueraJornada=Object.keys(fechasConMarcas).filter(function(d){ return !jornadaSet[d]; }).sort();
+
+  // 3) Plantel: el actual más cualquiera con marcas en el período
+  var nombres={};
+  try{
+    (typeof hoyRoster==='function'?hoyRoster():[]).forEach(function(n){
+      var k=asisNorm(n); if(k) nombres[k]=n;
+    });
+  }catch(e){}
+  var canon={};
+  try{
+    Object.values(typeof PLAYER_PROFILES!=='undefined'?PLAYER_PROFILES:{}).forEach(function(p){
+      if(p&&p.name) canon[asisNorm(p.name)]=p.name;
+    });
+  }catch(e){}
+  jornadas.forEach(function(j){
+    Object.keys(ASIST[j.fecha]||{}).forEach(function(k){
+      if(!nombres[k]) nombres[k]=canon[k]||k;
+    });
+  });
+
+  // 4) Recuento por jugador
+  var codigos=['P','D','K','A','AM','AK','AI'];
+  var filas=Object.keys(nombres).map(function(k){
+    var f={nameL:k, name:nombres[k], jornadas:jornadas.length, sinRegistro:0, dias:[]};
+    codigos.forEach(function(c){ f[c]=0; });
+    jornadas.forEach(function(j){
+      var v=(ASIST[j.fecha]||{})[k]||null;
+      f.dias.push({fecha:j.fecha, md:j.md, code:v});
+      if(!v){ f.sinRegistro++; return; }
+      if(f[v]===undefined) f[v]=0;
+      f[v]++;
+    });
+    f.registradas = f.jornadas - f.sinRegistro;
+    f.ausencias   = f.A + f.AM + f.AK + f.AI;
+    f.asistencias = f.P + f.D + (_asisKComoAsist ? f.K : 0);
+    f.base        = f.registradas;                       // sobre lo efectivamente registrado
+    f.pct         = f.base ? (f.asistencias*100/f.base) : null;
+    f.pctInjust   = f.base ? (f.AI*100/f.base) : null;
+    return f;
+  }).sort(function(a,b){
+    if(a.base && !b.base) return -1;
+    if(!a.base && b.base) return 1;
+    var pa=(a.pct==null?-1:a.pct), pb=(b.pct==null?-1:b.pct);
+    return (pa-pb) || a.name.localeCompare(b.name,'es');
+  });
+
+  // 5) Totales del plantel
+  var tot={P:0,D:0,K:0,A:0,AM:0,AK:0,AI:0,sinRegistro:0,registradas:0,asistencias:0,ausencias:0};
+  filas.forEach(function(f){
+    ['P','D','K','A','AM','AK','AI'].forEach(function(c){ tot[c]+=f[c]; });
+    tot.sinRegistro+=f.sinRegistro; tot.registradas+=f.registradas;
+    tot.asistencias+=f.asistencias; tot.ausencias+=f.ausencias;
+  });
+  tot.pct = tot.registradas ? (tot.asistencias*100/tot.registradas) : null;
+
+  return {desde:r.desde, hasta:r.hasta, jornadas:jornadas, jornadaSet:jornadaSet,
+          sinPlan:sinPlan, marcasFueraJornada:marcasFueraJornada,
+          filas:filas, totales:tot, nJugadores:filas.length};
+}
+window.asisCalcular=asisCalcular;
+
+// ── Controles ──
+function asisSetRango(v){ _asisRango=v; asisRender(); }
+window.asisSetRango=asisSetRango;
+function asisSetFecha(cual,v){
+  if(cual==='desde') _asisDesde=v; else _asisHasta=v;
+  _asisRango='custom'; asisRender();
+}
+window.asisSetFecha=asisSetFecha;
+function asisToggleK(v){ _asisKComoAsist=!!v; asisRender(); }
+window.asisToggleK=asisToggleK;
+function asisToggleMD(v){ _asisContarMD=!!v; asisRender(); }
+window.asisToggleMD=asisToggleMD;
+function asisVerJugador(k){ _asisJugador=(_asisJugador===k)?'':k; asisRender(); }
+window.asisVerJugador=asisVerJugador;
+
+// ── Render ──
+function asisPctCol(p){
+  if(p==null) return '#bbb';
+  return p>=90?'#1D9E75':(p>=75?'#EF9F27':'#D9534F');
+}
+function asisRender(){
+  var cont=document.getElementById('asis-container');
+  if(!cont)return;
+  var d=asisCalcular();
+  var t=d.totales;
+
+  var chip=function(val,lbl,on){
+    return '<button type="button" onclick="asisSetRango(\''+val+'\')" style="border:1px solid '+(on?'#304483':'#ccd3de')+';'+
+      'background:'+(on?'#304483':'#fff')+';color:'+(on?'#fff':'#4a5568')+';border-radius:14px;padding:4px 12px;'+
+      'font-size:11px;font-weight:700;cursor:pointer">'+lbl+'</button>';
+  };
+  var html='<div style="background:#f8faff;border:1px solid #e0e8f5;border-radius:9px;padding:10px 13px;margin-bottom:12px">'+
+    '<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">'+
+      '<span style="font-size:11px;color:#4a5568;font-weight:700">Período</span>'+
+      chip('30','30 días',_asisRango==='30')+chip('60','60 días',_asisRango==='60')+
+      chip('90','90 días',_asisRango==='90')+chip('todo','Todo',_asisRango==='todo')+
+      '<span style="font-size:11px;color:#8a93a5;margin-left:6px">o</span>'+
+      '<input type="date" value="'+asisEsc(d.desde)+'" onchange="asisSetFecha(\'desde\',this.value)" style="padding:4px 7px;border:1px solid #ccd3de;border-radius:6px;font-size:11px">'+
+      '<span style="font-size:11px;color:#8a93a5">a</span>'+
+      '<input type="date" value="'+asisEsc(d.hasta)+'" onchange="asisSetFecha(\'hasta\',this.value)" style="padding:4px 7px;border:1px solid #ccd3de;border-radius:6px;font-size:11px">'+
+      '<button type="button" onclick="asisImprimir()" style="margin-left:auto;border:none;background:#0D1B2A;color:#fff;border-radius:7px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer">🖨 Imprimir</button>'+
+      '<button type="button" onclick="asisCSV()" style="border:1px solid #ccd3de;background:#fff;color:#4a5568;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer">📄 CSV</button>'+
+    '</div>'+
+    '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:8px">'+
+      '<label style="font-size:10.5px;color:#4a5568;display:flex;align-items:center;gap:5px;cursor:pointer">'+
+        '<input type="checkbox" '+(_asisKComoAsist?'checked':'')+' onchange="asisToggleK(this.checked)"> Contar 🚑 Kinesio/Méd. en el club como asistencia</label>'+
+      '<label style="font-size:10.5px;color:#4a5568;display:flex;align-items:center;gap:5px;cursor:pointer">'+
+        '<input type="checkbox" '+(_asisContarMD?'checked':'')+' onchange="asisToggleMD(this.checked)"> Contar el día de partido (MD) como jornada</label>'+
+    '</div>'+
+  '</div>';
+
+  if(!d.jornadas.length){
+    html+='<div style="padding:26px;text-align:center;color:#8a93a5;font-size:12px;background:#fff;border:1px solid #e4e6ec;border-radius:9px">'+
+      '<div style="font-size:26px;margin-bottom:7px">📋</div>'+
+      '<b style="color:#555">No hay jornadas de entrenamiento en este período</b><br>'+
+      '<span style="font-size:11px">Las jornadas salen de las semanas cargadas en <b>Planificación</b> (los días con trabajo cargado o el día de partido). '+
+      'Si la semana no tiene fecha de inicio, el dashboard no puede saber qué días se entrenó.</span></div>';
+    cont.innerHTML=html; return;
+  }
+
+  // KPIs
+  var kpi=function(v,l,c,sub){
+    return '<div style="flex:1;min-width:112px;background:#fff;border:1px solid #e4e6ec;border-radius:9px;padding:9px 12px">'+
+      '<div style="font-size:9px;color:#a3a9b6;font-weight:700;text-transform:uppercase;letter-spacing:.04em">'+l+'</div>'+
+      '<div style="font-size:19px;font-weight:800;color:'+(c||'#0D1B2A')+';line-height:1.2">'+v+'</div>'+
+      (sub?'<div style="font-size:9px;color:#a3a9b6">'+sub+'</div>':'')+'</div>';
+  };
+  var nMD=d.jornadas.filter(function(j){return j.esMD;}).length;
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:11px">'+
+    kpi(d.jornadas.length,'Jornadas','#0D1B2A',(nMD?nMD+' de partido · ':'')+d.nJugadores+' jugadores')+
+    kpi((t.pct==null?'—':t.pct.toFixed(1)+'%'),'Asistencia del plantel',asisPctCol(t.pct),t.asistencias+' de '+t.registradas+' registros')+
+    kpi(t.ausencias,'Ausencias','#D9534F',(t.AI?t.AI+' injustificadas':'ninguna injustificada'))+
+    kpi(t.AM+t.AK,'Médicas + kinesio','#B4542F',t.AM+' méd. · '+t.AK+' kin.')+
+    kpi(t.sinRegistro,'Sin registro','#8a93a5','jornadas no marcadas')+
+  '</div>';
+
+  if(d.sinPlan){
+    html+='<div style="background:#fff8ec;border:1px solid #f0e0c0;border-radius:7px;padding:7px 11px;font-size:10.5px;color:#8a6d3b;margin-bottom:9px">'+
+      '⚠ '+d.sinPlan+' jornada(s) sin semana de planificación que las cubra: se contaron porque hay asistencia marcada ese día.</div>';
+  }
+  if(d.marcasFueraJornada.length){
+    html+='<div style="background:#f4f7fd;border:1px solid #dde6f5;border-radius:7px;padding:7px 11px;font-size:10.5px;color:#4a5568;margin-bottom:9px">'+
+      'ℹ '+d.marcasFueraJornada.length+' día(s) tienen asistencia marcada pero figuran como <b>día libre</b> en Planificación, así que no entran en los porcentajes: '+
+      d.marcasFueraJornada.slice(0,6).map(function(x){return x.slice(8,10)+'/'+x.slice(5,7);}).join(', ')+
+      (d.marcasFueraJornada.length>6?' y '+(d.marcasFueraJornada.length-6)+' más':'')+'.</div>';
+  }
+
+  // Tabla
+  var th=function(txt,tit,ancho){
+    return '<th style="padding:7px 6px;text-align:center;font-weight:700;color:#555;font-size:10px;white-space:nowrap'+(ancho?';width:'+ancho:'')+'"'+
+      (tit?' title="'+asisEsc(tit)+'"':'')+'>'+txt+'</th>';
+  };
+  html+='<div style="overflow-x:auto;background:#fff;border:1px solid #e4e6ec;border-radius:9px">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'+
+    '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e0e0e0">'+
+      '<th style="padding:7px 10px;text-align:left;font-weight:700;color:#555;font-size:10px">Jugador</th>'+
+      th('Jorn.','Jornadas del período con registro de este jugador')+
+      th('✅ P','Presente')+th('🟡 D','Diferenciado')+th('🚑 K','Kinesio o médico en el club')+
+      th('🩺 Méd.','Ausencia médica')+th('🦵 Kin.','Ausencia kinesiológica')+th('⛔ Inj.','Ausencia injustificada')+
+      th('⬜ s/esp.','Ausencia sin motivo especificado (marcas anteriores a esta versión)')+
+      th('% asist.','Asistencias sobre jornadas registradas')+
+      th('Sin reg.','Jornadas en las que no se marcó nada para este jugador')+
+    '</tr></thead><tbody>';
+  d.filas.forEach(function(f){
+    var abierto=(_asisJugador===f.nameL);
+    var num=function(v,col){
+      return '<td style="padding:5px 6px;text-align:center;'+(v?('color:'+(col||'#0D1B2A')+';font-weight:700'):'color:#d8dce3')+'">'+v+'</td>';
+    };
+    html+='<tr style="border-bottom:1px solid #f0f2f6;cursor:pointer'+(abierto?';background:#f4f8ff':'')+'" onclick="asisVerJugador(\''+asisArg(f.nameL)+'\')">'+
+      '<td style="padding:5px 10px;font-weight:600;color:#0D1B2A;white-space:nowrap">'+(abierto?'▾ ':'▸ ')+asisEsc(f.name)+'</td>'+
+      '<td style="padding:5px 6px;text-align:center;color:#8a93a5">'+f.registradas+'</td>'+
+      num(f.P,'#1D9E75')+num(f.D,'#9A6A1B')+num(f.K,'#D9534F')+
+      num(f.AM,'#B4542F')+num(f.AK,'#6B4FA8')+num(f.AI,'#C0392B')+num(f.A,'#888')+
+      '<td style="padding:5px 6px;text-align:center;font-weight:800;color:'+asisPctCol(f.pct)+'">'+(f.pct==null?'—':f.pct.toFixed(0)+'%')+'</td>'+
+      '<td style="padding:5px 6px;text-align:center;color:'+(f.sinRegistro?'#EF9F27':'#d8dce3')+'">'+f.sinRegistro+'</td>'+
+    '</tr>';
+    if(abierto){
+      html+='<tr style="background:#f9fbff"><td colspan="11" style="padding:9px 12px">'+asisDetalleHtml(f)+'</td></tr>';
+    }
+  });
+  // Fila de totales
+  html+='<tr style="background:#f5f7fa;border-top:2px solid #e0e0e0;font-weight:800">'+
+    '<td style="padding:6px 10px;color:#0D1B2A">Plantel</td>'+
+    '<td style="padding:6px;text-align:center;color:#555" title="Registros en total: jornadas × jugadores con marca">'+t.registradas+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#1D9E75">'+t.P+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#9A6A1B">'+t.D+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#D9534F">'+t.K+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#B4542F">'+t.AM+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#6B4FA8">'+t.AK+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#C0392B">'+t.AI+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#888">'+t.A+'</td>'+
+    '<td style="padding:6px;text-align:center;color:'+asisPctCol(t.pct)+'">'+(t.pct==null?'—':t.pct.toFixed(0)+'%')+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#8a93a5">'+t.sinRegistro+'</td>'+
+  '</tr>';
+  html+='</tbody></table></div>';
+  html+='<div style="font-size:10px;color:#a3a9b6;margin-top:9px;line-height:1.5">'+
+    'Las jornadas salen de <b>Planificación</b>: cuentan los días con trabajo cargado'+(_asisContarMD?' y el día de partido':'')+'; los días libres quedan afuera y no generan ausencias. '+
+    'El <b>% de asistencia</b> es (Presente + Diferenciado'+(_asisKComoAsist?' + Kinesio en el club':'')+') sobre las jornadas en las que el jugador tiene marca. '+
+    'Tocá un jugador para ver su detalle día por día.</div>';
+
+  cont.innerHTML=html;
+}
+window.asisRender=asisRender;
+
+// Detalle día por día de un jugador
+function asisDetalleHtml(f){
+  var h='<div style="font-size:10px;font-weight:800;color:#8a93a5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'+
+    asisEsc(f.name)+' — día por día</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:5px">';
+  f.dias.forEach(function(dia){
+    var m=dia.code?HOY_ASIST_META[dia.code]:null;
+    var bg=m?m.bg:'#fff', bd=m?m.bd:'#e4e6ec', col=m?m.col:'#c3cad6';
+    h+='<div style="border:1px solid '+bd+';background:'+bg+';border-radius:7px;padding:4px 5px;text-align:center" title="'+
+      asisEsc(dia.fecha+(dia.md?' · '+dia.md:'')+' — '+(m?m.lbl:'sin registro'))+'">'+
+      '<div style="font-size:9.5px;font-weight:700;color:#0D1B2A">'+dia.fecha.slice(8,10)+'/'+dia.fecha.slice(5,7)+'</div>'+
+      '<div style="font-size:11px">'+(m?m.ico:'·')+'</div>'+
+      '<div style="font-size:7.5px;font-weight:700;color:'+col+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+
+        (m?(m.corto||m.lbl):'sin reg.')+'</div></div>';
+  });
+  h+='</div>';
+  return h;
+}
+
+// ── Exportar ──
+function asisCSV(){
+  var d=asisCalcular();
+  var sep=';';
+  var filas=[['Jugador','Jornadas registradas','Presente','Diferenciado','Kinesio en club',
+              'Aus. medica','Aus. kinesiologica','Aus. injustificada','Aus. sin especificar',
+              '% asistencia','Sin registro']];
+  d.filas.forEach(function(f){
+    filas.push([f.name,f.registradas,f.P,f.D,f.K,f.AM,f.AK,f.AI,f.A,
+                (f.pct==null?'':f.pct.toFixed(1).replace('.',',')),f.sinRegistro]);
+  });
+  var txt='﻿'+filas.map(function(r){
+    return r.map(function(c){
+      var v=String(c==null?'':c);
+      return (v.indexOf(sep)>=0||v.indexOf('"')>=0) ? '"'+v.replace(/"/g,'""')+'"' : v;
+    }).join(sep);
+  }).join('\r\n');
+  try{
+    var blob=new Blob([txt],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='asistencia_'+d.desde+'_a_'+d.hasta+'.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },100);
+  }catch(e){ alert('No se pudo generar el CSV: '+e.message); }
+}
+window.asisCSV=asisCSV;
+
+function asisImprimir(){
+  var d=asisCalcular(), t=d.totales;
+  var filas=d.filas.map(function(f){
+    return '<tr><td><b>'+asisEsc(f.name)+'</b></td><td class="c">'+f.registradas+'</td>'+
+      '<td class="c">'+f.P+'</td><td class="c">'+f.D+'</td><td class="c">'+f.K+'</td>'+
+      '<td class="c">'+f.AM+'</td><td class="c">'+f.AK+'</td><td class="c">'+f.AI+'</td><td class="c">'+f.A+'</td>'+
+      '<td class="c"><b>'+(f.pct==null?'—':f.pct.toFixed(0)+'%')+'</b></td><td class="c">'+f.sinRegistro+'</td></tr>';
+  }).join('');
+  var html='<html><head><meta charset="utf-8"><title>Asistencia '+d.desde+' a '+d.hasta+'</title>'+
+    '<style>body{font-family:system-ui,-apple-system,sans-serif;padding:20px;color:#0D1B2A}'+
+    'h1{font-size:18px;margin:0 0 3px}h2{font-size:11px;font-weight:400;color:#6b7a90;margin:0 0 14px}'+
+    'table{width:100%;border-collapse:collapse;font-size:11px}'+
+    'th{background:#0D1B2A;color:#fff;padding:6px 5px;text-align:left;font-size:9.5px}'+
+    'td{padding:5px;border-bottom:1px solid #eee}.c{text-align:center}'+
+    'tfoot td{border-top:2px solid #0D1B2A;font-weight:800}'+
+    '.nota{font-size:9px;color:#8a93a5;margin-top:12px;line-height:1.5}'+
+    '@media print{body{padding:8px}}</style></head><body>'+
+    '<h1>Asistencia — '+d.desde.split('-').reverse().join('/')+' a '+d.hasta.split('-').reverse().join('/')+'</h1>'+
+    '<h2>'+d.jornadas.length+' jornadas de entrenamiento · '+d.nJugadores+' jugadores · '+
+      'asistencia del plantel '+(t.pct==null?'—':t.pct.toFixed(1)+'%')+'</h2>'+
+    '<table><thead><tr><th>Jugador</th><th>Jorn.</th><th>Pres.</th><th>Difer.</th><th>Kin. club</th>'+
+      '<th>A. méd.</th><th>A. kin.</th><th>A. injust.</th><th>A. s/esp.</th><th>% asist.</th><th>Sin reg.</th></tr></thead>'+
+    '<tbody>'+filas+'</tbody>'+
+    '<tfoot><tr><td>PLANTEL</td><td class="c">'+t.registradas+'</td><td class="c">'+t.P+'</td><td class="c">'+t.D+'</td>'+
+      '<td class="c">'+t.K+'</td><td class="c">'+t.AM+'</td><td class="c">'+t.AK+'</td><td class="c">'+t.AI+'</td>'+
+      '<td class="c">'+t.A+'</td><td class="c">'+(t.pct==null?'—':t.pct.toFixed(0)+'%')+'</td><td class="c">'+t.sinRegistro+'</td></tr></tfoot>'+
+    '</table>'+
+    '<div class="nota">Las jornadas se toman de las semanas de Planificación: los días sin trabajo cargado no cuentan como entrenamiento y no generan ausencias. '+
+    'El % de asistencia es (Presente + Diferenciado'+(_asisKComoAsist?' + Kinesio en el club':'')+') sobre las jornadas con marca registrada.</div>'+
+    '</body></html>';
+  var w=window.open('','_blank');
+  if(!w){ alert('El navegador bloqueó la ventana. Permití las ventanas emergentes para imprimir.'); return; }
+  w.document.write(html); w.document.close();
+  setTimeout(function(){ try{ w.print(); }catch(e){} },260);
+}
+window.asisImprimir=asisImprimir;
 
 // ── DISPONIBILIDAD DEL PLANTEL (v133) ─────────────────────────────────────
 // La disponibilidad es del PLANTEL, no del día: un jugador que pasa a Reserva
@@ -46957,6 +47506,7 @@ function hoyRender(){
     // v139: en lesionados, mostrar además cómo trabajan hoy (dif./kinesio)
     var outLbl=HOY_ESTADOS[s.out]?HOY_ESTADOS[s.out].lbl:s.out;
     if(s.out==='lesion'&&s.asist&&HOY_ASIST_META[s.asist]) outLbl+=' · '+HOY_ASIST_META[s.asist].lbl;
+    if(s.out==='ausente'&&s.asist&&HOY_ASIST_META[s.asist]) outLbl=HOY_ASIST_META[s.asist].lbl;
     var sub=s.level==='none'?'sin check-in':(s.level==='out'?outLbl:(s.reasons.length?(s.reasons[0].txt):'OK'));
     return '<div class="hoy-pl '+cls+'" onclick="hoyOpenPlayer('+i+')" data-hoy-idx="'+i+'" title="'+s.name.replace(/"/g,'&quot;')+'">'+
       '<b>'+dot+' '+hoyShortName(s.name)+'</b><small>'+sub+'</small></div>';
@@ -47010,7 +47560,7 @@ function hoyRender(){
     // v186: traer al instante lo que cargaron los jugadores desde sus celulares
     '<button class="hoy-btn" style="background:#3B4D88;padding:8px 14px" onclick="hoyRefrescarAhora(this)" title="Trae los check-in y cambios de los otros dispositivos">🔄 Actualizar</button>'+
     (nMarcados?'<button class="hoy-btn" style="background:#fff;color:#888;border:1px solid #ddd;padding:8px 12px" onclick="hoyAsistClear()">↺ Limpiar</button>':'')+
-    '<span style="font-size:10px;color:#999;flex:1;min-width:170px">Marcá las excepciones: cada toque cambia Presente → Diferenciado → Kinesio → Ausente</span>'+
+    '<span style="font-size:10px;color:#999;flex:1;min-width:170px">Marcá las excepciones: cada toque cambia Presente → Diferenciado → Kinesio → Ausente. Al quedar ausente, elegí el motivo (🩺 médica · 🦵 kinesio · ⛔ injustificada).</span>'+
   '</div>'+
   '<div class="hoy-sem">'+
     asistables.map(function(s){
@@ -47021,12 +47571,25 @@ function hoyRender(){
       // jugador sano, pero se puede tocar igual para ponerle D / K / A.
       var baseStyle=meta?('background:'+meta.bg+';border-color:'+meta.bd)
                         :(esLes?'background:#fff6f6;border-color:#E24B4A55':'');
+      var nmJs=asisArg(s.nameL);   // v196: escapa para JS y para HTML
+      // v196: si quedó ausente, se despliegan los tres motivos para elegir
+      var tiposHtml='';
+      if(hoyEsAusencia(st)){
+        tiposHtml='<div class="hoy-aus">'+
+          HOY_AUS_TIPOS.map(function(code){
+            var mt=HOY_ASIST_META[code], on=(st===code);
+            return '<button type="button" class="hoy-aus-b'+(on?' on':'')+'" '+
+              'style="'+(on?('background:'+mt.col+';border-color:'+mt.col+';color:#fff'):('color:'+mt.col+';border-color:'+mt.bd))+'" '+
+              'onclick="event.stopPropagation();hoyAsistSetTipo(\''+nmJs+'\',\''+code+'\')" '+
+              'title="'+mt.lbl+(on?' — tocá de nuevo para dejarla sin especificar':'')+'">'+mt.ico+'</button>';
+          }).join('')+'</div>';
+      }
       return '<div class="hoy-pl" style="'+baseStyle+(esLes?';border-left:3px solid #E24B4A':'')+'" '+
-        'onclick="hoyAsistCycle(\''+s.nameL.replace(/'/g,"\\'")+'\')" '+
+        'onclick="hoyAsistCycle(\''+nmJs+'\')" '+
         'title="'+(esLes?'Lesionado — tocá para marcar cómo trabaja hoy':'Tocá para cambiar')+'">'+
-        '<b>'+(meta?meta.ico+' ':(esLes?'🚑 ':''))+hoyShortName(s.name)+'</b>'+
+        '<b>'+(meta?meta.ico+' ':(esLes?'🚑 ':''))+hoyEsc(hoyShortName(s.name))+'</b>'+
         '<small style="'+(meta?('color:'+meta.col+';font-weight:700'):(esLes?'color:#E24B4A;font-weight:700':''))+'">'+
-          (meta?meta.lbl:(esLes?'lesión — sin marcar':'sin marcar'))+'</small></div>';
+          (meta?meta.lbl:(esLes?'lesión — sin marcar':'sin marcar'))+'</small>'+tiposHtml+'</div>';
     }).join('')+
   '</div>'+
   (nLes?'<div style="font-size:10px;color:#888;margin-top:7px">🚑 Los lesionados aparecen para que marques cómo trabajan hoy (diferenciado, kinesio o ausente). No cuentan en el total de presentes ni cambian su estado en el plantel.</div>':'')+
