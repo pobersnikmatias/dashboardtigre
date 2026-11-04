@@ -4310,7 +4310,12 @@ function setMainView(v){
     btn.style.borderBottom=v===vv?'2px solid '+(_SMV_COLORS[vv]||'#3B4D88'):'2px solid transparent';
   });
   // 'match' ya no tiene botón en el nav principal — ahora vive dentro de fixture como subtab GPS
-  if(v==='hoy'){if(typeof hoyRender==='function')hoyRender();}
+  if(v==='hoy'){
+    // v197: al entrar a la pestaña se vuelve al día de hoy, para no quedar
+    // parado en una fecha vieja de una sesión anterior.
+    try{ if(typeof _hoyFecha!=='undefined') _hoyFecha=null; }catch(e){}
+    if(typeof hoyRender==='function')hoyRender();
+  }
   if(v==='micro'){mcRebuildWeekSel();if(typeof mcRebuildLoadMetricSelector==='function')mcRebuildLoadMetricSelector();mcRenderWeek();mcRenderLoad();mcRenderBandConfig();mcEstInit();}
   if(v==='profiles'){if(typeof renderProfilesTable==='function')renderProfilesTable();}
   if(v==='players'){if(typeof plRebuild==='function')plRebuild();}
@@ -4782,7 +4787,12 @@ function _buildFullPayload(stripImages){
     // v196: el registro de asistencia vivía sólo en localStorage y se poda a
     // 120 días. Ahora que alimenta reportes, viaja también en el backup.
     HOY_ASIST:(typeof HOY_ASIST!=='undefined' && HOY_ASIST)?JSON.parse(JSON.stringify(HOY_ASIST)):{},
-    HOY_ASIST_TS:(typeof HOY_ASIST_TS!=='undefined' && HOY_ASIST_TS)?JSON.parse(JSON.stringify(HOY_ASIST_TS)):{}
+    HOY_ASIST_TS:(typeof HOY_ASIST_TS!=='undefined' && HOY_ASIST_TS)?JSON.parse(JSON.stringify(HOY_ASIST_TS)):{},
+    // v197: condiciones anotadas por día (planificación y correcciones)
+    HOY_COND:(typeof HOY_COND!=='undefined' && HOY_COND)?JSON.parse(JSON.stringify(HOY_COND)):{},
+    HOY_COND_TS:(typeof HOY_COND_TS!=='undefined' && HOY_COND_TS)?JSON.parse(JSON.stringify(HOY_COND_TS)):{},
+    HOY_FLAGS_D:(typeof HOY_FLAGS_D!=='undefined' && HOY_FLAGS_D)?JSON.parse(JSON.stringify(HOY_FLAGS_D)):{},
+    HOY_FLAGS_D_TS:(typeof HOY_FLAGS_D_TS!=='undefined' && HOY_FLAGS_D_TS)?JSON.parse(JSON.stringify(HOY_FLAGS_D_TS)):{}
   };
 }
 
@@ -5026,6 +5036,12 @@ function importData(ev){
       // días que la poda de 120 ya borró, y lo marcado hoy no se debe perder.
       if(p.HOY_ASIST && typeof hoyAsistMerge==='function'){
         try{ hoyAsistMerge(p.HOY_ASIST, p.HOY_ASIST_TS||null); }catch(e){ console.warn('Asistencia al importar:',e); }
+      }
+      if(p.HOY_COND && typeof hoyCondMerge==='function'){
+        try{ hoyCondMerge(p.HOY_COND, p.HOY_COND_TS||null); }catch(e){ console.warn('Condición al importar:',e); }
+      }
+      if(p.HOY_FLAGS_D && typeof hoyFlagsMerge==='function'){
+        try{ hoyFlagsMerge(p.HOY_FLAGS_D, p.HOY_FLAGS_D_TS||null); }catch(e){ console.warn('Estado del CT al importar:',e); }
       }
       if(p.PLAN_WEEKS){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});if(typeof planMigrateAll==='function')planMigrateAll();if(typeof planPreserveEditing==='function')planPreserveEditing();}
       if(p.WELLNESS_DATA && typeof WELLNESS_DATA!=='undefined'){WELLNESS_DATA.length=0;p.WELLNESS_DATA.forEach(function(r){WELLNESS_DATA.push(r);});}
@@ -8068,6 +8084,21 @@ function profRenameEverywhere(oldKey, oldName, newName){
   var newN=(typeof cargaNormName==='function')?cargaNormName(newName):String(newName||'').toLowerCase().trim();
   if(oldN && newN && oldN!==newN){
     try{
+      // v197: la condición y el estado del CT por día siguen al nombre nuevo
+      [ ['hoyCond_v1',    (typeof HOY_COND!=='undefined'?HOY_COND:null)],
+        ['hoyCondTs_v1',  (typeof HOY_COND_TS!=='undefined'?HOY_COND_TS:null)],
+        ['hoyFlagsD_v1',  (typeof HOY_FLAGS_D!=='undefined'?HOY_FLAGS_D:null)],
+        ['hoyFlagsDTs_v1',(typeof HOY_FLAGS_D_TS!=='undefined'?HOY_FLAGS_D_TS:null)]
+      ].forEach(function(par){
+        var lsKey=par[0], est=par[1];
+        if(!est)return;
+        Object.keys(est).forEach(function(d){
+          var day=est[d]; if(!day||day[oldN]===undefined)return;
+          if(day[newN]===undefined) day[newN]=day[oldN];
+          delete day[oldN];
+        });
+        try{ localStorage.setItem(lsKey, JSON.stringify(est)); }catch(e){}
+      });
       // v196: los sellos de tiempo acompañan a la marca. Si se quedaban con el
       // nombre viejo, el merge con la nube devolvía las entradas anteriores.
       if(typeof HOY_ASIST_TS!=='undefined'&&HOY_ASIST_TS){
@@ -8180,6 +8211,20 @@ function saveProfile(){
     profDeleteRemote(editKey);
   }
   profTombClear(key); // la key destino existe: no debe estar tombstoneada
+
+  // v197b: si hoy había una condición anotada para este jugador, se actualiza
+  // con lo que se acaba de guardar. Si no, la pestaña Hoy seguiría mostrando
+  // el valor viejo y el aviso ofrecería "aplicar al plantel" lo que se acaba
+  // de cambiar acá, revirtiendo la edición.
+  try{
+    if(typeof HOY_COND!=='undefined' && typeof hoyLocalISO==='function'){
+      var _hd=hoyLocalISO(), _nl=(typeof hoyNorm==='function')?hoyNorm(name.trim()):String(name).toLowerCase().trim();
+      if(HOY_COND[_hd] && HOY_COND[_hd][_nl]!==undefined && HOY_COND[_hd][_nl]!==estado){
+        HOY_COND[_hd][_nl]=estado;
+        if(typeof hoySetCondDia==='function') hoySetCondDia(_hd,_nl,estado);
+      }
+    }
+  }catch(e){ console.warn('[Perfiles] sincronizar condición de hoy:',e); }
 
   _profEditKey = key;  // seguimos editando el mismo jugador, ya con su key nueva
   if(typeof profSaveOne==='function') profSaveOne(key); else saveData();
@@ -19440,6 +19485,8 @@ document.addEventListener('DOMContentLoaded',function(){
 #view-hoy .hoy-pl.o{background:#f0f2f7;border-color:#c7cede;opacity:0.75}
 #view-hoy .hoy-pl.o-les{background:#faf0f0;border-color:#dcb9b9}
 #view-hoy .hoy-pl.o-nod{background:#f2f2f2;border-color:#c9c9c9}
+#view-hoy .hoy-nav{display:flex;gap:7px;align-items:center;flex-wrap:wrap;background:#f8faff;border:1px solid #e0e8f5;border-radius:10px;padding:8px 10px;margin-bottom:10px}
+#view-hoy .hoy-nav button:active{transform:scale(.96)}
 #view-hoy .hoy-aus{display:flex;gap:3px;margin-top:5px;justify-content:center}
 #view-hoy .hoy-aus-b{flex:1;min-width:0;border:1px solid #ddd;background:#fff;border-radius:6px;padding:3px 0;font-size:12px;line-height:1.35;cursor:pointer;filter:grayscale(.55);opacity:.8}
 #view-hoy .hoy-aus-b.on{filter:none;opacity:1}
@@ -37835,6 +37882,10 @@ var SB_SETTINGS_KEYS = [
   'HOY_FLAGS',
   'HOY_ASIST',
   'HOY_ASIST_TS',
+  'HOY_COND',        // v197: condición por día (planificar / corregir)
+  'HOY_COND_TS',
+  'HOY_FLAGS_D',     // v197: estado del CT por día
+  'HOY_FLAGS_D_TS',
   'HOY_CFG',
   'CARGA_WEEK_CTX',
   'CATS',
@@ -37885,7 +37936,7 @@ function _sbSettingsToPayloads(){
   // Claves "borrables": deben subir INCLUSO vacías, para que al borrar el último
   // ítem (pendiente, disponibilidad, asistencia) el vacío se propague a la nube.
   // Si no, la nube conserva la versión vieja con datos y reaparecen al recargar.
-  var ALWAYS_SYNC = {HOY_FLAGS:1, HOY_TODOS:1, HOY_ASIST:1, HOY_CFG:1, CARGA_WEEK_CTX:1};
+  var ALWAYS_SYNC = {HOY_FLAGS:1, HOY_TODOS:1, HOY_ASIST:1, HOY_CFG:1, CARGA_WEEK_CTX:1, HOY_COND:1, HOY_FLAGS_D:1};
   var out = [];
   SB_SETTINGS_KEYS.forEach(function(k){
     var v = _sbReadGlobal(k);
@@ -37949,6 +38000,30 @@ function _sbApplySettingRow(row){
   // v186: asistencia con sellos — gana la marca más reciente
   // Las dos filas (datos y sellos) pueden llegar en cualquier orden, así que
   // cada una guarda lo suyo y dispara el merge con lo que haya disponible.
+  // v197: estado del CT por día — mismo criterio de sellos
+  if(row.key==='HOY_FLAGS_D' || row.key==='HOY_FLAGS_D_TS'){
+    try{
+      if(row.key==='HOY_FLAGS_D') window._hoyFlagsPend=row.value||{};
+      else window._hoyFlagsTsPend=row.value||{};
+      if(window._hoyFlagsPend && typeof hoyFlagsMerge==='function'){
+        var nf=hoyFlagsMerge(window._hoyFlagsPend, window._hoyFlagsTsPend||null);
+        if(nf){ try{ if(typeof mainView!=='undefined'&&mainView==='hoy'&&typeof hoyRender==='function')hoyRender(); }catch(e){} }
+      }
+    }catch(e){ console.warn('[Hoy] merge estado del CT:',e); }
+    return;
+  }
+  // v197: condición por día — mismo criterio de sellos que la asistencia
+  if(row.key==='HOY_COND' || row.key==='HOY_COND_TS'){
+    try{
+      if(row.key==='HOY_COND') window._hoyCondPend=row.value||{};
+      else window._hoyCondTsPend=row.value||{};
+      if(window._hoyCondPend && typeof hoyCondMerge==='function'){
+        var nc=hoyCondMerge(window._hoyCondPend, window._hoyCondTsPend||null);
+        if(nc){ try{ if(typeof mainView!=='undefined'&&mainView==='hoy'&&typeof hoyRender==='function')hoyRender(); }catch(e){} }
+      }
+    }catch(e){ console.warn('[Hoy] merge condición:',e); }
+    return;
+  }
   if(row.key==='HOY_ASIST' || row.key==='HOY_ASIST_TS'){
     try{
       if(row.key==='HOY_ASIST') window._hoyAsistPend=row.value||{};
@@ -46501,6 +46576,90 @@ try{ HOY_FLAGS = JSON.parse(localStorage.getItem('hoyFlags_v1')||'{}') || {}; }c
 function hoySyncCloud(){ if(typeof sbScheduleTanda3Sync==='function'){ try{ sbScheduleTanda3Sync(); }catch(e){} } }
 function hoySaveFlags(){ try{ localStorage.setItem('hoyFlags_v1', JSON.stringify(HOY_FLAGS)); }catch(e){} hoySyncCloud(); }
 
+// ── v197: estado del CT por día ──
+// HOY_FLAGS_D = { 'YYYY-MM-DD': { nombreNormalizado: {flag:'medico'|'dif', note:''} } }
+// HOY_FLAGS (sin fecha) se mantiene como el estado de HOY: lo siguen leyendo
+// los dispositivos que todavía no actualizaron y la sincronización existente.
+var HOY_FLAGS_D={};
+try{
+  var _hfdv=JSON.parse(localStorage.getItem('hoyFlagsD_v1')||'{}');
+  if(_hfdv&&typeof _hfdv==='object'&&!Array.isArray(_hfdv)) HOY_FLAGS_D=_hfdv;
+}catch(e){ HOY_FLAGS_D={}; }
+var HOY_FLAGS_D_TS={};
+try{
+  var _hfd=JSON.parse(localStorage.getItem('hoyFlagsDTs_v1')||'null');
+  if(_hfd&&typeof _hfd==='object'&&!Array.isArray(_hfd)) HOY_FLAGS_D_TS=_hfd;
+}catch(e){}
+function hoyFlagsStamp(date,nameL){
+  if(!HOY_FLAGS_D_TS[date]) HOY_FLAGS_D_TS[date]={};
+  HOY_FLAGS_D_TS[date][nameL]=Date.now();
+}
+function hoyFlagsTs(date,nameL){
+  return (HOY_FLAGS_D_TS[date]&&HOY_FLAGS_D_TS[date][nameL])||0;
+}
+window.hoyFlagsTs=hoyFlagsTs;
+function hoyFlagsMerge(remoto, remotoTs){
+  if(!remoto||typeof remoto!=='object')return 0;
+  var cambios=0;
+  Object.keys(remoto).forEach(function(fecha){
+    var dr=remoto[fecha];
+    if(!dr||typeof dr!=='object')return;
+    if(!HOY_FLAGS_D[fecha]) HOY_FLAGS_D[fecha]={};
+    Object.keys(dr).forEach(function(n){
+      var tMio=hoyFlagsTs(fecha,n);
+      var tSuyo=(remotoTs&&remotoTs[fecha]&&remotoTs[fecha][n])||0;
+      var mio=HOY_FLAGS_D[fecha][n];
+      if(mio===undefined){
+        if(tMio>0 && tSuyo<=tMio) return;              // v197b: lápida local
+        HOY_FLAGS_D[fecha][n]=dr[n]; cambios++;
+        if(tSuyo){ if(!HOY_FLAGS_D_TS[fecha])HOY_FLAGS_D_TS[fecha]={}; HOY_FLAGS_D_TS[fecha][n]=tSuyo; }
+        return;
+      }
+      if(JSON.stringify(mio)===JSON.stringify(dr[n])){
+        if(tSuyo>tMio){ if(!HOY_FLAGS_D_TS[fecha])HOY_FLAGS_D_TS[fecha]={}; HOY_FLAGS_D_TS[fecha][n]=tSuyo; }
+        return;
+      }
+      if(tSuyo>tMio){
+        HOY_FLAGS_D[fecha][n]=dr[n];
+        if(!HOY_FLAGS_D_TS[fecha])HOY_FLAGS_D_TS[fecha]={};
+        HOY_FLAGS_D_TS[fecha][n]=tSuyo;
+        cambios++;
+      }
+    });
+  });
+  try{
+    localStorage.setItem('hoyFlagsD_v1', JSON.stringify(HOY_FLAGS_D));
+    localStorage.setItem('hoyFlagsDTs_v1', JSON.stringify(HOY_FLAGS_D_TS));
+  }catch(e){}
+  return cambios;
+}
+window.hoyFlagsMerge=hoyFlagsMerge;
+function hoySaveFlagsD(){
+  try{
+    var hoy=hoyLocalISO();
+    var pasados=Object.keys(HOY_FLAGS_D).filter(function(k){ return k<hoy; }).sort();
+    while(pasados.length>400){
+      var kk=pasados.shift();
+      delete HOY_FLAGS_D[kk]; delete HOY_FLAGS_D_TS[kk];
+    }
+    var limF=hoyFechaShift(hoy,-400);
+    Object.keys(HOY_FLAGS_D_TS).forEach(function(k){ if(k<limF) delete HOY_FLAGS_D_TS[k]; });
+    localStorage.setItem('hoyFlagsD_v1', JSON.stringify(HOY_FLAGS_D));
+    localStorage.setItem('hoyFlagsDTs_v1', JSON.stringify(HOY_FLAGS_D_TS));
+  }catch(e){}
+  hoySyncCloud();
+}
+window.hoySaveFlagsD=hoySaveFlagsD;
+// Estado del CT de un jugador en una fecha. Para el día de hoy, si todavía no
+// hay nada por día, vale lo que haya en la estructura vieja.
+function hoyFlagOf(dateISO, nameL){
+  var dia=HOY_FLAGS_D[dateISO];
+  if(dia && dia[nameL]!==undefined) return dia[nameL]||null;
+  if(dateISO===hoyLocalISO()) return HOY_FLAGS[nameL]||null;
+  return null;
+}
+window.hoyFlagOf=hoyFlagOf;
+
 // Configuración de la pestaña Hoy (persistente)
 var HOY_CFG={useACWR:true, acwrHigh:1.5, acwrWarn:1.3, lowWarn:false};
 try{ var _hc=JSON.parse(localStorage.getItem('hoyCfg_v1')||'null'); if(_hc)HOY_CFG=Object.assign(HOY_CFG,_hc); }catch(e){}
@@ -46603,6 +46762,10 @@ function hoyDailyAU(nameL, dateISO){
 // ── ACWR (agudo 7d / crónico 28d, medias diarias) ──
 function hoyACWR(nameL, todayISO){
   var base=new Date(todayISO+'T12:00:00');
+  // v197: si la fecha es futura, se ancla en hoy. Si no, la ventana aguda se
+  // llena de días sin datos y el cociente cae solo hasta 0.00.
+  var hoyReal=hoyLocalISO(), proyectado=false;
+  if(todayISO>hoyReal){ base=new Date(hoyReal+'T12:00:00'); proyectado=true; }
   var sum7=0, sum28=0, daysWith=0;
   for(var i=0;i<28;i++){
     var d=new Date(base); d.setDate(d.getDate()-i);
@@ -46613,18 +46776,21 @@ function hoyACWR(nameL, todayISO){
   if(daysWith<4 || sum28<=0) return null;              // datos insuficientes
   var acute=sum7/7, chronic=sum28/28;
   if(chronic<=0) return null;
-  return {ratio:acute/chronic, acute:Math.round(acute), chronic:Math.round(chronic), days:daysWith};
+  return {ratio:acute/chronic, acute:Math.round(acute), chronic:Math.round(chronic), days:daysWith, proyectado:proyectado};
 }
 
 // ── Estado del semáforo de un jugador ──
 function hoyPlayerStatus(name, todayISO, profMap){
   var nameL=hoyNorm(name);
   var reasons=[], level='green', ambers=0;
-  var flag=HOY_FLAGS[nameL];
+  var flag=(typeof hoyFlagOf==='function')?hoyFlagOf(todayISO, nameL):HOY_FLAGS[nameL];   // v197
 
-  // 1º manda el estado del perfil: Primera / Reserva / Lesión = no disponible hoy
+  // 1º manda la condición del día (v197: anotada para esa fecha, o la del
+  // perfil si ese día no tiene nada anotado): Primera / Reserva / Lesión = no
+  // disponible ese día.
   var prof=(profMap||hoyProfileByNorm())[nameL];
-  var est=prof&&prof.estado?prof.estado:'disponible';
+  var est=(typeof hoyCondOf==='function')?hoyCondOf(todayISO, nameL, profMap)
+          :(prof&&prof.estado?prof.estado:'disponible');
   if(HOY_ESTADOS[est]){
     // v139: si es un lesionado y ya se marcó cómo trabaja hoy (diferenciado,
     // kinesio, ausente), mostrarlo junto al estado en vez de solo "Lesión".
@@ -46644,11 +46810,12 @@ function hoyPlayerStatus(name, todayISO, profMap){
   if(hoyEsAusencia(asist)){
     var mAus=HOY_ASIST_META[asist];
     return {name:name, nameL:nameL, level:'out', out:'ausente', asist:asist,
-            reasons:[{t:'out', txt:mAus.ico+' '+mAus.lbl+' (asistencia de hoy)'}],
+            reasons:[{t:'out', txt:mAus.ico+' '+mAus.lbl+' (asistencia'+((typeof hoyEsHoy==='function'&&!hoyEsHoy())?(' del '+todayISO.slice(8,10)+'/'+todayISO.slice(5,7)):' de hoy')+')'}],
             wellness:hoyWellnessToday(nameL, todayISO), acwr:null, flag:flag||null};
   }
-  if(asist==='K'){ level='red'; reasons.push({t:'red', txt:'🚑 En kinesiología/médico (asistencia de hoy)'}); }
-  else if(asist==='D'){ ambers++; reasons.push({t:'amber', txt:'Trabajo diferenciado (asistencia de hoy)'}); }
+  var _asDia=(typeof hoyEsHoy==='function'&&!hoyEsHoy())?(' del '+todayISO.slice(8,10)+'/'+todayISO.slice(5,7)):' de hoy';
+  if(asist==='K'){ level='red'; reasons.push({t:'red', txt:'🚑 En kinesiología/médico (asistencia'+_asDia+')'}); }
+  else if(asist==='D'){ ambers++; reasons.push({t:'amber', txt:'Trabajo diferenciado (asistencia'+_asDia+')'}); }
 
   if(flag && (flag.flag==='medico')){
     level='red'; reasons.push({t:'red', txt:'Estado médico/kinesio'+(flag.note?': '+flag.note:'')});
@@ -46677,9 +46844,10 @@ function hoyPlayerStatus(name, todayISO, profMap){
   var ac=HOY_CFG.useACWR?hoyACWR(nameL, todayISO):null;
   if(ac){
     var r=ac.ratio;
-    if(r>HOY_CFG.acwrHigh){ level='red'; reasons.push({t:'red', txt:'ACWR '+r.toFixed(2)+' — pico de carga (agudo '+ac.acute+' vs crónico '+ac.chronic+' AU/día)'}); }
-    else if(r>HOY_CFG.acwrWarn){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+' — carga en ascenso'}); }
-    else if(HOY_CFG.lowWarn&&r<0.8){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+' — subcarga, cuidar el reingreso'}); }
+    var proy=ac.proyectado?' (al día de hoy)':'';
+    if(r>HOY_CFG.acwrHigh){ level='red'; reasons.push({t:'red', txt:'ACWR '+r.toFixed(2)+proy+' — pico de carga (agudo '+ac.acute+' vs crónico '+ac.chronic+' AU/día)'}); }
+    else if(r>HOY_CFG.acwrWarn){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+proy+' — carga en ascenso'}); }
+    else if(HOY_CFG.lowWarn&&r<0.8){ ambers++; reasons.push({t:'amber', txt:'ACWR '+r.toFixed(2)+proy+' — subcarga, cuidar el reingreso'}); }
   }
 
   if(level!=='red'){
@@ -46691,14 +46859,30 @@ function hoyPlayerStatus(name, todayISO, profMap){
 }
 
 // ── Sesión de hoy desde la última planificación semanal ──
-function hoyTodaysPlan(){
+function hoyTodaysPlan(dateISO){
   if(!(typeof PLAN_WEEKS!=='undefined') || !PLAN_WEEKS.length) return null;
-  var sorted=PLAN_WEEKS.slice().sort(function(a,b){ return (b.created||'').localeCompare(a.created||''); });
-  var week=sorted[0];
-  var dow=new Date().getDay();                       // 0=Dom .. 6=Sáb
+  var iso=dateISO||((typeof hoyFechaSel==='function')?hoyFechaSel():hoyLocalISO());
   var labels=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-  var todayLbl=labels[dow];
-  var day=(week.days||[]).find(function(d){ return d.label===todayLbl; });
+  var todayLbl=labels[new Date(iso+'T12:00:00').getDay()];
+  var week=null, day=null;
+  // v197: primero la semana cuyo rango de fechas cubre el día. Así al moverse
+  // de día se muestra el plan que corresponde y no siempre el de la última
+  // semana cargada. Si ninguna tiene fecha, se usa el criterio anterior.
+  try{
+    (PLAN_WEEKS||[]).slice().sort(function(a,b){
+      return String(a&&a.created||'').localeCompare(String(b&&b.created||''));
+    }).forEach(function(w){
+      if(!w||!w.startDate)return;
+      var len=parseInt(w.weekLen,10)||7;
+      var idx=Math.round((new Date(iso+'T12:00:00')-new Date(w.startDate+'T12:00:00'))/86400000);
+      if(idx>=0 && idx<len && (w.days||[])[idx]){ week=w; day=w.days[idx]; }
+    });
+  }catch(e){}
+  if(!week){
+    var sorted=PLAN_WEEKS.slice().sort(function(a,b){ return (b.created||'').localeCompare(a.created||''); });
+    week=sorted[0];
+    day=(week.days||[]).find(function(d){ return d.label===todayLbl; });
+  }
   if(!day) return {week:week, day:null, todayLbl:todayLbl};
   var items=[];
   var blocks=day.blocks||[];
@@ -46737,7 +46921,8 @@ window.hoyTodoWeekNav=hoyTodoWeekNav;
 function hoyTodoWeekReset(){ _hoyTodoWeekOff=0; hoyRender(); }
 window.hoyTodoWeekReset=hoyTodoWeekReset;
 function hoyTodoMonday(off){
-  var d=new Date(hoyLocalISO()+'T12:00:00');
+  // v197: la semana mostrada acompaña al día que se está mirando
+  var d=new Date(((typeof hoyFechaSel==='function')?hoyFechaSel():hoyLocalISO())+'T12:00:00');
   var dow=(d.getDay()+6)%7; // lunes=0
   d.setDate(d.getDate()-dow+off*7);
   return d;
@@ -46753,7 +46938,9 @@ window.hoyTodoAddOn=hoyTodoAddOn;
 function hoyTodoAdd(){
   var inp=document.getElementById('hoy-todo-inp'); if(!inp)return;
   var txt=(inp.value||'').trim(); if(!txt)return;
-  HOY_TODOS.push({id:Date.now(), txt:txt.slice(0,120), done:false, date:hoyLocalISO()});
+  // v197: el pendiente rápido se guarda en el día que se está mirando
+  HOY_TODOS.push({id:Date.now(), txt:txt.slice(0,120), done:false,
+                  date:(typeof hoyFechaSel==='function')?hoyFechaSel():hoyLocalISO()});
   inp.value='';
   hoySaveTodos(); hoyRender();
 }
@@ -46845,10 +47032,15 @@ function hoyAsistMerge(remoto, remotoTs){
       var tMio=hoyAsistTs(fecha,n);
       var tSuyo=(remotoTs&&remotoTs[fecha]&&remotoTs[fecha][n])||0;
       var mio=HOY_ASIST[fecha][n];
-      if(mio===undefined){ HOY_ASIST[fecha][n]=dr[n]; cambios++;
+      if(mio===undefined){
+        if(tMio>0 && tSuyo<=tMio) return;              // v197b: lápida local
+        HOY_ASIST[fecha][n]=dr[n]; cambios++;
         if(tSuyo){ if(!HOY_ASIST_TS[fecha])HOY_ASIST_TS[fecha]={}; HOY_ASIST_TS[fecha][n]=tSuyo; }
         return; }
-      if(mio===dr[n])return;
+      if(mio===dr[n]){
+        if(tSuyo>tMio){ if(!HOY_ASIST_TS[fecha])HOY_ASIST_TS[fecha]={}; HOY_ASIST_TS[fecha][n]=tSuyo; }
+        return;
+      }
       // Los dos tienen valor y difieren: gana el más nuevo
       if(tSuyo>tMio){
         HOY_ASIST[fecha][n]=dr[n];
@@ -46869,7 +47061,10 @@ window.hoyAsistMerge=hoyAsistMerge;
 function hoySaveAsist(){
   // Poda: conservar solo los últimos 120 días para que el registro viaje liviano
   try{
-    var keys=Object.keys(HOY_ASIST).sort();
+    // v197b: sólo cuentan los días PASADOS. Antes cada día futuro planificado
+    // recortaba un día de historial, aunque las flechas dejan ir 120 atrás.
+    var _hoyA=hoyLocalISO();
+    var keys=Object.keys(HOY_ASIST).filter(function(k){ return k<_hoyA; }).sort();
     while(keys.length>120){ var kk=keys.shift(); delete HOY_ASIST[kk]; delete HOY_ASIST_TS[kk]; }
     localStorage.setItem('hoyAsist_v1', JSON.stringify(HOY_ASIST));
     localStorage.setItem('hoyAsistTs_v1', JSON.stringify(HOY_ASIST_TS));
@@ -46878,13 +47073,14 @@ function hoySaveAsist(){
 }
 function hoyAsistGet(dateISO, nameL){ return (HOY_ASIST[dateISO]||{})[nameL]||null; }
 function hoyAsistCycle(nameL){
-  var today=hoyLocalISO();
+  var today=hoyFechaSel();   // v197: el día que se está mirando
   if(!HOY_ASIST[today])HOY_ASIST[today]={};
   var cur=HOY_ASIST[today][nameL];
   // v139: si el jugador está lesionado, el primer toque lo pone en
   // "Diferenciado" (no en "Presente"): viene a entrenar pero trabaja aparte.
-  var prof=hoyProfileByNorm()[nameL];
-  var esLesion=prof&&prof.estado==='lesion';
+  var esLesion=(typeof hoyCondOf==='function')
+    ? (hoyCondOf(today,nameL)==='lesion')
+    : (function(){ var p=hoyProfileByNorm()[nameL]; return !!(p&&p.estado==='lesion'); })();
   var next;
   if(!cur){
     next=esLesion?'D':'P';
@@ -46903,7 +47099,7 @@ window.hoyAsistCycle=hoyAsistCycle;
 // Si se vuelve a tocar el tipo ya marcado, se queda como ausencia sin especificar.
 function hoyAsistSetTipo(nameL, code){
   if(!HOY_ASIST_META[code])return;
-  var today=hoyLocalISO();
+  var today=hoyFechaSel();   // v197
   if(!HOY_ASIST[today])HOY_ASIST[today]={};
   HOY_ASIST[today][nameL]=(HOY_ASIST[today][nameL]===code)?'A':code;
   hoyAsistStamp(today,nameL);
@@ -46916,16 +47112,15 @@ window.hoyAsistSetTipo=hoyAsistSetTipo;
 // Ahora pone P a todos los jugadores DISPONIBLES del plantel, sin excepciones:
 // las excepciones se marcan después tocando cada uno.
 function hoyAsistAllPresent(){
-  var today=hoyLocalISO();
+  var today=hoyFechaSel();   // v197
   if(!HOY_ASIST[today])HOY_ASIST[today]={};
   var profMap=hoyProfileByNorm();
   var n=0, conservadas=0;
   hoyRoster().forEach(function(nm){
     var nameL=hoyNorm(nm);
-    var prof=profMap[nameL];
-    var est=(prof&&prof.estado)?prof.estado:'disponible';
-    // Los que no están disponibles en el plantel (Primera/Reserva/Lesión/No disp.)
-    // no participan del entrenamiento, así que no se marcan.
+    // v197: la condición de ESE día (Primera/Reserva/Lesión/No disp. no entrenan)
+    var est=(typeof hoyCondOf==='function')?hoyCondOf(today,nameL,profMap)
+            :((profMap[nameL]&&profMap[nameL].estado)||'disponible');
     if(HOY_ESTADOS[est])return;
     // v196: no pisar una ausencia ya cargada. Tipificarla cuesta dos toques y
     // alimenta los reportes; si de verdad hay que reiniciar el día está
@@ -46942,9 +47137,13 @@ window.hoyAsistAllPresent=hoyAsistAllPresent;
 
 // Limpia la asistencia del día (volver a "sin marcar")
 function hoyAsistClear(){
-  var today=hoyLocalISO();
+  var today=hoyFechaSel();   // v197
   if(!HOY_ASIST[today]||!Object.keys(HOY_ASIST[today]).length)return;
-  if(!confirm('¿Borrar la asistencia marcada de hoy?\n\nNo afecta la disponibilidad del plantel.'))return;
+  var cual=(typeof hoyEsHoy==='function'&&hoyEsHoy())?'de hoy':('del '+today.slice(8,10)+'/'+today.slice(5,7));
+  if(!confirm('¿Borrar la asistencia marcada '+cual+'?\n\nNo afecta la disponibilidad del plantel.'))return;
+  // v197b: sellar cada borrado. Sin la marca de "cuándo se borró", el merge con
+  // la nube devolvía las marcas al recargar.
+  try{ Object.keys(HOY_ASIST[today]||{}).forEach(function(n){ hoyAsistStamp(today,n); }); }catch(e){}
   delete HOY_ASIST[today];
   hoySaveAsist(); hoyRender();
 }
@@ -47091,17 +47290,35 @@ function asisCalcular(){
 
   // 4) Recuento por jugador
   var codigos=['P','D','K','A','AM','AK','AI'];
+  // v197: la condición de ese día (Reserva, Primera, Lesión, No disponible)
+  // saca al jugador de la jornada. No vino a entrenar porque no estaba citado:
+  // contarlo como ausente falsearía su porcentaje.
+  var profMapA={};
+  try{ profMapA=(typeof hoyProfileByNorm==='function')?hoyProfileByNorm():{}; }catch(e){}
+  var hoyISOa=(typeof hoyLocalISO==='function')?hoyLocalISO():'';
+  function condDia(fecha,k){
+    if(typeof hoyCondOf!=='function') return 'disponible';
+    // Días pasados: sólo lo anotado ese día. Hoy y los futuros sí heredan del
+    // perfil, que es lo que sirve para planificar.
+    try{ return hoyCondOf(fecha,k,profMapA, fecha<hoyISOa); }catch(e){ return 'disponible'; }
+  }
   var filas=Object.keys(nombres).map(function(k){
-    var f={nameL:k, name:nombres[k], jornadas:jornadas.length, sinRegistro:0, dias:[]};
+    var f={nameL:k, name:nombres[k], jornadas:jornadas.length, sinRegistro:0, noConvocado:0, dias:[]};
     codigos.forEach(function(c){ f[c]=0; });
     jornadas.forEach(function(j){
       var v=(ASIST[j.fecha]||{})[k]||null;
-      f.dias.push({fecha:j.fecha, md:j.md, code:v});
+      var cond=condDia(j.fecha,k);
+      var fuera=(cond!=='disponible');
+      f.dias.push({fecha:j.fecha, md:j.md, code:v, cond:fuera?cond:null});
+      // Si ese día no estaba a disposición y además no hay marca, no es una
+      // ausencia: queda fuera del cálculo. Si SÍ hay marca (por ejemplo un
+      // lesionado que vino a kinesio), la marca manda y se cuenta.
+      if(fuera && !v){ f.noConvocado++; return; }
       if(!v){ f.sinRegistro++; return; }
       if(f[v]===undefined) f[v]=0;
       f[v]++;
     });
-    f.registradas = f.jornadas - f.sinRegistro;
+    f.registradas = f.jornadas - f.sinRegistro - f.noConvocado;
     f.ausencias   = f.A + f.AM + f.AK + f.AI;
     f.asistencias = f.P + f.D + (_asisKComoAsist ? f.K : 0);
     f.base        = f.registradas;                       // sobre lo efectivamente registrado
@@ -47116,9 +47333,10 @@ function asisCalcular(){
   });
 
   // 5) Totales del plantel
-  var tot={P:0,D:0,K:0,A:0,AM:0,AK:0,AI:0,sinRegistro:0,registradas:0,asistencias:0,ausencias:0};
+  var tot={P:0,D:0,K:0,A:0,AM:0,AK:0,AI:0,sinRegistro:0,noConvocado:0,registradas:0,asistencias:0,ausencias:0};
   filas.forEach(function(f){
     ['P','D','K','A','AM','AK','AI'].forEach(function(c){ tot[c]+=f[c]; });
+    tot.noConvocado+=f.noConvocado;
     tot.sinRegistro+=f.sinRegistro; tot.registradas+=f.registradas;
     tot.asistencias+=f.asistencias; tot.ausencias+=f.ausencias;
   });
@@ -47230,6 +47448,7 @@ function asisRender(){
       th('✅ P','Presente')+th('🟡 D','Diferenciado')+th('🚑 K','Kinesio o médico en el club')+
       th('🩺 Méd.','Ausencia médica')+th('🦵 Kin.','Ausencia kinesiológica')+th('⛔ Inj.','Ausencia injustificada')+
       th('⬜ s/esp.','Ausencia sin motivo especificado (marcas anteriores a esta versión)')+
+      th('No conv.','Jornadas en las que ese día figuraba en Reserva, Primera, lesión o no disponible: no se cuentan como ausencia')+
       th('% asist.','Asistencias sobre jornadas registradas')+
       th('Sin reg.','Jornadas en las que no se marcó nada para este jugador')+
     '</tr></thead><tbody>';
@@ -47243,11 +47462,12 @@ function asisRender(){
       '<td style="padding:5px 6px;text-align:center;color:#8a93a5">'+f.registradas+'</td>'+
       num(f.P,'#1D9E75')+num(f.D,'#9A6A1B')+num(f.K,'#D9534F')+
       num(f.AM,'#B4542F')+num(f.AK,'#6B4FA8')+num(f.AI,'#C0392B')+num(f.A,'#888')+
+      num(f.noConvocado,'#3B4D88')+
       '<td style="padding:5px 6px;text-align:center;font-weight:800;color:'+asisPctCol(f.pct)+'">'+(f.pct==null?'—':f.pct.toFixed(0)+'%')+'</td>'+
       '<td style="padding:5px 6px;text-align:center;color:'+(f.sinRegistro?'#EF9F27':'#d8dce3')+'">'+f.sinRegistro+'</td>'+
     '</tr>';
     if(abierto){
-      html+='<tr style="background:#f9fbff"><td colspan="11" style="padding:9px 12px">'+asisDetalleHtml(f)+'</td></tr>';
+      html+='<tr style="background:#f9fbff"><td colspan="12" style="padding:9px 12px">'+asisDetalleHtml(f)+'</td></tr>';
     }
   });
   // Fila de totales
@@ -47261,6 +47481,7 @@ function asisRender(){
     '<td style="padding:6px;text-align:center;color:#6B4FA8">'+t.AK+'</td>'+
     '<td style="padding:6px;text-align:center;color:#C0392B">'+t.AI+'</td>'+
     '<td style="padding:6px;text-align:center;color:#888">'+t.A+'</td>'+
+    '<td style="padding:6px;text-align:center;color:#3B4D88">'+t.noConvocado+'</td>'+
     '<td style="padding:6px;text-align:center;color:'+asisPctCol(t.pct)+'">'+(t.pct==null?'—':t.pct.toFixed(0)+'%')+'</td>'+
     '<td style="padding:6px;text-align:center;color:#8a93a5">'+t.sinRegistro+'</td>'+
   '</tr>';
@@ -47268,6 +47489,7 @@ function asisRender(){
   html+='<div style="font-size:10px;color:#a3a9b6;margin-top:9px;line-height:1.5">'+
     'Las jornadas salen de <b>Planificación</b>: cuentan los días con trabajo cargado'+(_asisContarMD?' y el día de partido':'')+'; los días libres quedan afuera y no generan ausencias. '+
     'El <b>% de asistencia</b> es (Presente + Diferenciado'+(_asisKComoAsist?' + Kinesio en el club':'')+') sobre las jornadas en las que el jugador tiene marca. '+
+    'Las jornadas en las que el jugador figuraba en Reserva, Primera, lesión o no disponible salen de la cuenta como <b>no convocado</b>, no como ausencia. '+
     'Tocá un jugador para ver su detalle día por día.</div>';
 
   cont.innerHTML=html;
@@ -47281,13 +47503,18 @@ function asisDetalleHtml(f){
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:5px">';
   f.dias.forEach(function(dia){
     var m=dia.code?HOY_ASIST_META[dia.code]:null;
-    var bg=m?m.bg:'#fff', bd=m?m.bd:'#e4e6ec', col=m?m.col:'#c3cad6';
+    // v197: sin marca pero con condición ese día → no estaba convocado
+    var cm=(!m&&dia.cond&&typeof HOY_DISP_META!=='undefined')?HOY_DISP_META[dia.cond]:null;
+    var bg=m?m.bg:(cm?'#f4f6fb':'#fff'), bd=m?m.bd:(cm?'#dde3ef':'#e4e6ec');
+    var col=m?m.col:(cm?cm.col:'#c3cad6');
+    var ico=m?m.ico:(cm?cm.ico:'·');
+    var txt=m?(m.corto||m.lbl):(cm?cm.lbl:'sin reg.');
     h+='<div style="border:1px solid '+bd+';background:'+bg+';border-radius:7px;padding:4px 5px;text-align:center" title="'+
-      asisEsc(dia.fecha+(dia.md?' · '+dia.md:'')+' — '+(m?m.lbl:'sin registro'))+'">'+
+      asisEsc(dia.fecha+(dia.md?' · '+dia.md:'')+' — '+(m?m.lbl:(cm?('No convocado: '+cm.lbl):'sin registro')))+'">'+
       '<div style="font-size:9.5px;font-weight:700;color:#0D1B2A">'+dia.fecha.slice(8,10)+'/'+dia.fecha.slice(5,7)+'</div>'+
-      '<div style="font-size:11px">'+(m?m.ico:'·')+'</div>'+
+      '<div style="font-size:11px">'+ico+'</div>'+
       '<div style="font-size:7.5px;font-weight:700;color:'+col+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+
-        (m?(m.corto||m.lbl):'sin reg.')+'</div></div>';
+        asisEsc(txt)+'</div></div>';
   });
   h+='</div>';
   return h;
@@ -47299,9 +47526,9 @@ function asisCSV(){
   var sep=';';
   var filas=[['Jugador','Jornadas registradas','Presente','Diferenciado','Kinesio en club',
               'Aus. medica','Aus. kinesiologica','Aus. injustificada','Aus. sin especificar',
-              '% asistencia','Sin registro']];
+              'No convocado','% asistencia','Sin registro']];
   d.filas.forEach(function(f){
-    filas.push([f.name,f.registradas,f.P,f.D,f.K,f.AM,f.AK,f.AI,f.A,
+    filas.push([f.name,f.registradas,f.P,f.D,f.K,f.AM,f.AK,f.AI,f.A,f.noConvocado,
                 (f.pct==null?'':f.pct.toFixed(1).replace('.',',')),f.sinRegistro]);
   });
   var txt='﻿'+filas.map(function(r){
@@ -47327,6 +47554,7 @@ function asisImprimir(){
     return '<tr><td><b>'+asisEsc(f.name)+'</b></td><td class="c">'+f.registradas+'</td>'+
       '<td class="c">'+f.P+'</td><td class="c">'+f.D+'</td><td class="c">'+f.K+'</td>'+
       '<td class="c">'+f.AM+'</td><td class="c">'+f.AK+'</td><td class="c">'+f.AI+'</td><td class="c">'+f.A+'</td>'+
+      '<td class="c">'+f.noConvocado+'</td>'+
       '<td class="c"><b>'+(f.pct==null?'—':f.pct.toFixed(0)+'%')+'</b></td><td class="c">'+f.sinRegistro+'</td></tr>';
   }).join('');
   var html='<html><head><meta charset="utf-8"><title>Asistencia '+d.desde+' a '+d.hasta+'</title>'+
@@ -47342,11 +47570,11 @@ function asisImprimir(){
     '<h2>'+d.jornadas.length+' jornadas de entrenamiento · '+d.nJugadores+' jugadores · '+
       'asistencia del plantel '+(t.pct==null?'—':t.pct.toFixed(1)+'%')+'</h2>'+
     '<table><thead><tr><th>Jugador</th><th>Jorn.</th><th>Pres.</th><th>Difer.</th><th>Kin. club</th>'+
-      '<th>A. méd.</th><th>A. kin.</th><th>A. injust.</th><th>A. s/esp.</th><th>% asist.</th><th>Sin reg.</th></tr></thead>'+
+      '<th>A. méd.</th><th>A. kin.</th><th>A. injust.</th><th>A. s/esp.</th><th>No conv.</th><th>% asist.</th><th>Sin reg.</th></tr></thead>'+
     '<tbody>'+filas+'</tbody>'+
     '<tfoot><tr><td>PLANTEL</td><td class="c">'+t.registradas+'</td><td class="c">'+t.P+'</td><td class="c">'+t.D+'</td>'+
       '<td class="c">'+t.K+'</td><td class="c">'+t.AM+'</td><td class="c">'+t.AK+'</td><td class="c">'+t.AI+'</td>'+
-      '<td class="c">'+t.A+'</td><td class="c">'+(t.pct==null?'—':t.pct.toFixed(0)+'%')+'</td><td class="c">'+t.sinRegistro+'</td></tr></tfoot>'+
+      '<td class="c">'+t.A+'</td><td class="c">'+t.noConvocado+'</td><td class="c">'+(t.pct==null?'—':t.pct.toFixed(0)+'%')+'</td><td class="c">'+t.sinRegistro+'</td></tr></tfoot>'+
     '</table>'+
     '<div class="nota">Las jornadas se toman de las semanas de Planificación: los días sin trabajo cargado no cuentan como entrenamiento y no generan ausencias. '+
     'El % de asistencia es (Presente + Diferenciado'+(_asisKComoAsist?' + Kinesio en el club':'')+') sobre las jornadas con marca registrada.</div>'+
@@ -47370,8 +47598,244 @@ var HOY_DISP_META={
   lesion:    {lbl:'Lesión',       ico:'🚑', col:'#E24B4A'},
   nodisp:    {lbl:'No disponible',ico:'⛔', col:'#6B7280'}
 };
+// ═══════════════════════════════════════════════════════════════════════════
+// DÍA SELECCIONADO + CONDICIÓN POR DÍA (v197)
+// ───────────────────────────────────────────────────────────────────────────
+// La pestaña Hoy ahora se puede mover de día con las flechas. Sirve para dos
+// cosas: preparar el día siguiente (quién va a Reserva, quién no está) y
+// corregir hacia atrás una asistencia o una condición que quedó mal.
+//
+// La CONDICIÓN (disponible / reserva / primera / lesión / no disponible) era
+// una sola por jugador, del plantel. Ahora además se puede fijar por día:
+//   HOY_COND = { 'YYYY-MM-DD': { nombreNormalizado: 'reserva'|... } }
+// Si un día no tiene nada anotado, vale la condición del perfil, igual que
+// antes. Así nada de lo que ya existía cambia de comportamiento.
+//
+// Al editar la condición del día de HOY se escribe también el perfil, para que
+// el resto del dashboard (Perfiles, microciclo, informes) siga viendo lo mismo
+// de siempre. Al editar otro día se guarda SOLO en ese día y el plantel de hoy
+// queda intacto.
+// ═══════════════════════════════════════════════════════════════════════════
+var _hoyFecha=null;                      // null = hoy
+function hoyFechaSel(){ return _hoyFecha || hoyLocalISO(); }
+window.hoyFechaSel=hoyFechaSel;
+function hoyEsHoy(){ return hoyFechaSel()===hoyLocalISO(); }
+window.hoyEsHoy=hoyEsHoy;
+function hoyFechaShift(iso,n){
+  var d=new Date(iso+'T12:00:00'); d.setDate(d.getDate()+n);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+window.hoyFechaShift=hoyFechaShift;
+// Límites: 120 días atrás (lo que conserva el registro) y 60 adelante
+function hoyFechaNav(delta){
+  var nueva=hoyFechaShift(hoyFechaSel(), delta);
+  var hoy=hoyLocalISO();
+  if(nueva<hoyFechaShift(hoy,-120) || nueva>hoyFechaShift(hoy,60)) return;
+  _hoyFecha=(nueva===hoy)?null:nueva;
+  hoyRender();
+}
+window.hoyFechaNav=hoyFechaNav;
+function hoyFechaIr(iso){
+  if(!iso||!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
+  _hoyFecha=(iso===hoyLocalISO())?null:iso;
+  hoyRender();
+}
+window.hoyFechaIr=hoyFechaIr;
+function hoyFechaHoy(){ _hoyFecha=null; hoyRender(); }
+window.hoyFechaHoy=hoyFechaHoy;
+function hoyFechaLarga(iso){
+  var d=new Date(iso+'T12:00:00');
+  var t=d.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+  return t.charAt(0).toUpperCase()+t.slice(1);
+}
+window.hoyFechaLarga=hoyFechaLarga;
+// "hoy" / "mañana" / "ayer" / "en 3 días" / "hace 3 días"
+function hoyFechaRel(iso){
+  var a=new Date(hoyLocalISO()+'T12:00:00'), b=new Date(iso+'T12:00:00');
+  var n=Math.round((b-a)/86400000);
+  if(n===0) return 'hoy';
+  if(n===1) return 'mañana';
+  if(n===-1) return 'ayer';
+  return n>0 ? ('en '+n+' días') : ('hace '+Math.abs(n)+' días');
+}
+window.hoyFechaRel=hoyFechaRel;
+
+// ── Condición por día ──
+var HOY_COND={};
+try{
+  var _hc=JSON.parse(localStorage.getItem('hoyCond_v1')||'{}');
+  if(_hc&&typeof _hc==='object'&&!Array.isArray(_hc)) HOY_COND=_hc;
+}catch(e){ HOY_COND={}; }
+var HOY_COND_TS={};
+try{
+  var _hct=JSON.parse(localStorage.getItem('hoyCondTs_v1')||'null');
+  if(_hct&&typeof _hct==='object'&&!Array.isArray(_hct)) HOY_COND_TS=_hct;
+}catch(e){}
+
+function hoyCondStamp(date,nameL){
+  if(!HOY_COND_TS[date]) HOY_COND_TS[date]={};
+  HOY_COND_TS[date][nameL]=Date.now();
+}
+function hoyCondTs(date,nameL){
+  return (HOY_COND_TS[date]&&HOY_COND_TS[date][nameL])||0;
+}
+window.hoyCondTs=hoyCondTs;
+
+// Fusión multi-dispositivo: gana la anotación más reciente, jugador por jugador.
+// Mismo criterio que la asistencia (v186), para que no se pisen entre equipos.
+function hoyCondMerge(remoto, remotoTs){
+  if(!remoto||typeof remoto!=='object')return 0;
+  var cambios=0;
+  Object.keys(remoto).forEach(function(fecha){
+    var dr=remoto[fecha];
+    if(!dr||typeof dr!=='object')return;
+    if(!HOY_COND[fecha]) HOY_COND[fecha]={};
+    Object.keys(dr).forEach(function(n){
+      var tMio=hoyCondTs(fecha,n);
+      var tSuyo=(remotoTs&&remotoTs[fecha]&&remotoTs[fecha][n])||0;
+      var mio=HOY_COND[fecha][n];
+      if(mio===undefined){
+        // v197b: "no lo tengo" puede ser "nunca lo supe" o "lo borré". El sello
+        // local sobrevive al borrado, así que si es más nuevo que el remoto,
+        // esto es una lápida y la entrada NO debe revivir.
+        if(tMio>0 && tSuyo<=tMio) return;
+        HOY_COND[fecha][n]=dr[n]; cambios++;
+        if(tSuyo){ if(!HOY_COND_TS[fecha])HOY_COND_TS[fecha]={}; HOY_COND_TS[fecha][n]=tSuyo; }
+        return;
+      }
+      if(mio===dr[n]){
+        // v197b: mismo valor pero el remoto trae sello y acá no hay. Pasa
+        // cuando la fila de datos llega antes que la de sellos: sin esto los
+        // sellos quedaban en 0 y el merge degradaba a "gana siempre el local".
+        if(tSuyo>tMio){ if(!HOY_COND_TS[fecha])HOY_COND_TS[fecha]={}; HOY_COND_TS[fecha][n]=tSuyo; }
+        return;
+      }
+      if(tSuyo>tMio){
+        HOY_COND[fecha][n]=dr[n];
+        if(!HOY_COND_TS[fecha])HOY_COND_TS[fecha]={};
+        HOY_COND_TS[fecha][n]=tSuyo;
+        cambios++;
+      }
+    });
+  });
+  try{
+    localStorage.setItem('hoyCond_v1', JSON.stringify(HOY_COND));
+    localStorage.setItem('hoyCondTs_v1', JSON.stringify(HOY_COND_TS));
+  }catch(e){}
+  return cambios;
+}
+window.hoyCondMerge=hoyCondMerge;
+
+function hoySaveCond(){
+  // Poda: nunca se descartan los días futuros ya planificados. El tope es alto
+  // (más de un año) a propósito: lo que se poda acá también se sube a la nube
+  // reemplazando la fila, así que podar poco es podar seguro. Son pocos bytes
+  // por jugador y día.
+  try{
+    var hoy=hoyLocalISO();
+    var pasados=Object.keys(HOY_COND).filter(function(k){ return k<hoy; }).sort();
+    while(pasados.length>400){
+      var kk=pasados.shift();
+      delete HOY_COND[kk]; delete HOY_COND_TS[kk];
+    }
+    // Sellos de días ya borrados (las lápidas): se conservan 400 días y después
+    // se sueltan, porque a esa altura ningún dispositivo trae datos tan viejos.
+    var limite=hoyFechaShift(hoy,-400);
+    Object.keys(HOY_COND_TS).forEach(function(k){ if(k<limite) delete HOY_COND_TS[k]; });
+    localStorage.setItem('hoyCond_v1', JSON.stringify(HOY_COND));
+    localStorage.setItem('hoyCondTs_v1', JSON.stringify(HOY_COND_TS));
+  }catch(e){}
+  hoySyncCloud();
+}
+window.hoySaveCond=hoySaveCond;
+
+// Condición efectiva de un jugador en una fecha: lo anotado ese día, y si no
+// hay nada, la del perfil (comportamiento de siempre).
+function hoyCondOf(dateISO, nameL, profMap, estricto){
+  var dia=HOY_COND[dateISO];
+  if(dia && dia[nameL] && HOY_DISP_META[dia[nameL]]) return dia[nameL];
+  // v197b: en modo estricto (informes sobre fechas pasadas) no se hereda del
+  // perfil: el estado de hoy no dice nada de lo que pasaba hace dos meses, y
+  // heredarlo hacía que los números históricos cambiaran solos.
+  if(estricto) return 'disponible';
+  var prof=(profMap||hoyProfileByNorm())[nameL];
+  return (prof&&prof.estado)?prof.estado:'disponible';
+}
+window.hoyCondOf=hoyCondOf;
+// ¿La condición de ese día fue anotada a mano (y no heredada del perfil)?
+function hoyCondEsDelDia(dateISO, nameL){
+  var dia=HOY_COND[dateISO];
+  return !!(dia && dia[nameL] && HOY_DISP_META[dia[nameL]]);
+}
+window.hoyCondEsDelDia=hoyCondEsDelDia;
+
+// Anota la condición de un jugador para una fecha concreta
+function hoySetCondDia(dateISO, nameL, estado){
+  if(!HOY_DISP_META[estado])return;
+  if(!HOY_COND[dateISO]) HOY_COND[dateISO]={};
+  HOY_COND[dateISO][nameL]=estado;
+  hoyCondStamp(dateISO,nameL);
+  hoySaveCond();
+}
+window.hoySetCondDia=hoySetCondDia;
+// Borra la anotación del día: el jugador vuelve a seguir la del perfil
+function hoyBorrarCondDia(dateISO, nameL){
+  if(HOY_COND[dateISO] && HOY_COND[dateISO][nameL]!==undefined){
+    delete HOY_COND[dateISO][nameL];
+    hoyCondStamp(dateISO,nameL);
+    if(!Object.keys(HOY_COND[dateISO]).length) delete HOY_COND[dateISO];
+    hoySaveCond();
+  }
+  hoyRender();
+}
+window.hoyBorrarCondDia=hoyBorrarCondDia;
+
+// Pasa al plantel (los perfiles) las condiciones anotadas para un día.
+// Se usa con el aviso de "hay condiciones planificadas para hoy".
+function hoyAplicarCondAlPlantel(dateISO){
+  var dia=HOY_COND[dateISO]||{};
+  var profMap=hoyProfileByNorm();
+  // v197b: sólo jugadores que existen en el plantel. Una clave suelta (un
+  // nombre viejo que volvió de la nube, un jugador dado de baja) creaba un
+  // perfil nuevo con el nombre sin tildes ni mayúsculas.
+  var enPlantel={};
+  try{ hoyRoster().forEach(function(n){ enPlantel[hoyNorm(n)]=true; }); }catch(e){}
+  var pend=Object.keys(dia).filter(function(n){
+    if(!enPlantel[n] && !profMap[n]) return false;
+    var prof=profMap[n];
+    var act=(prof&&prof.estado)?prof.estado:'disponible';
+    return act!==dia[n];
+  });
+  if(!pend.length){ alert('El plantel ya coincide con lo planificado para ese día.'); return; }
+  var det=pend.slice(0,12).map(function(n){
+    var prof=profMap[n];
+    return '  · '+((prof&&prof.name)||n)+' → '+HOY_DISP_META[dia[n]].lbl;
+  }).join('\n');
+  if(!confirm('Aplicar al plantel '+pend.length+' condición(es) planificada(s) para el '+
+              dateISO.slice(8,10)+'/'+dateISO.slice(5,7)+':\n\n'+det+
+              (pend.length>12?'\n  … y '+(pend.length-12)+' más':'')+
+              '\n\nEsto pisa el estado actual en Perfiles y lo ve todo el dashboard.')) return;
+  window._hoyAplicando=true;              // v197b: un solo repintado al final
+  try{ pend.forEach(function(n){ hoySetEstado(n, dia[n], {soloPerfil:true}); }); }
+  finally{ window._hoyAplicando=false; }
+  if(typeof renderProfilesTable==='function'){ try{ renderProfilesTable(); }catch(e){} }
+  hoyRender();
+}
+window.hoyAplicarCondAlPlantel=hoyAplicarCondAlPlantel;
+
 // Cambia el estado de un jugador desde la pestaña Hoy (escribe en Perfiles).
-function hoySetEstado(nameL, estado){
+function hoySetEstado(nameL, estado, opts){
+  opts=opts||{};
+  // v197: la condición se anota SIEMPRE en el día que se está mirando.
+  // Si ese día es hoy, además se escribe el perfil, que es lo que lee el resto
+  // del dashboard; así el comportamiento de siempre no cambia. Si es otro día,
+  // sólo queda anotado ahí y el plantel actual no se toca.
+  var fecha=(typeof hoyFechaSel==='function')?hoyFechaSel():hoyLocalISO();
+  if(!opts.soloPerfil && typeof hoySetCondDia==='function') hoySetCondDia(fecha, nameL, estado);
+  if(!opts.soloPerfil && typeof hoyEsHoy==='function' && !hoyEsHoy()){
+    if(typeof hoyRender==='function') hoyRender();
+    return;                               // no se toca el perfil de otro día
+  }
   var profMap=hoyProfileByNorm();
   var prof=profMap[nameL];
   if(!prof){
@@ -47394,8 +47858,10 @@ function hoySetEstado(nameL, estado){
   }catch(e){}
   if(_k && typeof profSaveOne==='function') profSaveOne(_k);
   else if(typeof saveData==='function')saveData();
-  if(typeof renderProfilesTable==='function'){ try{ renderProfilesTable(); }catch(e){} }
-  hoyRender();
+  if(!window._hoyAplicando){
+    if(typeof renderProfilesTable==='function'){ try{ renderProfilesTable(); }catch(e){} }
+    hoyRender();
+  }
 }
 window.hoySetEstado=hoySetEstado;
 
@@ -47403,20 +47869,32 @@ window.hoySetEstado=hoySetEstado;
 function hoyDispMenu(nameL, name){
   var profMap=hoyProfileByNorm();
   var prof=profMap[nameL];
-  var cur=(prof&&prof.estado)?prof.estado:'disponible';
+  var fechaSel=(typeof hoyFechaSel==='function')?hoyFechaSel():hoyLocalISO();
+  var esHoy=(typeof hoyEsHoy==='function')?hoyEsHoy():true;
+  var cur=(typeof hoyCondOf==='function')?hoyCondOf(fechaSel,nameL,profMap)
+          :((prof&&prof.estado)?prof.estado:'disponible');
+  var anotado=(typeof hoyCondEsDelDia==='function')&&hoyCondEsDelDia(fechaSel,nameL);
+  var perfilEst=(prof&&prof.estado)?prof.estado:'disponible';
   var old=document.getElementById('hoy-disp-menu'); if(old)old.remove();
   var m=document.createElement('div');
   m.id='hoy-disp-menu';
   m.style.cssText='position:fixed;inset:0;z-index:13000;background:rgba(10,16,28,.55);display:flex;align-items:center;justify-content:center;padding:18px';
   m.innerHTML='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:330px;width:100%;box-shadow:0 18px 60px rgba(0,0,0,.35)" onclick="event.stopPropagation()">'+
     '<div style="font-size:14px;font-weight:800;color:#0D1B2A;margin-bottom:3px">'+String(name).replace(/</g,'&lt;')+'</div>'+
-    '<div style="font-size:11px;color:#888;margin-bottom:13px">Disponibilidad en el plantel</div>'+
+    '<div style="font-size:11px;color:#888;margin-bottom:13px">'+
+      (esHoy ? 'Disponibilidad en el plantel'
+             : ('Condición para el <b style="color:#0D1B2A">'+hoyFechaLarga(fechaSel)+'</b>'+
+                '<br><span style="font-size:10px">Queda anotada sólo para ese día. El plantel de hoy no se toca.</span>'))+
+    '</div>'+
     HOY_DISP_ORDER.map(function(k){
       var meta=HOY_DISP_META[k], on=(k===cur);
       return '<button onclick="hoyDispPick(\''+nameL.replace(/'/g,"\\'")+'\',\''+k+'\')" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;margin-bottom:6px;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700;'+
         (on?('background:'+meta.col+';color:#fff;border:1px solid '+meta.col):('background:#f7f8fb;color:#333;border:1px solid #e4e6ec'))+'">'+
         '<span style="font-size:16px">'+meta.ico+'</span>'+meta.lbl+(on?'<span style="margin-left:auto;font-size:11px">✓ actual</span>':'')+'</button>';
     }).join('')+
+    (anotado ? ('<button onclick="hoyDispClose();hoyBorrarCondDia(\''+fechaSel+'\',\''+asisArg(nameL)+'\')" '+
+        'style="width:100%;margin-top:4px;padding:8px;border-radius:9px;border:1px solid #e0d2b5;background:#fffaf0;color:#8a6d3b;font-size:11px;font-weight:700;cursor:pointer">'+
+        '↺ Quitar lo anotado para este día (vuelve a «'+HOY_DISP_META[perfilEst].lbl+'» del plantel)</button>') : '')+
     '<button onclick="hoyDispClose()" style="width:100%;margin-top:6px;padding:9px;border-radius:9px;border:1px solid #ddd;background:#fff;color:#666;font-size:12px;font-weight:700;cursor:pointer">Cancelar</button>'+
   '</div>';
   m.onclick=hoyDispClose;
@@ -47445,7 +47923,9 @@ function hoyNextMatch(){
 // ── RENDER PRINCIPAL ──
 function hoyRender(){
   var root=document.getElementById('view-hoy'); if(!root) return;
-  var today=hoyLocalISO();
+  var today=hoyFechaSel();          // v197: el día que se está mirando
+  var esHoy=hoyEsHoy();
+  var esFuturo=today>hoyLocalISO();
   var roster=hoyRoster();
   var profMap=hoyProfileByNorm();
   var statuses=roster.map(function(n){ return hoyPlayerStatus(n, today, profMap); });
@@ -47465,10 +47945,10 @@ function hoyRender(){
   HOY_DISP_ORDER.forEach(function(k){ dispByState[k]=[]; });
   roster.forEach(function(nm){
     var nameL=hoyNorm(nm);
-    var prof=profMap[nameL];
-    var est=(prof&&prof.estado)?prof.estado:'disponible';
+    // v197: condición de ESE día (si no hay nada anotado, la del perfil)
+    var est=hoyCondOf(today, nameL, profMap);
     if(!dispByState[est])dispByState[est]=[];
-    dispByState[est].push({name:nm, nameL:nameL});
+    dispByState[est].push({name:nm, nameL:nameL, delDia:hoyCondEsDelDia(today,nameL)});
   });
   var nDispOK=(dispByState['disponible']||[]).length;
   var nDispOut=roster.length-nDispOK;
@@ -47482,18 +47962,72 @@ function hoyRender(){
     return (dispByState[k]||[]).slice().sort(function(a,b){return a.name.localeCompare(b.name,'es');}).map(function(p){
       var meta=HOY_DISP_META[k];
       var isOk=(k==='disponible');
-      return '<div class="hoy-pl" style="cursor:pointer;'+(isOk?'':'background:'+meta.col+'0e;border-color:'+meta.col+'44')+'" '+
-        'onclick="hoyDispMenu(\''+p.nameL.replace(/'/g,"\\'")+'\',\''+String(p.name).replace(/'/g,"\\'")+'\')" title="Cambiar disponibilidad">'+
-        '<b>'+meta.ico+' '+hoyShortName(p.name)+'</b>'+
-        '<small style="color:'+meta.col+';font-weight:700">'+meta.lbl+'</small></div>';
+      return '<div class="hoy-pl" style="cursor:pointer;'+(isOk?'':'background:'+meta.col+'0e;border-color:'+meta.col+'44')+
+          (p.delDia?';box-shadow:inset 3px 0 0 '+meta.col:'')+'" '+
+        'onclick="hoyDispMenu(\''+asisArg(p.nameL)+'\',\''+asisArg(String(p.name))+'\')" '+
+        'title="'+(p.delDia?'Condición anotada para este día':'Cambiar disponibilidad')+'">'+
+        '<b>'+meta.ico+' '+hoyEsc(hoyShortName(p.name))+'</b>'+
+        '<small style="color:'+meta.col+';font-weight:700">'+meta.lbl+(p.delDia?' ·':'')+'</small></div>';
     }).join('');
   }).join('');
 
-  var plan=hoyTodaysPlan();
+  var plan=hoyTodaysPlan(today);
   var next=hoyNextMatch();
-  var fmt=new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
-  fmt=fmt.charAt(0).toUpperCase()+fmt.slice(1);
+  var fmt=hoyFechaLarga(today);
   var mdLbl=(plan&&plan.day&&plan.day.mdLabel)?plan.day.mdLabel:'';
+
+
+  // Título de los paneles según el día que se está mirando
+  var sufDia = esHoy ? ' de hoy' : (' — '+hoyFechaRel(today));
+  var delDia = esHoy ? 'de hoy'  : ('del '+today.slice(8,10)+'/'+today.slice(5,7));
+  // ── v197: barra de días. Permite preparar el día siguiente y corregir atrás ──
+  var hoyISO=hoyLocalISO();
+  var puedeAtras=(today>hoyFechaShift(hoyISO,-120));
+  var puedeAdel=(today<hoyFechaShift(hoyISO,60));
+  var relTxt=hoyFechaRel(today);
+  var colDia=esHoy?'#1D9E75':(esFuturo?'#3B4D88':'#8a6d3b');
+  var flecha=function(d,txt,act,tit){
+    return '<button type="button" '+(act?'onclick="hoyFechaNav('+d+')"':'disabled')+' title="'+tit+'" '+
+      'style="border:1px solid '+(act?'#ccd3de':'#eee')+';background:#fff;color:'+(act?'#0D1B2A':'#ccc')+';'+
+      'border-radius:8px;min-width:34px;height:32px;font-size:15px;font-weight:700;'+
+      'cursor:'+(act?'pointer':'default')+'">'+txt+'</button>';
+  };
+  var navHtml='<div class="hoy-nav">'+
+    flecha(-1,'‹',puedeAtras,'Día anterior')+
+    '<div style="flex:1;min-width:0;text-align:center;line-height:1.2">'+
+      '<div style="font-size:13.5px;font-weight:800;color:#0D1B2A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+hoyEsc(fmt)+'</div>'+
+      '<div style="font-size:10px;font-weight:700;color:'+colDia+'">'+relTxt+(mdLbl?' · '+hoyEsc(mdLbl):'')+'</div>'+
+    '</div>'+
+    flecha(1,'›',puedeAdel,'Día siguiente')+
+    '<input type="date" value="'+today+'" onchange="hoyFechaIr(this.value)" title="Ir a una fecha" '+
+      'style="border:1px solid #ccd3de;border-radius:8px;height:32px;padding:0 7px;font-size:11px;color:#4a5568">'+
+    (esHoy?'':'<button type="button" onclick="hoyFechaHoy()" style="border:none;background:#1D9E75;color:#fff;border-radius:8px;height:32px;padding:0 13px;font-size:11.5px;font-weight:800;cursor:pointer">Volver a hoy</button>')+
+  '</div>';
+  if(!esHoy){
+    navHtml+='<div style="background:'+(esFuturo?'#eef3fb':'#fff8ec')+';border:1px solid '+(esFuturo?'#d5e0f0':'#f0e0c0')+';'+
+      'border-radius:8px;padding:7px 11px;font-size:10.5px;color:'+(esFuturo?'#3B4D88':'#8a6d3b')+';margin-bottom:9px">'+
+      (esFuturo
+        ? '📅 Estás preparando un día que todavía no llegó. Las condiciones que pongas quedan anotadas sólo para esa fecha: el plantel de hoy no cambia.'
+        : '↩ Estás mirando un día pasado. Podés corregir la asistencia o la condición de esa fecha; el plantel de hoy no cambia.')+
+      '</div>';
+  }
+  // Aviso: hoy tiene condiciones planificadas que el plantel todavía no refleja
+  var pendHoy=[];
+  if(esHoy && HOY_COND[today]){
+    Object.keys(HOY_COND[today]).forEach(function(n){
+      var prof=profMap[n];
+      var act=(prof&&prof.estado)?prof.estado:'disponible';
+      if(act!==HOY_COND[today][n]) pendHoy.push(n);
+    });
+  }
+  if(pendHoy.length){
+    navHtml+='<div style="background:#eef3fb;border:1px solid #d5e0f0;border-radius:8px;padding:8px 11px;margin-bottom:9px;'+
+      'display:flex;gap:9px;align-items:center;flex-wrap:wrap">'+
+      '<span style="font-size:10.5px;color:#3B4D88;flex:1;min-width:180px">📋 Hay <b>'+pendHoy.length+'</b> condición(es) que planificaste para hoy y el plantel todavía no refleja. '+
+        'La pestaña Hoy ya las está usando; aplicalas si querés que las vea el resto del dashboard.</span>'+
+      '<button type="button" onclick="hoyAplicarCondAlPlantel(\''+today+'\')" style="border:none;background:#3B4D88;color:#fff;border-radius:7px;padding:6px 13px;font-size:11px;font-weight:700;cursor:pointer">Aplicar al plantel</button>'+
+    '</div>';
+  }
 
   // ── Semáforo (orden: rojo, amarillo, sin datos, verde) ──
   var order={red:0, amber:1, none:2, green:3, out:4};
@@ -47525,7 +48059,7 @@ function hoyRender(){
     var bg=a.t==='red'?'#fdeeee':'#fdf3e2', ic=a.t==='red'?'🔴':'🟡';
     return '<div class="hoy-alert"><div class="ic" style="background:'+bg+'">'+ic+'</div><div><b>'+hoyShortName(a.name)+'</b> — '+a.txt+'</div></div>';
   }).join('');
-  if(nN>0) alertsHtml+='<div class="hoy-alert"><div class="ic" style="background:#f2f2f2">⚪</div><div><b>'+nN+' jugador'+(nN===1?'':'es')+'</b> todavía sin check-in de wellness hoy.</div></div>';
+  if(nN>0) alertsHtml+='<div class="hoy-alert"><div class="ic" style="background:#f2f2f2">⚪</div><div><b>'+nN+' jugador'+(nN===1?'':'es')+'</b> '+(esHoy?'todavía sin check-in de wellness hoy.':('sin check-in de wellness '+hoyEsc(delDia)+'.'))+'</div></div>';
   if(!alertsHtml) alertsHtml='<div style="font-size:12px;color:#1D9E75;padding:6px 0">✓ Sin alertas: plantel completo en verde.</div>';
 
   // ── Asistencia de hoy: 1 toque cicla P → D → K → A ──
@@ -47560,7 +48094,9 @@ function hoyRender(){
     // v186: traer al instante lo que cargaron los jugadores desde sus celulares
     '<button class="hoy-btn" style="background:#3B4D88;padding:8px 14px" onclick="hoyRefrescarAhora(this)" title="Trae los check-in y cambios de los otros dispositivos">🔄 Actualizar</button>'+
     (nMarcados?'<button class="hoy-btn" style="background:#fff;color:#888;border:1px solid #ddd;padding:8px 12px" onclick="hoyAsistClear()">↺ Limpiar</button>':'')+
-    '<span style="font-size:10px;color:#999;flex:1;min-width:170px">Marcá las excepciones: cada toque cambia Presente → Diferenciado → Kinesio → Ausente. Al quedar ausente, elegí el motivo (🩺 médica · 🦵 kinesio · ⛔ injustificada).</span>'+
+    '<span style="font-size:10px;color:#999;flex:1;min-width:170px">'+
+      (esHoy?'':'<b style="color:#8a6d3b">Estás marcando el '+hoyEsc(today.slice(8,10)+'/'+today.slice(5,7))+'.</b> ')+
+      'Marcá las excepciones: cada toque cambia Presente → Diferenciado → Kinesio → Ausente. Al quedar ausente, elegí el motivo (🩺 médica · 🦵 kinesio · ⛔ injustificada).</span>'+
   '</div>'+
   '<div class="hoy-sem">'+
     asistables.map(function(s){
@@ -47670,7 +48206,7 @@ function hoyRender(){
       '</div>';
     });
     h+='<div style="display:flex;gap:6px;margin-top:9px">'+
-      '<input id="hoy-todo-inp" placeholder="Pendiente rápido para hoy…" onkeydown="hoyTodoKey(event)" style="flex:1;padding:8px 10px;font-size:11.5px;border:1px solid #ddd;border-radius:8px;min-width:0">'+
+      '<input id="hoy-todo-inp" placeholder="'+(esHoy?'Pendiente rápido para hoy…':('Pendiente para el '+hoyEsc(today.slice(8,10)+'/'+today.slice(5,7))+'…'))+'" onkeydown="hoyTodoKey(event)" style="flex:1;padding:8px 10px;font-size:11.5px;border:1px solid #ddd;border-radius:8px;min-width:0">'+
       '<button class="hoy-btn" style="background:var(--club-c1,#1E2A52);padding:8px 14px" onclick="hoyTodoAdd()">＋</button>'+
     '</div>';
     return h;
@@ -47712,9 +48248,10 @@ function hoyRender(){
   sesHtml+=gymHtml;
 
   root.innerHTML=
+    navHtml+
     '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">'+
-      '<div style="font-size:19px;font-weight:800;color:#0D1B2A">🏠 '+fmt+'</div>'+
-      (mdLbl?'<span class="hoy-chipmd">'+mdLbl+'</span>':'')+
+      '<div style="font-size:19px;font-weight:800;color:#0D1B2A">'+(esHoy?'🏠':(esFuturo?'📅':'↩'))+' '+hoyEsc(fmt)+'</div>'+
+      (mdLbl?'<span class="hoy-chipmd">'+hoyEsc(mdLbl)+'</span>':'')+
       (next?'<span style="font-size:11px;color:#666">Próximo: <b>vs '+next.rival+'</b> ('+next.cond+', F'+next.n+')</span>':'')+
       '<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'+
         '<button class="hoy-btn" style="background:#1D9E75" onclick="cargaSelfEntry(\'wellness\')">📲 Wellness</button>'+
@@ -47733,25 +48270,30 @@ function hoyRender(){
             '</span></h3>'+
           '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px">'+dispChips+'</div>'+
           (statuses.length?('<div class="hoy-sem">'+dispHtml+'</div>'):'<div style="font-size:12px;color:#888">Sin jugadores registrados todavía. Se toman de perfiles, GPS y wellness.</div>')+
-          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Tocá un jugador para cambiar su disponibilidad (queda guardada en Perfiles). Es del plantel, no del día: no depende del check-in ni de la asistencia, así podés planificar para otro día.</div>'+
+          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">'+
+            (esHoy
+              ? 'Tocá un jugador para cambiar su disponibilidad. En el día de hoy el cambio se guarda en Perfiles y lo ve todo el dashboard. No depende del check-in ni de la asistencia.'
+              : 'Tocá un jugador para fijar su condición <b>sólo para este día</b>. El plantel de hoy no se modifica. La barra lateral de color marca lo anotado para la fecha.')+
+          '</div>'+
         '</div>'+
-        '<div class="hoy-card"><h3>🟢 Estado de hoy'+
+        '<div class="hoy-card"><h3>🟢 '+(esHoy?'Estado de hoy':('Estado — '+hoyEsc(hoyFechaRel(today))))+
           '<span style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap">'+
             '<span class="hoy-count g">'+nG+'</span><span class="hoy-count y">'+nY+'</span>'+
             '<span class="hoy-count r">'+nR+'</span><span class="hoy-count n">'+nN+' s/checkin</span>'+
           '</span></h3>'+
           (statuses.length?('<div class="hoy-sem">'+semHtml+'</div>'):'')+
-          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Semáforo = wellness de hoy (dolor, ítems bajos)'+(HOY_CFG.useACWR?' + ACWR (sRPE 7d/28d)':'')+' + asistencia. Tocá un jugador para el detalle. ⚙ para configurar.</div>'+
+          '<div style="font-size:9.5px;color:#aaa;margin-top:10px">Semáforo = wellness '+hoyEsc(delDia)+' (dolor, ítems bajos)'+(HOY_CFG.useACWR?' + ACWR (sRPE 7d/28d)':'')+' + asistencia. Tocá un jugador para el detalle. ⚙ para configurar.</div>'+
         '</div>'+
-        '<div class="hoy-card"><h3>📋 Asistencia de hoy'+asistHeadHtml+'</h3>'+asistHtml+'</div>'+
-        '<div class="hoy-card"><h3>⚠️ Alertas de hoy</h3>'+alertsHtml+'</div>'+
+        '<div class="hoy-card"><h3>📋 Asistencia'+hoyEsc(sufDia)+asistHeadHtml+'</h3>'+asistHtml+'</div>'+
+        '<div class="hoy-card"><h3>⚠️ Alertas'+hoyEsc(sufDia)+'</h3>'+alertsHtml+'</div>'+
       '</div>'+
       '<div style="display:flex;flex-direction:column;gap:14px">'+
-        '<div class="hoy-card"><h3>⚽ Sesión de hoy'+(plan&&plan.week&&plan.week.name?'<span style="margin-left:auto;font-size:9px;color:#aaa;font-weight:600;text-transform:none">'+plan.week.name+'</span>':'')+'</h3>'+sesHtml+'</div>'+
-        '<div class="hoy-card"><h3>📲 Check-in de hoy</h3>'+
+        '<div class="hoy-card"><h3>⚽ Sesión'+hoyEsc(sufDia)+(plan&&plan.week&&plan.week.name?'<span style="margin-left:auto;font-size:9px;color:#aaa;font-weight:600;text-transform:none">'+plan.week.name+'</span>':'')+'</h3>'+sesHtml+'</div>'+
+        '<div class="hoy-card"><h3>📲 Check-in'+hoyEsc(sufDia)+'</h3>'+
           '<div style="display:flex;align-items:center;gap:12px">'+
             '<div style="font-size:26px;font-weight:800;color:'+(withWellness>=activos.length&&activos.length?'#1D9E75':'#E8A13C')+'">'+withWellness+'<span style="font-size:13px;color:#aaa">/'+activos.length+'</span></div>'+
-            '<div style="font-size:11px;color:#666;line-height:1.4">jugadores disponibles respondieron el wellness de hoy.</div>'+
+            '<div style="font-size:11px;color:#666;line-height:1.4">jugadores disponibles respondieron el wellness '+hoyEsc(delDia)+'.'+
+              (esFuturo?'<br><span style="font-size:10px;color:#aaa">Es un día que todavía no llegó: el check-in se completa ese mismo día.</span>':'')+'</div>'+
           '</div>'+
           '<button class="hoy-btn" style="background:#1E2A52;width:100%;margin-top:10px" onclick="ckioEnter()">🔒 Activar Check IN-OUT (modo tablet vestuario)</button>'+
         '</div>'+
@@ -47767,8 +48309,10 @@ function hoyOpenPlayer(idx){
   var old=document.getElementById('hoy-modal'); if(old) old.remove();
   var reasons=s.reasons.length
     ? s.reasons.map(function(r){ return '<div class="hoy-alert"><div class="ic" style="background:'+(r.t==='red'?'#fdeeee':'#fdf3e2')+'">'+(r.t==='red'?'🔴':'🟡')+'</div><div>'+r.txt+'</div></div>'; }).join('')
-    : '<div style="font-size:12px;color:'+(s.wellness?'#1D9E75':'#888')+';padding:4px 0">'+(s.wellness?'✓ Sin señales de riesgo hoy.':'Sin check-in de wellness hoy.')+'</div>';
-  var ac=s.acwr?('<div class="hoy-row"><span>ACWR (7d/28d)</span><b>'+s.acwr.ratio.toFixed(2)+'</b></div>'+
+    : '<div style="font-size:12px;color:'+(s.wellness?'#1D9E75':'#888')+';padding:4px 0">'+
+        (s.wellness?('✓ Sin señales de riesgo '+(hoyEsHoy()?'hoy':('el '+hoyFechaSel().slice(8,10)+'/'+hoyFechaSel().slice(5,7)))+'.')
+                   :('Sin check-in de wellness '+(hoyEsHoy()?'hoy':('el '+hoyFechaSel().slice(8,10)+'/'+hoyFechaSel().slice(5,7)))+'.'))+'</div>';
+  var ac=s.acwr?('<div class="hoy-row"><span>ACWR (7d/28d)'+(s.acwr.proyectado?' <span style="font-size:9px;color:#aaa">al día de hoy</span>':'')+'</span><b>'+s.acwr.ratio.toFixed(2)+'</b></div>'+
                  '<div class="hoy-row"><span>Carga aguda / crónica</span><b>'+s.acwr.acute+' / '+s.acwr.chronic+' AU·día</b></div>')
                :'<div class="hoy-row"><span>ACWR</span><b style="color:#aaa">s/d (menos de 4 días con carga en 28d)</b></div>';
   var f=s.flag||{};
@@ -47784,7 +48328,7 @@ function hoyOpenPlayer(idx){
       '<div style="font-size:16px;font-weight:800;color:#0D1B2A">'+(s.level==='red'?'🔴':(s.level==='amber'?'🟡':(s.level==='green'?'🟢':'⚪')))+' '+s.name+'</div>'+
       '<button onclick="document.getElementById(\'hoy-modal\').remove()" style="background:#f0f0f0;border:none;border-radius:6px;padding:5px 12px;font-size:14px;cursor:pointer;font-weight:700">✕</button>'+
     '</div>'+reasons+ac+
-    '<div style="font-size:11px;font-weight:800;color:var(--club-c2,#3B4D88);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 8px">Estado del CT para hoy</div>'+
+    '<div style="font-size:11px;font-weight:800;color:var(--club-c2,#3B4D88);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 8px">Estado del CT '+(hoyEsHoy()?'para hoy':('para el '+hoyFechaSel().slice(8,10)+'/'+hoyFechaSel().slice(5,7)))+'</div>'+
     '<div style="display:flex;gap:6px">'+btn('apto','✓ Apto','#1D9E75')+btn('dif','Diferenciado','#E8A13C')+btn('medico','Kinesio / Médico','#D9534F')+'</div>'+
     '<input id="hoy-flag-note" placeholder="Nota (opcional): zona, indicación…" value="'+((f.note||'').replace(/"/g,'&quot;'))+'" '+
       'onchange="hoySetFlagNote(\''+s.nameL.replace(/'/g,"\\'")+'\',this.value)" '+
@@ -47797,27 +48341,47 @@ function hoyOpenPlayer(idx){
 window.hoyOpenPlayer=hoyOpenPlayer;
 
 function hoySetFlag(nameL, val){
-  if(val==='apto'){ delete HOY_FLAGS[nameL]; }
+  // v197: se guarda en el día que se está mirando. El día de hoy además
+  // actualiza la estructura sin fecha, que es la que ya estaba sincronizada.
+  var fecha=(typeof hoyFechaSel==='function')?hoyFechaSel():hoyLocalISO();
+  if(!HOY_FLAGS_D[fecha]) HOY_FLAGS_D[fecha]={};
+  if(val==='apto'){ HOY_FLAGS_D[fecha][nameL]=null; }
   else{
-    HOY_FLAGS[nameL]=HOY_FLAGS[nameL]||{};
-    HOY_FLAGS[nameL].flag=val;
-    HOY_FLAGS[nameL].date=hoyLocalISO();
+    var prev=HOY_FLAGS_D[fecha][nameL]||{};
+    HOY_FLAGS_D[fecha][nameL]={flag:val, note:prev.note||''};
   }
-  hoySaveFlags();
+  hoyFlagsStamp(fecha,nameL);
+  hoySaveFlagsD();
+  if(fecha===hoyLocalISO()){
+    if(val==='apto'){ delete HOY_FLAGS[nameL]; }
+    else{
+      HOY_FLAGS[nameL]=HOY_FLAGS[nameL]||{};
+      HOY_FLAGS[nameL].flag=val;
+      HOY_FLAGS[nameL].date=fecha;
+    }
+    hoySaveFlags();
+  }
   var mm=document.getElementById('hoy-modal'); if(mm) mm.remove();
   hoyRender();
 }
 window.hoySetFlag=hoySetFlag;
 
 function hoySetFlagNote(nameL, note){
-  if(HOY_FLAGS[nameL]){ HOY_FLAGS[nameL].note=(note||'').trim(); hoySaveFlags(); }
+  var fecha=(typeof hoyFechaSel==='function')?hoyFechaSel():hoyLocalISO();
+  var txt=(note||'').trim();
+  if(HOY_FLAGS_D[fecha] && HOY_FLAGS_D[fecha][nameL]){
+    HOY_FLAGS_D[fecha][nameL].note=txt;
+    hoyFlagsStamp(fecha,nameL);
+    hoySaveFlagsD();
+  }
+  if(fecha===hoyLocalISO() && HOY_FLAGS[nameL]){ HOY_FLAGS[nameL].note=txt; hoySaveFlags(); }
 }
 window.hoySetFlagNote=hoySetFlagNote;
 
 // ── 📤 INFORME DEL DÍA (imagen 1080×1350 lista para WhatsApp, cero dependencias) ──
 function hoyInformeOpen(){
   try{
-    var today=hoyLocalISO();
+    var today=hoyFechaSel();   // v197: el informe es del día que se está mirando
     var roster=hoyRoster();
     var profMap=hoyProfileByNorm();
     var statuses=roster.map(function(n){ return hoyPlayerStatus(n, today, profMap); });
@@ -47828,10 +48392,9 @@ function hoyInformeOpen(){
     var nO=statuses.filter(function(s){return s.level==='out';}).length;
     var activos=statuses.filter(function(s){return s.level!=='out';});
     var withWellness=activos.filter(function(s){return !!s.wellness;}).length;
-    var plan=hoyTodaysPlan(), gym=hoyGymToday(today), next=hoyNextMatch();
+    var plan=hoyTodaysPlan(today), gym=hoyGymToday(today), next=hoyNextMatch();
     var mdLbl=(plan&&plan.day&&plan.day.mdLabel)?plan.day.mdLabel:'';
-    var fmt=new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
-    fmt=fmt.charAt(0).toUpperCase()+fmt.slice(1);
+    var fmt=hoyFechaLarga(today);   // v197: el día del informe, no el de hoy
 
     // Altura adaptativa: el informe crece si hay muchas alertas/ejercicios,
     // así el contenido nunca pisa el footer. Mínimo 1350 (formato WhatsApp).
