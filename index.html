@@ -3635,7 +3635,8 @@ function csvNormName(s){
   return String(s||'').toLowerCase().trim()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .replace(/[.,_\-]/g,' ')
-    .replace(/\s+/g,' ');
+    .replace(/\s+/g,' ')
+    .trim();      // "Gutierrez, M." dejaba un espacio al final y no matcheaba
 }
 window.csvNormName=csvNormName;
 
@@ -5414,6 +5415,9 @@ const STORAGE_KEY='gps_dash_v9';
 // abajo en el archivo). Por eso TODO acceso a una global debe usar
 // `typeof X !== 'undefined' ? X : default` — sino, ReferenceError rompe la app.
 function _buildFullPayload(stripImages){
+  // Si una variable todavía no se declaró (vive en un bloque de script
+  // posterior), la clave sale como `undefined` y NO como vacía: así saveData
+  // conserva lo que ya estaba en disco en vez de borrarlo.
   // Helper para clonar arrays con stripImages opcional
   function safeArr(name, getter, mapImg){
     if(typeof getter==='function'){try{var v=getter();return v||[];}catch(e){return [];}}
@@ -5431,35 +5435,36 @@ function _buildFullPayload(stripImages){
   }) : [];
   return {
     D:dD,
-    MATCHES:(typeof MATCHES!=='undefined' && Array.isArray(MATCHES))?[...MATCHES]:[],
-    CATS:(typeof CATS!=='undefined' && Array.isArray(CATS))?[...CATS]:[],
-    CATN:(typeof CATN!=='undefined' && Array.isArray(CATN))?[...CATN]:[],
-    BC:(typeof BC!=='undefined' && BC)?{...BC}:{},
-    CS:(typeof CS!=='undefined' && CS)?{...CS}:{},
-    REF:(typeof REF!=='undefined' && REF)?{...REF}:{},
-    MICROCICLO:(typeof MICROCICLO!=='undefined' && Array.isArray(MICROCICLO))?[...MICROCICLO]:[],
-    PLAYER_PROFILES:(typeof PLAYER_PROFILES!=='undefined' && PLAYER_PROFILES)?{...PLAYER_PROFILES}:{},
-    MC_BANDS:(typeof MC_BANDS!=='undefined' && MC_BANDS)?{...MC_BANDS}:{},
-    MC_PLAYER_BANDS:(typeof MC_PLAYER_BANDS!=='undefined' && MC_PLAYER_BANDS)?{...MC_PLAYER_BANDS}:{},
-    GYM_SESSIONS:(typeof GYM_SESSIONS!=='undefined' && Array.isArray(GYM_SESSIONS))?[...GYM_SESSIONS]:[],
+    MATCHES:(typeof MATCHES!=='undefined' && Array.isArray(MATCHES))?[...MATCHES]:undefined,
+    CATS:(typeof CATS!=='undefined' && Array.isArray(CATS))?[...CATS]:undefined,
+    CATN:(typeof CATN!=='undefined' && Array.isArray(CATN))?[...CATN]:undefined,
+    BC:(typeof BC!=='undefined' && BC)?{...BC}:undefined,
+    CS:(typeof CS!=='undefined' && CS)?{...CS}:undefined,
+    REF:(typeof REF!=='undefined' && REF)?{...REF}:undefined,
+    MICROCICLO:(typeof MICROCICLO!=='undefined' && Array.isArray(MICROCICLO))?[...MICROCICLO]:undefined,
+    PLAYER_PROFILES:(typeof PLAYER_PROFILES!=='undefined' && PLAYER_PROFILES)?{...PLAYER_PROFILES}:undefined,
+    MC_BANDS:(typeof MC_BANDS!=='undefined' && MC_BANDS)?{...MC_BANDS}:undefined,
+    MC_PLAYER_BANDS:(typeof MC_PLAYER_BANDS!=='undefined' && MC_PLAYER_BANDS)?{...MC_PLAYER_BANDS}:undefined,
+    GYM_SESSIONS:(typeof GYM_SESSIONS!=='undefined' && Array.isArray(GYM_SESSIONS))?[...GYM_SESSIONS]:undefined,
     GYM_EXERCISES:gymEx,
-    GYM_CATS:(typeof GYM_CATS!=='undefined' && Array.isArray(GYM_CATS))?[...GYM_CATS]:[],
-    GYM_EVALS:(typeof GYM_EVALS!=='undefined' && GYM_EVALS)?{...GYM_EVALS}:{},
+    GYM_CATS:(typeof GYM_CATS!=='undefined' && Array.isArray(GYM_CATS))?[...GYM_CATS]:undefined,
+    GYM_EVALS:(typeof GYM_EVALS!=='undefined' && GYM_EVALS)?{...GYM_EVALS}:undefined,
     TST_DATA:(typeof TST_DATA!=='undefined' && Array.isArray(TST_DATA))?TST_DATA.slice():[],
-    NUTRITION_DATA:(typeof NUTRITION_DATA!=='undefined' && NUTRITION_DATA)?{...NUTRITION_DATA}:{},
-    MOBILITY_DATA:(typeof MOBILITY_DATA!=='undefined' && MOBILITY_DATA)?{...MOBILITY_DATA}:{},
-    NUT_REF:(typeof NUT_REF!=='undefined' && NUT_REF)?{...NUT_REF}:{},
-    MOB_REF:(typeof MOB_REF!=='undefined' && MOB_REF)?{...MOB_REF}:{},
+    NUTRITION_DATA:(typeof NUTRITION_DATA!=='undefined' && NUTRITION_DATA)?{...NUTRITION_DATA}:undefined,
+    MOBILITY_DATA:(typeof MOBILITY_DATA!=='undefined' && MOBILITY_DATA)?{...MOBILITY_DATA}:undefined,
+    NUT_REF:(typeof NUT_REF!=='undefined' && NUT_REF)?{...NUT_REF}:undefined,
+    MOB_REF:(typeof MOB_REF!=='undefined' && MOB_REF)?{...MOB_REF}:undefined,
     EXTRA_METRICS:(typeof EXTRA_METRICS!=='undefined' && Array.isArray(EXTRA_METRICS))?JSON.parse(JSON.stringify(EXTRA_METRICS)):[],
-    NUT_COL_MAP:(typeof NUT_COL_MAP!=='undefined' && NUT_COL_MAP)?{...NUT_COL_MAP}:{},
-    MOB_COL_MAP:(typeof MOB_COL_MAP!=='undefined' && MOB_COL_MAP)?{...MOB_COL_MAP}:{},
-    EVAL_ALIASES:(typeof EVAL_ALIASES!=='undefined' && EVAL_ALIASES)?{...EVAL_ALIASES}:{},
+    NUT_COL_MAP:(typeof NUT_COL_MAP!=='undefined' && NUT_COL_MAP)?{...NUT_COL_MAP}:undefined,
+    MOB_COL_MAP:(typeof MOB_COL_MAP!=='undefined' && MOB_COL_MAP)?{...MOB_COL_MAP}:undefined,
+    EVAL_ALIASES:(typeof EVAL_ALIASES!=='undefined' && EVAL_ALIASES)?{...EVAL_ALIASES}:undefined,
     PLAN_WEEKS:(typeof PLAN_WEEKS!=='undefined' && Array.isArray(PLAN_WEEKS))?PLAN_WEEKS.map(function(w){return JSON.parse(JSON.stringify(w));}):[],
     WELLNESS_DATA:(typeof WELLNESS_DATA!=='undefined' && Array.isArray(WELLNESS_DATA))?JSON.parse(JSON.stringify(WELLNESS_DATA)):[],
     PSE_DATA:(typeof PSE_DATA!=='undefined' && Array.isArray(PSE_DATA))?JSON.parse(JSON.stringify(PSE_DATA)):[],
     WELLNESS_LAYOUT:(typeof WELLNESS_LAYOUT!=='undefined' && WELLNESS_LAYOUT)?JSON.parse(JSON.stringify(WELLNESS_LAYOUT)):null,
     PSE_LAYOUT:(typeof PSE_LAYOUT!=='undefined' && PSE_LAYOUT)?JSON.parse(JSON.stringify(PSE_LAYOUT)):null,
-    CARGA_NAME_ALIASES:(typeof CARGA_NAME_ALIASES!=='undefined')?{...CARGA_NAME_ALIASES}:{},
+    CARGA_NAME_ALIASES:(typeof CARGA_NAME_ALIASES!=='undefined')?{...CARGA_NAME_ALIASES}:undefined,
+    GYM_BLOQUES:(typeof GYM_BLOQUES!=='undefined')?[...GYM_BLOQUES]:undefined,
     CARGA_LOAD_CONFIG:(typeof CARGA_LOAD_CONFIG!=='undefined')?CARGA_LOAD_CONFIG:null,
     // v196: el registro de asistencia vivía sólo en localStorage y se poda a
     // 120 días. Ahora que alimenta reportes, viaja también en el backup.
@@ -5540,6 +5545,25 @@ function saveData(){
   var payload, json;
   try{
     payload=_buildFullPayload(false);
+    // RED DE SEGURIDAD: durante el arranque hay guardados que corren ANTES de
+    // que se declaren variables que viven en bloques de script posteriores
+    // (GYM_SESSIONS, por ejemplo). Esas claves salían del payload como
+    // undefined y el guardado las borraba del disco: las sesiones de gimnasio
+    // desaparecían de localStorage en cada carga, y sólo volvían porque
+    // Supabase las reponía. Acá se conserva lo que ya estaba guardado para
+    // toda clave que todavía no existe en memoria.
+    try{
+      // Si ya se supo que el espejo de localStorage quedó corto por cuota, no
+      // sirve como referencia: mejor no reinyectar datos viejos.
+      var _prev=window._lsMirrorWarned ? null : localStorage.getItem(STORAGE_KEY);
+      if(_prev){
+        var _pp=JSON.parse(_prev);
+        Object.keys(_pp).forEach(function(k){
+          if(k==='__ts') return;
+          if(payload[k]===undefined) payload[k]=_pp[k];
+        });
+      }
+    }catch(e){ /* sin copia previa o ilegible: se guarda lo que hay */ }
     payload.__ts=Date.now();
     json=JSON.stringify(payload);
   }catch(e){ console.warn('saveData build error:',e); return; }
@@ -5598,6 +5622,7 @@ function applyPayload(p){
     if(p.WELLNESS_LAYOUT && typeof WELLNESS_LAYOUT!=='undefined'){WELLNESS_LAYOUT=p.WELLNESS_LAYOUT;}
     if(p.PSE_LAYOUT && typeof PSE_LAYOUT!=='undefined'){PSE_LAYOUT=p.PSE_LAYOUT;}
     if(p.CARGA_NAME_ALIASES && typeof CARGA_NAME_ALIASES!=='undefined'){CARGA_NAME_ALIASES=p.CARGA_NAME_ALIASES;}
+    if(Array.isArray(p.GYM_BLOQUES) && p.GYM_BLOQUES.length && typeof GYM_BLOQUES!=='undefined'){GYM_BLOQUES.length=0;p.GYM_BLOQUES.forEach(function(b){GYM_BLOQUES.push(b);});}
     if(p.CARGA_LOAD_CONFIG && typeof CARGA_LOAD_CONFIG!=='undefined'){CARGA_LOAD_CONFIG=p.CARGA_LOAD_CONFIG;}
     return true;
   }catch(e){console.warn('applyPayload error:',e);return false;}
@@ -5726,6 +5751,7 @@ function importData(ev){
       if(p.WELLNESS_LAYOUT && typeof WELLNESS_LAYOUT!=='undefined')WELLNESS_LAYOUT=p.WELLNESS_LAYOUT;
       if(p.PSE_LAYOUT && typeof PSE_LAYOUT!=='undefined')PSE_LAYOUT=p.PSE_LAYOUT;
       if(p.CARGA_NAME_ALIASES && typeof CARGA_NAME_ALIASES!=='undefined')CARGA_NAME_ALIASES=p.CARGA_NAME_ALIASES;
+      if(Array.isArray(p.GYM_BLOQUES) && p.GYM_BLOQUES.length && typeof GYM_BLOQUES!=='undefined'){GYM_BLOQUES.length=0;p.GYM_BLOQUES.forEach(function(b){GYM_BLOQUES.push(b);});}
       if(p.CARGA_LOAD_CONFIG && typeof CARGA_LOAD_CONFIG!=='undefined')CARGA_LOAD_CONFIG=p.CARGA_LOAD_CONFIG;
       saveData();
       rebuildCatBtns();rebuildCatSelects();
@@ -6058,7 +6084,79 @@ function mcParseCsvByLayout(txt, layout){
   }).filter(Boolean);
 }
 
+// ── Correlación de nombres del GPS con los perfiles ──────────────────────────
+// El archivo del GPS escribe los nombres como se los cargó el operador: a veces
+// sin tilde, a veces en MAYÚSCULAS, a veces apellido primero. Antes cada
+// variante se guardaba como un jugador distinto y la semana quedaba con
+// duplicados. Acá cada nombre se resuelve contra los perfiles usando el mismo
+// mapa de equivalencias que ya aprenden las importaciones de wellness y PSE;
+// el nombre tal como vino queda en `_nameRaw` para poder mostrarlo al revisar.
+function mcResolverNombres(rows){
+  if(!rows || !rows.length) return rows;
+  rows.forEach(function(r){
+    if(!r || !r.name) return;
+    if(r._nameRaw===undefined) r._nameRaw=r.name;
+    try{
+      if(typeof cargaResolveName==='function'){
+        var res=cargaResolveName(r._nameRaw);
+        if(res) r.name=res;
+      }
+    }catch(e){}
+  });
+  return rows;
+}
+window.mcResolverNombres=mcResolverNombres;
+
+// Devuelve los nombres del archivo que NO se pudieron asociar a ningún perfil
+// (ni por equivalencia aprendida ni por coincidencia exacta sin tildes).
+function mcNombresSinAsociar(rows){
+  if(typeof cargaClubNames!=='function' || typeof cargaNormName!=='function') return [];
+  var club=cargaClubNames();
+  if(!club.length) return [];              // sin perfiles no hay con qué comparar
+  var clubKeys={};
+  club.forEach(function(cn){ clubKeys[cargaNormName(cn)]=true; });
+  var vistos={}, out=[];
+  (rows||[]).forEach(function(r){
+    var raw=(r&&(r._nameRaw||r.name))||'';
+    if(!raw) return;
+    var k=cargaNormName(raw);
+    if(vistos[k]) return; vistos[k]=true;
+    if(typeof CARGA_NAME_ALIASES!=='undefined' && CARGA_NAME_ALIASES[k]) return;
+    if(clubKeys[k]) return;
+    // Se consulta al MISMO resolvedor que usa la importación: si él ya sabe a
+    // quién corresponde (apellido primero, puntuación), no hay nada que
+    // preguntar. Sin esto el nombre quedaba "pendiente" para siempre y la
+    // previsualización se llamaba a sí misma sin parar.
+    try{
+      if(typeof cargaResolveName==='function'){
+        var res=cargaResolveName(raw);
+        if(res && cargaNormName(res)!==k) return;
+      }
+    }catch(e){}
+    out.push(raw);
+  });
+  return out;
+}
+window.mcNombresSinAsociar=mcNombresSinAsociar;
+
+// Antes de previsualizar o de guardar: si hay nombres nuevos, preguntar a quién
+// corresponden. Lo que se confirma queda aprendido y las próximas
+// importaciones lo resuelven solas, así no se duplican jugadores.
+function mcRevisarNombres(rows, seguir){
+  try{
+    var pend=mcNombresSinAsociar(rows);
+    if(!pend.length || typeof cargaShowNameReview!=='function'){ seguir(); return; }
+    cargaShowNameReview(rows, 'gps', function(){ seguir(); });
+  }catch(e){ console.warn('mcRevisarNombres:',e); seguir(); }
+}
+window.mcRevisarNombres=mcRevisarNombres;
+
 function mcParseCsv(txt){
+  return mcResolverNombres(mcParseCsvCrudo(txt));
+}
+window.mcParseCsv=mcParseCsv;
+
+function mcParseCsvCrudo(txt){
   // Si el modo de layout NO es 'auto', usar el parser por orden de columnas
   // (ignora headers, todo por orden, todos los negativos a positivos)
   if(typeof _mcLayoutMode!=='undefined' && _mcLayoutMode!=='auto'){
@@ -6354,6 +6452,16 @@ function mcBuildTable(players,ref,ctx){
 function mcPreview(){
   const txt=document.getElementById('mc-raw').value;const rows=mcParseCsv(txt);
   if(!rows.length){alert('Sin filas válidas. Revisá el formato del CSV.');return;}
+  // Si hay nombres que no se reconocen, se pregunta primero y se vuelve a
+  // entrar: al reparsear ya se aplican las equivalencias confirmadas.
+  if(mcNombresSinAsociar(rows).length && !window._mcRevisando){
+    window._mcRevisando=true;
+    mcRevisarNombres(rows, function(){ window._mcRevisando=false; mcPreview(); });
+    // Si el modal se cierra sin confirmar, el candado se suelta igual.
+    setTimeout(function(){ if(!document.getElementById('carga-namematch-modal')) window._mcRevisando=false; }, 400);
+    return;
+  }
+  window._mcRevisando=false;
   document.getElementById('mc-imp-msg').textContent='';
   document.getElementById('mc-prev-tbl').innerHTML=mcBuildTable(rows,mcGetRef());
   document.getElementById('mc-prev-wrap').style.display='';
@@ -6481,10 +6589,22 @@ function mcUpdatePlayerProfilesFromSession(playerList, esPartido){
   if(typeof PLAYER_PROFILES === 'undefined') return 0;
   var campo = esPartido ? 'vmaxPartido' : 'vmaxEntren';
   var updates = 0;
+  // Índice de perfiles por nombre normalizado (sin tildes ni mayúsculas): si el
+  // jugador ya existe se escribe en SU perfil en vez de crear uno nuevo. Antes
+  // la clave era el nombre crudo en minúsculas, así que "Jeronimo" y
+  // "Jerónimo" abrían dos perfiles distintos.
+  var _norm = (typeof cargaNormName==='function') ? cargaNormName
+            : function(x){ return String(x||'').toLowerCase().trim(); };
+  var porNorm = {};
+  Object.keys(PLAYER_PROFILES).forEach(function(k){
+    var pr=PLAYER_PROFILES[k];
+    porNorm[_norm((pr&&pr.name)||k)] = k;
+  });
   playerList.forEach(function(p){
     if(!p || !p.name || p.name.length < 2) return;
-    var key = p.name.trim().toLowerCase();
+    var key = porNorm[_norm(p.name)] || p.name.trim().toLowerCase();
     var ex = PLAYER_PROFILES[key] || {name: p.name.trim(), vmax: null, accmax: null, dccmax: null};
+    if(!PLAYER_PROFILES[key]) porNorm[_norm(p.name)] = key;   // recién creado
     var locks = ex.locks || {};
     var changed = false;
     if(!locks.vmax && p.vmax){
@@ -6554,6 +6674,15 @@ window.mcRecalcVmaxContextos=mcRecalcVmaxContextos;
 function mcImport(){
   const txt=document.getElementById('mc-raw').value;const rows=mcParseCsv(txt);const msg=document.getElementById('mc-imp-msg');
   if(!rows.length){msg.style.color='#E24B4A';msg.textContent='Sin datos.';return;}
+  // Red de seguridad: si se llegó acá sin pasar por la previsualización y
+  // quedan nombres sin asociar, se pregunta antes de escribir la sesión.
+  if(mcNombresSinAsociar(rows).length && !window._mcRevisando){
+    window._mcRevisando=true;
+    mcRevisarNombres(rows, function(){ window._mcRevisando=false; mcImport(); });
+    setTimeout(function(){ if(!document.getElementById('carga-namematch-modal')) window._mcRevisando=false; }, 400);
+    return;
+  }
+  window._mcRevisando=false;
   const week=document.getElementById('mc-week-name').value.trim()||('Sem '+([...new Set(MICROCICLO.map(s=>s.week))].length+1));
   const day=document.getElementById('mc-day-sel').value;
   const pse=parseFloat(document.getElementById('mc-pse').value)||null;
@@ -7646,7 +7775,7 @@ window.mcEstDrop=mcEstDrop;
 
 function mcEstCsvPreview(){
   var txt=document.getElementById('mc-est-raw')?.value||'';
-  var rows=mcParseCsv(txt);
+  var rows=mcParseCsvCrudo(txt);
   var cont=document.getElementById('mc-est-csv-rows');
   if(!rows.length){ cont.innerHTML='<span style="font-size:10px;color:#E24B4A">Sin filas válidas. Revisá el formato del CSV.</span>'; return; }
   window._mcEstCsvRows=rows;
@@ -7855,6 +7984,7 @@ window.mcRebuildLoadMetricSelector=mcRebuildLoadMetricSelector;
       <label class="btn bb" style="font-size:10px;padding:4px 12px;cursor:pointer;margin:0">📂 Subir PDF<input type="file" accept=".pdf" onchange="mcPdfImport(event)" style="display:none"></label>
       <label class="btn bb" style="font-size:10px;padding:4px 12px;cursor:pointer;margin:0">📂 Subir CSV<input type="file" accept=".csv,.txt" onchange="mcCsvFileImport(event)" style="display:none"></label>
       <button class="btn" onclick="mcToggleColEditor()" style="font-size:10px;padding:3px 10px;background:#e8efff;color:#0C447C;border:1px solid #b3ccf5">⚙️ Columnas PDF</button>
+      <button class="btn" onclick="cargaAliasPanel()" style="font-size:10px;padding:3px 10px;background:#e8efff;color:#0C447C;border:1px solid #b3ccf5" title="Ver y borrar las equivalencias de nombres aprendidas">🔗 Equivalencias</button>
       <span id="mc-pdf-status" style="font-size:11px"></span>
     </div>
     <!-- Column editor panel -->
@@ -19843,8 +19973,12 @@ document.addEventListener('DOMContentLoaded',function(){
     </div>
   </details>
 
-  <div id="gym-session-rows" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
-  <button class="btn bc" onclick="gymAddExRow()" style="font-size:11px;padding:4px 12px;margin-bottom:10px">+ Agregar ejercicio</button>
+  <div id="gym-session-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+  <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+    <button class="btn bc" onclick="gymAddExRow()" style="font-size:11px;padding:4px 12px">+ Agregar ejercicio</button>
+    <button class="btn" onclick="gymBlqAgregar('new')" style="font-size:11px;padding:4px 12px;background:#fff;color:var(--club-c2,#3B4D88);border:1px solid color-mix(in srgb, var(--club-c2,#3B4D88) 40%, transparent);font-weight:600">🧩 + Agregar bloque</button>
+    <span style="font-size:9.5px;color:#999">Con ↑↓ ordenás los bloques · con ▲▼ movés un ejercicio (y lo pasás al bloque de al lado)</span>
+  </div>
 
   <div style="display:flex;gap:8px;align-items:center">
     <button class="btn bg" onclick="gymSaveSession()" style="font-size:11px;padding:5px 16px">💾 Guardar sesión</button>
@@ -20491,8 +20625,11 @@ document.addEventListener('DOMContentLoaded',function(){
       <label style="min-width:200px;font-size:10px;color:#555;font-weight:600;display:flex;flex-direction:column;gap:2px">Notas<input id="gym-edit-notes" type="text" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;background:#fafafa"></label>
     </div>
     <div style="font-size:11px;font-weight:700;color:#333;margin-bottom:4px">Ejercicios</div>
-    <div id="gym-edit-rows" style="display:flex;flex-direction:column;gap:6px"></div>
-    <button class="btn bc" onclick="gymEditAddRow()" style="font-size:11px;padding:4px 12px;align-self:flex-start">+ Agregar ejercicio</button>
+    <div id="gym-edit-rows" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
+      <button class="btn bc" onclick="gymEditAddRow()" style="font-size:11px;padding:4px 12px">+ Agregar ejercicio</button>
+      <button class="btn" onclick="gymBlqAgregar('edit')" style="font-size:11px;padding:4px 12px;background:#fff;color:var(--club-c2,#3B4D88);border:1px solid color-mix(in srgb, var(--club-c2,#3B4D88) 40%, transparent);font-weight:600">🧩 + Agregar bloque</button>
+    </div>
     <div style="display:flex;gap:8px;align-items:center;border-top:1px solid #eee;padding-top:10px">
       <button class="btn bg" onclick="gymEditSave()" style="font-size:11px;padding:5px 16px">💾 Guardar</button>
       <button class="btn bc" onclick="gymEditClose()" style="font-size:11px;padding:5px 12px">Cancelar</button>
@@ -20550,6 +20687,20 @@ var GYM_EXERCISES_DEFAULT = [
 var _gymTab = 'library';
 var _gymLibCat = 'all';
 var _gymEditId = null;
+// ── Bloques dentro de una sesión de gimnasio ─────────────────────────────────
+// Cada ejercicio guarda a qué bloque pertenece (campo `bloque`); el orden del
+// arreglo `exercises` sigue siendo el orden real. Así todo lo que ya lee
+// `session.exercises` (resúmenes, hoja de carga, informes) funciona igual.
+var GYM_BLOQUES = [        // nombres sugeridos, editables por el usuario
+  'Activación',
+  'Zona media',
+  'A1 — Fuerza',
+  'A2 — Potencia',
+  'Accesorios',
+  'Vuelta a la calma'
+];
+var GYM_BLOQUE_DEF = 'Bloque 1';   // si una sesión vieja no tiene bloques
+
 var _gymNewRows = [];   // filas de la nueva sesión
 var _gymEditRows = [];  // filas del modal edición
 
@@ -20564,6 +20715,11 @@ var _gymEditRows = [];  // filas del modal edición
     if(p.GYM_CATS && p.GYM_CATS.length){ GYM_CATS.length=0; p.GYM_CATS.forEach(function(c){GYM_CATS.push(c);}); if(typeof gymSortCats==='function')gymSortCats(); }
     if(p.GYM_EVALS) Object.assign(GYM_EVALS, p.GYM_EVALS);
     if(p.EVAL_ALIASES) Object.assign(EVAL_ALIASES, p.EVAL_ALIASES);
+    // Los nombres de bloque se restauran acá, no en applyPayload: allá
+    // GYM_BLOQUES todavía no está declarado (vive en este bloque de script).
+    if(Array.isArray(p.GYM_BLOQUES) && p.GYM_BLOQUES.length){
+      GYM_BLOQUES.length=0; p.GYM_BLOQUES.forEach(function(x){ GYM_BLOQUES.push(x); });
+    }
   }catch(e){ console.warn('gymLoadData error:', e); }
 })();
 
@@ -20577,6 +20733,15 @@ function gymInit(){
   var ys = today.getFullYear()+'-'+(today.getMonth()+1).toString().padStart(2,'0')+'-'+today.getDate().toString().padStart(2,'0');
   var dateEl = document.getElementById('gym-date');
   if(dateEl && !dateEl.value) dateEl.value = ys;
+  // La lista de nombres sugeridos para los bloques, una sola vez en el documento
+  if(!document.getElementById('gym-blq-nombres') && typeof gymBlqDatalist==='function'){
+    document.body.insertAdjacentHTML('beforeend', gymBlqDatalist());
+  }
+  // El armador de sesiones arranca con un bloque listo para usar
+  var sr = document.getElementById('gym-session-rows');
+  if(sr && !sr.querySelector('.gym-blq') && typeof gymBlqAgregar==='function'){
+    gymBlqAgregar('new');
+  }
 }
 
 function gymRender(){
@@ -20653,7 +20818,8 @@ function gymMigrateEx(ex){
   var series = [];
   for(var i=0;i<sets;i++) series.push({reps:ex.reps||null, intensity:ex.intensity!==undefined?ex.intensity:null});
   return {exId:ex.exId, inttype:ex.inttype||'kg', derivedFrom:ex.derivedFrom||null,
-          pctFactor:ex.pctFactor||null, notes:ex.notes||'', series:series};
+          pctFactor:ex.pctFactor||null, notes:ex.notes||'', series:series,
+          bloque:ex.bloque||''};
 }
 
 // Render de una fila de ejercicio con modo idéntico/variable
@@ -20707,16 +20873,16 @@ function gymExRowHTML(rid, mode){
           +'style="width:40px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;font-size:11px;text-align:center;margin-left:3px">'
       +'</label>'
       +'<label style="font-size:10px;color:#555;display:flex;align-items:center;gap:3px">Reps'
-        +'<input id="gymrow-reps-'+rid+'-0" type="number" min="1" max="50" placeholder="6" '
+        +'<input id="gymrow-idreps-'+rid+'" type="number" min="1" max="50" placeholder="6" '
           +'style="width:40px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;font-size:11px;text-align:center;margin-left:3px">'
       +'</label>'
       +'<label id="gymrow-intlbl-'+rid+'" style="font-size:10px;color:#555;display:flex;align-items:center;gap:3px">Intens.'
-        +'<input id="gymrow-int-'+rid+'-0" type="number" step="0.5" placeholder="—" '
+        +'<input id="gymrow-idint-'+rid+'" type="number" step="0.5" placeholder="—" '
           +'style="width:54px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;font-size:11px;text-align:center;margin-left:3px">'
       +'</label>'
       // VBT % pérdida inline — only visible when inttype=vbt
       +'<label id="gymrow-vloss-lbl-'+rid+'" style="display:none;font-size:10px;color:#E24B4A;font-weight:700;align-items:center;gap:3px">% Pérd.'
-        +'<input id="gymrow-vloss-'+rid+'-0" type="number" step="1" min="0" max="100" placeholder="—" '
+        +'<input id="gymrow-idvloss-'+rid+'" type="number" step="1" min="0" max="100" placeholder="—" '
           +'style="width:44px;padding:2px 4px;border:1px solid #E24B4A55;border-radius:3px;font-size:11px;text-align:center;margin-left:3px;background:#fff5f5">'
         +'<span style="font-size:9px;color:#aaa;margin-left:1px">%vel</span>'
       +'</label>'
@@ -20913,8 +21079,8 @@ function gymRowExChange(rid){
   if(vbtHint) vbtHint.style.display = (it==='vbt') ? 'flex' : 'none';
   if(it==='vbt') gymVbtUpdateHint(rid);
 
-  var intInp = document.getElementById('gymrow-int-'+rid+'-0');
-  var repsInp = document.getElementById('gymrow-reps-'+rid+'-0');
+  var intInp = document.getElementById('gymrow-idint-'+rid);
+  var repsInp = document.getElementById('gymrow-idreps-'+rid);
   // Preserve existing values before updating UI
   var savedReps = repsInp ? repsInp.value : '';
   var savedInt  = intInp  ? intInp.value  : '';
@@ -20980,7 +21146,7 @@ function gymVbtUpdateHint(rid){
   if(!hintPanel||!rowsEl) return;
 
   var exSel = document.getElementById('gymrow-ex-'+rid);
-  var intInp = document.getElementById('gymrow-int-'+rid+'-0');
+  var intInp = document.getElementById('gymrow-idint-'+rid);
   var vmp = intInp ? parseFloat(intInp.value) : NaN;
   var exId = exSel ? parseInt(exSel.value)||null : null;
   var exObj = exId ? GYM_EXERCISES.find(function(e){return e.id===exId;}) : null;
@@ -21140,9 +21306,9 @@ function gymRowValues(rid){
     }
   } else {
     var setsEl = document.getElementById('gymrow-sets-'+rid);
-    var repsEl = document.getElementById('gymrow-reps-'+rid+'-0');
-    var intEl  = document.getElementById('gymrow-int-'+rid+'-0');
-    var vlEl2  = document.getElementById('gymrow-vloss-'+rid+'-0');
+    var repsEl = document.getElementById('gymrow-idreps-'+rid);
+    var intEl  = document.getElementById('gymrow-idint-'+rid);
+    var vlEl2  = document.getElementById('gymrow-idvloss-'+rid);
     var sets   = parseInt(setsEl?setsEl.value:'')||1;
     var reps   = parseInt(repsEl?repsEl.value:'')||null;
     var int_   = parseFloat(intEl?intEl.value:'');
@@ -21165,15 +21331,320 @@ function gymRemoveRow(rid, mode){
 }
 window.gymRemoveRow = gymRemoveRow;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BLOQUES DE UNA SESIÓN DE GIMNASIO
+// ═══════════════════════════════════════════════════════════════════════════
+// Los ejercicios de una sesión se agrupan en bloques (Activación, Zona media,
+// A1 — Fuerza…). El bloque viaja en el campo `bloque` de cada ejercicio y el
+// orden del arreglo `exercises` sigue siendo el orden real, así que todo lo que
+// ya lee `session.exercises` no se enteró del cambio.
+var _gymBlqId = 0;
+
+function gymBlqEsc(x){
+  return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Nombre libre para un bloque nuevo: el primero de la lista que no esté en uso.
+function gymBlqNombreLibre(usados){
+  var lista = (typeof GYM_BLOQUES!=='undefined' && GYM_BLOQUES.length) ? GYM_BLOQUES : [GYM_BLOQUE_DEF];
+  for(var i=0;i<lista.length;i++){ if(usados.indexOf(lista[i])<0) return lista[i]; }
+  var n=usados.length+1;
+  while(usados.indexOf('Bloque '+n)>=0) n++;
+  return 'Bloque '+n;
+}
+
+// Agrupa una lista plana de ejercicios en bloques contiguos.
+function gymBlqAgrupar(exercises){
+  var out=[];
+  (exercises||[]).forEach(function(ex){
+    var nom = (ex && ex.bloque) ? String(ex.bloque) : GYM_BLOQUE_DEF;
+    if(!out.length || out[out.length-1].nombre!==nom) out.push({nombre:nom, ejercicios:[]});
+    out[out.length-1].ejercicios.push(ex);
+  });
+  return out;
+}
+window.gymBlqAgrupar = gymBlqAgrupar;
+
+function gymBlqDatalist(){
+  var lista = (typeof GYM_BLOQUES!=='undefined') ? GYM_BLOQUES : [];
+  return '<datalist id="gym-blq-nombres">'
+    + lista.map(function(b){ return '<option value="'+gymBlqEsc(b)+'">'; }).join('')
+    + '</datalist>';
+}
+
+// Cabecera + contenedor de un bloque. `mode` es 'new' o 'edit'.
+function gymBlqHTML(bid, nombre, mode){
+  var m = gymBlqEsc(mode);
+  return '<div class="gym-blq" id="gymblq-'+bid+'" data-blq="'+bid+'" data-modo="'+m+'" '
+      +'style="border:1px solid color-mix(in srgb, var(--club-c2,#3B4D88) 20%, transparent);border-radius:8px;background:#fbfcff;overflow:hidden">'
+    +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 8px;'
+      +'background:color-mix(in srgb, var(--club-c2,#3B4D88) 8%, transparent);'
+      +'border-bottom:1px solid color-mix(in srgb, var(--club-c2,#3B4D88) 14%, transparent)">'
+      +'<span style="font-size:13px;cursor:default" title="Bloque">🧩</span>'
+      +'<input class="gym-blq-nom" id="gymblq-nom-'+bid+'" type="text" list="gym-blq-nombres" '
+        +'value="'+gymBlqEsc(nombre)+'" placeholder="Nombre del bloque" '
+        +'onchange="gymBlqAprenderNombre(this.value)" '
+        +'title="'+gymBlqEsc(nombre)+'" '
+        +'style="font-size:11.5px;font-weight:700;color:var(--club-c2,#3B4D88);padding:3px 7px;'
+        +'border:1px solid color-mix(in srgb, var(--club-c2,#3B4D88) 28%, transparent);border-radius:5px;background:#fff;min-width:150px;flex:1;max-width:360px">'
+      +'<span class="gym-blq-cuenta" style="font-size:9.5px;color:#888;white-space:nowrap"></span>'
+      +'<span style="flex:1"></span>'
+      +'<button type="button" onclick="gymBlqMover(\''+bid+'\',-1)" title="Subir el bloque" '
+        +'style="border:1px solid #ddd;background:#fff;cursor:pointer;border-radius:4px;font-size:11px;padding:2px 7px">↑</button>'
+      +'<button type="button" onclick="gymBlqMover(\''+bid+'\',1)" title="Bajar el bloque" '
+        +'style="border:1px solid #ddd;background:#fff;cursor:pointer;border-radius:4px;font-size:11px;padding:2px 7px">↓</button>'
+      +'<button type="button" onclick="gymBlqAgregarEjercicio(\''+bid+'\')" title="Agregar un ejercicio a este bloque" '
+        +'style="border:1px solid color-mix(in srgb, var(--club-c2,#3B4D88) 34%, transparent);background:#fff;color:var(--club-c2,#3B4D88);cursor:pointer;'
+        +'border-radius:4px;font-size:10px;font-weight:600;padding:2px 9px">+ ejercicio</button>'
+      +'<button type="button" onclick="gymBlqBorrar(\''+bid+'\')" title="Quitar el bloque" '
+        +'style="border:1px solid #E24B4A55;background:#fff;color:#E24B4A;cursor:pointer;border-radius:4px;font-size:11px;padding:2px 7px">🗑</button>'
+    +'</div>'
+    +'<div class="gym-blq-filas" id="gymblq-filas-'+bid+'" '
+      +'style="display:flex;flex-direction:column;gap:6px;padding:7px 8px;min-height:10px"></div>'
+  +'</div>';
+}
+
+// Envuelve una fila de ejercicio con los controles para moverla.
+function gymBlqItemHTML(rid, mode){
+  return '<div class="gym-blq-it" data-rid="'+gymBlqEsc(rid)+'" style="display:flex;align-items:flex-start;gap:5px">'
+    +'<div style="display:flex;flex-direction:column;gap:2px;padding-top:7px;flex-shrink:0">'
+      +'<button type="button" onclick="gymBlqMoverFila(\''+rid+'\',-1)" title="Subir (al llegar arriba pasa al bloque anterior)" '
+        +'style="border:1px solid #ddd;background:#fff;cursor:pointer;border-radius:3px;font-size:9px;padding:1px 4px;line-height:1.3">▲</button>'
+      +'<button type="button" onclick="gymBlqMoverFila(\''+rid+'\',1)" title="Bajar (al llegar abajo pasa al bloque siguiente)" '
+        +'style="border:1px solid #ddd;background:#fff;cursor:pointer;border-radius:3px;font-size:9px;padding:1px 4px;line-height:1.3">▼</button>'
+    +'</div>'
+    +'<div style="flex:1;min-width:0">'+gymExRowHTML(rid, mode)+'</div>'
+  +'</div>';
+}
+
+function gymBlqCont(mode){
+  return document.getElementById(mode==='edit' ? 'gym-edit-rows' : 'gym-session-rows');
+}
+function gymBlqModoDe(el){
+  var b = el.closest ? el.closest('.gym-blq') : null;
+  return (b && b.getAttribute('data-modo')) || 'new';
+}
+
+// Vuelve a numerar los contadores y a habilitar/deshabilitar las flechas.
+function gymBlqRefrescar(mode){
+  ['new','edit'].forEach(function(m){
+    if(mode && m!==mode) return;
+    var cont = gymBlqCont(m);
+    if(!cont) return;
+    var blqs = Array.prototype.slice.call(cont.querySelectorAll(':scope > .gym-blq'));
+    blqs.forEach(function(b, i){
+      var filas = b.querySelector('.gym-blq-filas');
+      var n = filas ? filas.querySelectorAll(':scope > .gym-blq-it').length : 0;
+      var c = b.querySelector('.gym-blq-cuenta');
+      if(c) c.textContent = n ? (n+(n===1?' ejercicio':' ejercicios')) : 'vacío';
+      var ups = b.querySelectorAll(':scope > div > button');
+      if(ups[0]) ups[0].disabled = (i===0);
+      if(ups[1]) ups[1].disabled = (i===blqs.length-1);
+      [ups[0],ups[1]].forEach(function(bt){ if(bt){ bt.style.opacity = bt.disabled?'0.3':''; bt.style.cursor = bt.disabled?'default':'pointer'; } });
+    });
+  });
+}
+window.gymBlqRefrescar = gymBlqRefrescar;
+
+// Nombres de bloque que ya están en uso en un contenedor.
+function gymBlqUsados(mode){
+  var cont = gymBlqCont(mode); if(!cont) return [];
+  return Array.prototype.slice.call(cont.querySelectorAll(':scope > .gym-blq .gym-blq-nom'))
+    .map(function(i){ return i.value.trim(); }).filter(Boolean);
+}
+
+// Agrega un bloque nuevo al final.
+function gymBlqAgregar(mode, nombre){
+  var cont = gymBlqCont(mode); if(!cont) return null;
+  var bid = 'b'+(++_gymBlqId);
+  var nom = nombre!==undefined ? nombre : gymBlqNombreLibre(gymBlqUsados(mode));
+  cont.insertAdjacentHTML('beforeend', gymBlqHTML(bid, nom, mode));
+  gymBlqRefrescar(mode);
+  return bid;
+}
+window.gymBlqAgregar = gymBlqAgregar;
+
+// Agrega un ejercicio dentro de un bloque.
+function gymBlqAgregarEjercicio(bid){
+  var filas = document.getElementById('gymblq-filas-'+bid);
+  if(!filas) return null;
+  var mode = gymBlqModoDe(filas);
+  var rid = (mode==='edit' ? 'e' : 'n')+(++_gymRowId);
+  if(mode==='edit') _gymEditRows.push(rid); else _gymNewRows.push(rid);
+  filas.insertAdjacentHTML('beforeend', gymBlqItemHTML(rid, mode));
+  setTimeout(function(){ gymRowAddSerie(rid); }, 0);
+  gymBlqRefrescar(mode);
+  return rid;
+}
+window.gymBlqAgregarEjercicio = gymBlqAgregarEjercicio;
+
+// Mueve un bloque entero una posición arriba o abajo.
+function gymBlqMover(bid, dir){
+  var b = document.getElementById('gymblq-'+bid); if(!b) return;
+  var mode = b.getAttribute('data-modo')||'new';
+  if(dir<0){ var p=b.previousElementSibling; if(p) b.parentNode.insertBefore(b,p); }
+  else     { var n=b.nextElementSibling;     if(n) b.parentNode.insertBefore(n,b); }
+  gymBlqRefrescar(mode);
+}
+window.gymBlqMover = gymBlqMover;
+
+// Mueve una fila dentro del bloque; si ya está en el borde, salta al bloque
+// vecino. Así con las mismas dos flechas se ordena y se cambia de bloque.
+function gymBlqMoverFila(rid, dir){
+  var it = document.querySelector('.gym-blq-it[data-rid="'+rid+'"]');
+  if(!it) return;
+  var mode = gymBlqModoDe(it);
+  var hermano = dir<0 ? it.previousElementSibling : it.nextElementSibling;
+  if(hermano){
+    if(dir<0) it.parentNode.insertBefore(it, hermano);
+    else      it.parentNode.insertBefore(hermano, it);
+  } else {
+    var blq = it.closest('.gym-blq');
+    var vecino = dir<0 ? blq.previousElementSibling : blq.nextElementSibling;
+    if(!vecino || !vecino.classList.contains('gym-blq')) return;
+    var destino = vecino.querySelector('.gym-blq-filas');
+    if(!destino) return;
+    if(dir<0) destino.appendChild(it);
+    else      destino.insertBefore(it, destino.firstElementChild);
+  }
+  gymBlqRefrescar(mode);
+}
+window.gymBlqMoverFila = gymBlqMoverFila;
+
+// Quita un bloque. Si tiene ejercicios, se pregunta y se ofrece conservarlos.
+function gymBlqBorrar(bid){
+  var b = document.getElementById('gymblq-'+bid); if(!b) return;
+  var mode = b.getAttribute('data-modo')||'new';
+  var cont = gymBlqCont(mode);
+  var filas = b.querySelector('.gym-blq-filas');
+  var items = filas ? Array.prototype.slice.call(filas.querySelectorAll(':scope > .gym-blq-it')) : [];
+  var hermanos = Array.prototype.slice.call(cont.querySelectorAll(':scope > .gym-blq'));
+  if(items.length){
+    var otro = hermanos.filter(function(x){ return x!==b; })[0];
+    var nom = (b.querySelector('.gym-blq-nom')||{}).value || 'este bloque';
+    if(!otro){
+      if(!confirm('«'+nom+'» tiene '+items.length+' ejercicio(s) y es el único bloque.\n¿Borrar el bloque con sus ejercicios?')) return;
+    } else {
+      var r = confirm('«'+nom+'» tiene '+items.length+' ejercicio(s).\n\nAceptar: los paso al bloque «'+
+        ((otro.querySelector('.gym-blq-nom')||{}).value||'')+'» y borro el bloque.\nCancelar: no toco nada.');
+      if(!r) return;
+      var destino = otro.querySelector('.gym-blq-filas');
+      items.forEach(function(it){ destino.appendChild(it); });
+    }
+  }
+  // Las filas que se van se descuentan del registro de filas activas
+  items.forEach(function(it){
+    if(!it.parentNode || !it.closest('.gym-blq')){
+      var rid = it.getAttribute('data-rid');
+      if(mode==='edit') _gymEditRows = _gymEditRows.filter(function(r){return r!==rid;});
+      else              _gymNewRows  = _gymNewRows.filter(function(r){return r!==rid;});
+    }
+  });
+  b.remove();
+  if(!cont.querySelector(':scope > .gym-blq')) gymBlqAgregar(mode, gymBlqNombreLibre([]));
+  gymBlqRefrescar(mode);
+}
+window.gymBlqBorrar = gymBlqBorrar;
+
+// Un nombre nuevo escrito a mano se suma a la lista de sugerencias.
+function gymBlqAprenderNombre(nom){
+  nom = String(nom||'').trim();
+  if(!nom || typeof GYM_BLOQUES==='undefined') return;
+  if(GYM_BLOQUES.indexOf(nom)>=0) return;
+  if(GYM_BLOQUES.length>=40) return;
+  GYM_BLOQUES.push(nom);
+  document.querySelectorAll('#gym-blq-nombres').forEach(function(dl){
+    dl.insertAdjacentHTML('beforeend','<option value="'+gymBlqEsc(nom)+'">');
+  });
+  // Agrupado: si renombrás tres bloques seguidos se guarda una sola vez.
+  if(window._gymBlqTmr) clearTimeout(window._gymBlqTmr);
+  window._gymBlqTmr=setTimeout(function(){
+    window._gymBlqTmr=null;
+    try{ if(typeof saveData==='function') saveData(); }catch(e){}
+  }, 1200);
+}
+window.gymBlqAprenderNombre = gymBlqAprenderNombre;
+
+// Pinta los bloques de una sesión en un contenedor. Devuelve los rid creados,
+// en orden, para que el llamador complete los valores de cada fila.
+function gymBlqPintar(mode, exercises, nombresGuardados){
+  var cont = gymBlqCont(mode); if(!cont) return [];
+  cont.innerHTML = '';
+  if(mode==='new') _gymNewRows=[]; else _gymEditRows=[];
+  var grupos = gymBlqAgrupar(exercises);
+  // Bloques que se guardaron vacíos: se reponen en su lugar.
+  if(Array.isArray(nombresGuardados) && nombresGuardados.length){
+    var conEj = {};
+    grupos.forEach(function(g){ conEj[g.nombre] = g; });
+    var rearmado = [], usados = {};
+    nombresGuardados.forEach(function(nom){
+      if(conEj[nom] && !usados[nom]){ rearmado.push(conEj[nom]); usados[nom]=true; }
+      else if(!conEj[nom]) rearmado.push({nombre:nom, ejercicios:[]});
+    });
+    grupos.forEach(function(g){ if(!usados[g.nombre]) rearmado.push(g); });
+    if(rearmado.length) grupos = rearmado;
+  }
+  if(!grupos.length) grupos = [{nombre: gymBlqNombreLibre([]), ejercicios: []}];
+  var rids = [];
+  grupos.forEach(function(g){
+    var bid = 'b'+(++_gymBlqId);
+    cont.insertAdjacentHTML('beforeend', gymBlqHTML(bid, g.nombre, mode));
+    var filas = document.getElementById('gymblq-filas-'+bid);
+    g.ejercicios.forEach(function(){
+      var rid = (mode==='edit'?'e':'n')+(++_gymRowId);
+      if(mode==='edit') _gymEditRows.push(rid); else _gymNewRows.push(rid);
+      filas.insertAdjacentHTML('beforeend', gymBlqItemHTML(rid, mode));
+      rids.push(rid);
+    });
+  });
+  gymBlqRefrescar(mode);
+  return rids;
+}
+window.gymBlqPintar = gymBlqPintar;
+
+// Lee el contenedor y devuelve la lista plana de ejercicios, cada uno con su
+// bloque. El orden sale del DOM, que es lo que el usuario ve.
+// Los nombres de todos los bloques en pantalla, en orden (incluidos los que
+// todavía no tienen ningún ejercicio). Se guarda aparte en la sesión para que
+// un bloque armado y vacío no desaparezca al guardar.
+function gymBlqNombres(mode){
+  var cont = gymBlqCont(mode); if(!cont) return [];
+  return Array.prototype.slice.call(cont.querySelectorAll(':scope > .gym-blq')).map(function(b){
+    return ((b.querySelector('.gym-blq-nom')||{}).value||'').trim() || GYM_BLOQUE_DEF;
+  });
+}
+window.gymBlqNombres = gymBlqNombres;
+
+function gymBlqLeer(mode){
+  var cont = gymBlqCont(mode); if(!cont) return [];
+  var out = [];
+  Array.prototype.slice.call(cont.querySelectorAll(':scope > .gym-blq')).forEach(function(b){
+    var nom = ((b.querySelector('.gym-blq-nom')||{}).value||'').trim() || GYM_BLOQUE_DEF;
+    var filas = b.querySelector('.gym-blq-filas');
+    if(!filas) return;
+    Array.prototype.slice.call(filas.querySelectorAll(':scope > .gym-blq-it')).forEach(function(it){
+      var rid = it.getAttribute('data-rid');
+      var v = gymRowValues(rid);
+      if(!v || !v.exId) return;
+      v.bloque = nom;
+      out.push(v);
+    });
+  });
+  return out;
+}
+window.gymBlqLeer = gymBlqLeer;
+
 // Nueva sesión — agregar fila
 function gymAddExRow(){
-  var rid = 'n'+(++_gymRowId);
-  _gymNewRows.push(rid);
+  // Va al último bloque; si todavía no hay ninguno, se crea.
   var cont = document.getElementById('gym-session-rows');
-  if(cont){
-    cont.insertAdjacentHTML('beforeend', gymExRowHTML(rid,'new'));
-    setTimeout(function(){ gymRowAddSerie(rid); }, 0);
-  }
+  if(!cont) return;
+  var blqs = cont.querySelectorAll(':scope > .gym-blq');
+  var bid;
+  if(!blqs.length) bid = gymBlqAgregar('new');
+  else bid = blqs[blqs.length-1].getAttribute('data-blq');
+  gymBlqAgregarEjercicio(bid);
 }
 window.gymAddExRow = gymAddExRow;
 
@@ -21186,9 +21657,11 @@ function gymSaveSession(){
   var msg   = document.getElementById('gym-save-msg');
   if(!date){ msg.style.color='#E24B4A'; msg.textContent='La fecha es obligatoria.'; return; }
   if(!week){ msg.style.color='#E24B4A'; msg.textContent='Escribí el nombre de la semana.'; return; }
-  var exercises = _gymNewRows.map(function(rid){ return gymRowValues(rid); }).filter(function(r){return r.exId;});
+  var exercises = gymBlqLeer('new');      // el orden y el bloque salen de la pantalla
+  var bloquesNom = gymBlqNombres('new');
   var newId = GYM_SESSIONS.length ? Math.max.apply(null, GYM_SESSIONS.map(function(s){return s.id;}))+1 : 1;
-  GYM_SESSIONS.push({id:newId, date:date, week:week, md:md, notes:notes, exercises:exercises});
+  GYM_SESSIONS.push({id:newId, date:date, week:week, md:md, notes:notes,
+                     exercises:exercises, bloques:bloquesNom});
   saveData();
   msg.style.color='#1D9E75'; msg.textContent='Sesión guardada.'; setTimeout(function(){msg.textContent='';},3000);
   gymClearNewSession();
@@ -21199,8 +21672,8 @@ function gymSaveSession(){
 window.gymSaveSession = gymSaveSession;
 
 function gymClearNewSession(){
-  document.getElementById('gym-session-rows').innerHTML='';
   _gymNewRows=[];
+  gymBlqPintar('new', []);              // deja un bloque vacío listo para usar
   document.getElementById('gym-notes').value='';
   document.getElementById('gym-md').value='';
 }
@@ -21227,8 +21700,24 @@ function gymRenderSessions(){
   }
   cont.innerHTML = sessions.map(function(s){
     var d = s.date ? s.date.split('-').reverse().join('/') : '—';
+    // Una fila de ejercicio; si abre un bloque nuevo, lleva su cabecera arriba.
+    var _blqPrev = null;
     var exRows = (s.exercises||[]).map(function(rawEx){
       var ex = gymMigrateEx(rawEx);
+      // Se resuelve el nombre primero (los ejercicios sin bloque caen en el
+      // bloque por defecto): si no, un ejercicio sin bloque en el medio no
+      // cortaba el grupo y el historial contradecía al editor.
+      var _blqNom = (rawEx && rawEx.bloque) ? String(rawEx.bloque) : GYM_BLOQUE_DEF;
+      var _cab = '';
+      if(_blqNom!==_blqPrev){
+        _cab = '<div style="display:flex;align-items:center;gap:5px;margin:7px 0 3px">'
+          +'<span style="font-size:10px">🧩</span>'
+          +'<span style="font-size:10px;font-weight:700;color:var(--club-c2,#3B4D88);text-transform:uppercase;letter-spacing:.3px">'
+            +String(_blqNom).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</span>'
+          +'<span style="flex:1;height:1px;background:color-mix(in srgb, var(--club-c2,#3B4D88) 14%, transparent)"></span>'
+          +'</div>';
+      }
+      _blqPrev = _blqNom;
       var exObj = GYM_EXERCISES.find(function(e){return e.id===ex.exId;});
       var exName = exObj ? exObj.name : '(ejercicio eliminado)';
       var col = exObj ? gymCatColor(exObj.cat) : '#aaa';
@@ -21244,7 +21733,7 @@ function gymRenderSessions(){
           +(si+1)+': '+(repsStr||'')+(intStr||'—')+vlStr+'</span>';
       }).join('');
 
-      return '<div style="display:flex;align-items:flex-start;gap:5px;padding:3px 0;border-bottom:0.5px solid #f5f5f5;flex-wrap:wrap">'
+      return _cab+'<div style="display:flex;align-items:flex-start;gap:5px;padding:3px 0;border-bottom:0.5px solid #f5f5f5;flex-wrap:wrap">'
         +'<span style="width:8px;height:8px;border-radius:50%;background:'+col+';flex-shrink:0;display:inline-block;margin-top:3px"></span>'
         +'<span style="font-size:11px;font-weight:600;color:#1a1a1a;min-width:130px">'+exName+'</span>'
         +(ex.inttype==='derived'&&ex.derivedFrom?'<span style="font-size:9px;color:#7F77DD;background:#7F77DD11;border-radius:3px;padding:1px 5px">🔗 '+ex.derivedFrom+' × '+ex.pctFactor+'</span>':'')
@@ -21304,20 +21793,28 @@ function gymEditSession(id){
   document.getElementById('gym-edit-week').value  = s.week||'';
   document.getElementById('gym-edit-md').value    = s.md||'';
   document.getElementById('gym-edit-notes').value = s.notes||'';
-  // Cargar filas
-  var cont = document.getElementById('gym-edit-rows');
-  cont.innerHTML = '';
-  (s.exercises||[]).forEach(function(rawEx){
-    var ex = gymMigrateEx(rawEx);
-    var rid = 'e'+(++_gymRowId);
-    _gymEditRows.push(rid);
-    cont.insertAdjacentHTML('beforeend', gymExRowHTML(rid,'edit'));
+  // Cargar filas, agrupadas en sus bloques
+  var _exs = (s.exercises||[]).map(gymMigrateEx);
+  var _rids = gymBlqPintar('edit', _exs, s.bloques);
+  _exs.forEach(function(ex, _i){
+    var rid = _rids[_i];
+    if(!rid) return;
     setTimeout(function(){
       var exSel = document.getElementById('gymrow-ex-'+rid);
       var itSel2 = document.getElementById('gymrow-it-'+rid);
       // Restore inttype to the session-level selector first, then trigger change
       if(itSel2 && ex.inttype) itSel2.value = ex.inttype;
-      if(exSel && ex.exId){ exSel.value = ex.exId; gymRowExChange(rid); }
+      // El tipo de intensidad lo eligió el usuario para ESTA sesión: hay que
+      // avisarle a gymRowExChange que no lo reemplace por el de la biblioteca.
+      // Sin esto, abrir y guardar una sesión le cambiaba el tipo a todos los
+      // ejercicios (un trabajo en segundos pasaba a %1RM, por ejemplo).
+      if(exSel && ex.exId){
+        window._gymRowExChangeSource = ex.inttype ? 'it' : null;
+        exSel.value = ex.exId;
+        gymRowExChange(rid);
+        window._gymRowExChangeSource = null;
+        if(itSel2 && ex.inttype) itSel2.value = ex.inttype;   // por las dudas
+      }
       var noteEl = document.getElementById('gymrow-note-'+rid);
       if(noteEl) noteEl.value = ex.notes||'';
 
@@ -21347,9 +21844,9 @@ function gymEditSession(id){
         }
       } else {
         var setsEl = document.getElementById('gymrow-sets-'+rid);
-        var repsEl = document.getElementById('gymrow-reps-'+rid+'-0');
-        var intEl  = document.getElementById('gymrow-int-'+rid+'-0');
-        var vlEl3  = document.getElementById('gymrow-vloss-'+rid+'-0');
+        var repsEl = document.getElementById('gymrow-idreps-'+rid);
+        var intEl  = document.getElementById('gymrow-idint-'+rid);
+        var vlEl3  = document.getElementById('gymrow-idvloss-'+rid);
         if(setsEl) setsEl.value = ex.series.length||1;
         if(ex.series.length){
           if(repsEl) repsEl.value = ex.series[0].reps||'';
@@ -21367,10 +21864,11 @@ function gymEditSession(id){
 window.gymEditSession = gymEditSession;
 
 function gymEditAddRow(){
-  var rid = 'e'+(++_gymRowId);
-  _gymEditRows.push(rid);
-  document.getElementById('gym-edit-rows').insertAdjacentHTML('beforeend', gymExRowHTML(rid,'edit'));
-  setTimeout(function(){ gymRowAddSerie(rid); }, 0);
+  var cont = document.getElementById('gym-edit-rows');
+  if(!cont) return;
+  var blqs = cont.querySelectorAll(':scope > .gym-blq');
+  var bid = blqs.length ? blqs[blqs.length-1].getAttribute('data-blq') : gymBlqAgregar('edit');
+  gymBlqAgregarEjercicio(bid);
 }
 window.gymEditAddRow = gymEditAddRow;
 
@@ -21381,7 +21879,8 @@ function gymEditSave(){
   s.week  = document.getElementById('gym-edit-week').value.trim();
   s.md    = document.getElementById('gym-edit-md').value;
   s.notes = document.getElementById('gym-edit-notes').value.trim();
-  s.exercises = _gymEditRows.map(function(rid){return gymRowValues(rid);}).filter(function(r){return r.exId;});
+  s.exercises = gymBlqLeer('edit');     // el orden y el bloque salen de la pantalla
+  s.bloques   = gymBlqNombres('edit');
   saveData();
   gymEditClose();
   gymRenderFilterWeek();
@@ -28137,12 +28636,56 @@ function cargaResolveName(csvName){
   if(!csvName)return csvName;
   var key=cargaNormName(csvName);
   if(CARGA_NAME_ALIASES[key]) return CARGA_NAME_ALIASES[key];
+  // Los dos importadores guardan los alias con normalizadores distintos: se
+  // prueban las dos claves, así lo que se enseñó en un lado sirve en el otro.
+  if(typeof csvNormName==='function'){
+    var key2=csvNormName(csvName);
+    if(CARGA_NAME_ALIASES[key2]) return CARGA_NAME_ALIASES[key2];
+  }
   // exact normalized match against club names
   var clubNames=cargaClubNames();
   var exact=clubNames.find(function(cn){return cargaNormName(cn)===key;});
   if(exact)return exact;
+  // "Martinez, Nicolas" y "Nicolás Martínez" son el mismo: se compara sin
+  // puntuación y con las palabras ordenadas. Esto ya existía en csvNormName
+  // pero este resolvedor no lo usaba.
+  if(typeof csvNormName==='function'){
+    var k2=csvNormName(csvName);
+    var orden=function(x){ return String(x||'').split(' ').filter(Boolean).sort().join(' '); };
+    var ko=orden(k2);
+    var porPunt=clubNames.find(function(cn){ return csvNormName(cn)===k2; });
+    if(porPunt) return porPunt;
+    var porOrden=clubNames.find(function(cn){ return orden(csvNormName(cn))===ko; });
+    if(porOrden) return porOrden;
+  }
   return csvName; // no match → keep original
 }
+
+// "Gutierrez, M." y "Matías Gutiérrez": una inicial suelta contra un nombre
+// que empieza con esa letra. Es como viene media planilla de club.
+function cargaSimInicial(a,b){
+  var norm=(typeof csvNormName==='function')?csvNormName:function(x){
+    return String(x||'').toLowerCase().trim().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'').replace(/[.,_\-]/g,' ').replace(/\s+/g,' ').trim(); };
+  var A=norm(a).split(' ').filter(Boolean), B=norm(b).split(' ').filter(Boolean);
+  if(!A.length || !B.length) return 0;
+  // el lado con iniciales es el que tiene alguna palabra de una sola letra
+  var ini=A.filter(function(w){return w.length===1;}).length ? A : B;
+  var full=(ini===A)?B:A;
+  if(!ini.filter(function(w){return w.length===1;}).length) return 0;
+  var libres=full.slice(), usadas=0;
+  ini.forEach(function(w){
+    var i=-1;
+    if(w.length===1) i=libres.findIndex(function(f){ return f[0]===w; });
+    else             i=libres.indexOf(w);
+    if(i>=0){ libres.splice(i,1); usadas++; }
+  });
+  if(usadas<ini.length) return 0;                 // quedó algo sin pareja
+  var completasOk=ini.filter(function(w){return w.length>2;}).length;
+  if(!completasOk) return 0;                      // sólo iniciales: muy flojo
+  return 0.82;
+}
+window.cargaSimInicial=cargaSimInicial;
 
 // Find the best fuzzy match for a CSV name among club names
 // Returns {match:clubName|null, score:0..1}
@@ -28151,7 +28694,13 @@ function cargaBestMatch(csvName){
   if(!clubNames.length)return {match:null,score:0};
   var best=null,bestScore=0;
   clubNames.forEach(function(cn){
+    // Se queda con el mejor de los tres medidores: csvNameSim entiende el
+    // apellido primero y la puntuación, y cargaSimInicial el nombre abreviado.
     var s=cargaNameSimilarity(csvName,cn);
+    if(typeof csvNameSim==='function'){
+      try{ s=Math.max(s, csvNameSim(csvName,cn)); }catch(e){}
+    }
+    try{ s=Math.max(s, cargaSimInicial(csvName,cn)); }catch(e){}
     if(s>bestScore){bestScore=s;best=cn;}
   });
   return {match:best,score:bestScore};
@@ -28182,6 +28731,13 @@ function cargaShowNameReview(rows, type, onConfirm){
     return {csv:cn, resolved:(bm.score>=0.55?bm.match:''), score:bm.score, source:'fuzzy'};
   });
 
+  // Los que hay que decidir van primero: con un plantel grande, si no,
+  // quedaban perdidos entre veinte filas ya resueltas.
+  matches.sort(function(a,b){
+    var pa=(a.source==='fuzzy')?0:1, pb=(b.source==='fuzzy')?0:1;
+    if(pa!==pb) return pa-pb;
+    return String(a.csv).localeCompare(String(b.csv),'es');
+  });
   // If everything is an exact/alias match, skip the modal entirely
   var needsReview=matches.some(function(m){return m.source==='fuzzy';});
   if(!needsReview && clubNames.length){
@@ -28199,9 +28755,17 @@ function cargaShowNameReview(rows, type, onConfirm){
   modal.id='carga-namematch-modal';
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10001;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
 
-  var clubOpts='<option value="">— sin asociar (nuevo) —</option>'+
+  var esGps = (type==='gps');
+  // Todo lo que viene del archivo o de un perfil se escapa: un nombre con
+  // "<" o "&" desarmaba la tabla (y, en el peor caso, inyectaba HTML).
+  var _esc=function(x){ return String(x==null?'':x)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;'); };
+  var clubOpts='<option value="">'+(esGps
+      ? '➕ Es un jugador NUEVO (crear perfil)'
+      : '— sin asociar (se guarda con el nombre del archivo) —')+'</option>'+
     clubNames.sort(function(a,b){return a.localeCompare(b,'es');}).map(function(cn){
-      return '<option value="'+cn.replace(/"/g,'&quot;')+'">'+cn+'</option>';
+      return '<option value="'+_esc(cn)+'">'+_esc(cn)+'</option>';
     }).join('');
 
   var rowsHtml=matches.map(function(m,i){
@@ -28209,49 +28773,230 @@ function cargaShowNameReview(rows, type, onConfirm){
     var scoreCol=m.score>=0.85?'#1D9E75':m.score>=0.55?'#EF9F27':'#E24B4A';
     var sourceLbl=m.source==='alias'?'<span style="color:#0C447C">memorizado</span>'
       :m.source==='exact'?'<span style="color:#1D9E75">exacto</span>'
-      :'<span style="color:'+scoreCol+'">'+scorePct+'% similar</span>';
-    return '<tr style="border-bottom:1px solid #f0f0f0">'+
-      '<td style="padding:5px 8px;font-size:11px;font-weight:600;white-space:nowrap">'+m.csv+'</td>'+
+      :'<span style="color:'+scoreCol+'">'+scorePct+'% parecido</span>';
+    return {dudoso:(m.source==='fuzzy'), html:
+      '<tr style="border-bottom:1px solid #f0f0f0">'+
+      '<td style="padding:5px 8px;font-size:11px;font-weight:600;white-space:nowrap">'+_esc(m.csv)+'</td>'+
       '<td style="padding:5px 8px;text-align:center;font-size:9px">'+sourceLbl+'</td>'+
       '<td style="padding:5px 8px">'+
-        '<select id="cnm-sel-'+i+'" style="font-size:11px;padding:3px 6px;border:1px solid '+(m.resolved?'#ccc':'#EF9F27')+';border-radius:4px;width:100%;background:'+(m.resolved?'#fff':'#fffbf0')+'">'+
-          clubOpts.replace('value="'+(m.resolved||'').replace(/"/g,'&quot;')+'"','value="'+(m.resolved||'').replace(/"/g,'&quot;')+'" selected')+
+        '<select id="cnm-sel-'+i+'" onchange="cargaNameReviewChecar()" style="font-size:11px;padding:3px 6px;border:1px solid '+(m.resolved?'#ccc':'#EF9F27')+';border-radius:4px;width:100%;background:'+(m.resolved?'#fff':'#fffbf0')+'">'+
+          clubOpts.replace('value="'+_esc(m.resolved||'')+'"','value="'+_esc(m.resolved||'')+'" selected')+
         '</select>'+
       '</td>'+
-    '</tr>';
-  }).join('');
+    '</tr>'};
+  });
+  // Con el plantel completo el modal mostraba veinte filas ya resueltas y las
+  // dos que importaban quedaban perdidas. Arriba van sólo las dudosas; el
+  // resto queda plegado, por si hay que corregir alguna.
+  var _cabTabla =
+    '<thead style="background:#f5f5f5;position:sticky;top:0"><tr>'+
+      '<th style="padding:6px 8px;text-align:left;font-size:10px;color:#555">'+(esGps?'Nombre en el archivo del GPS':'Nombre en CSV')+'</th>'+
+      '<th style="padding:6px 8px;text-align:center;font-size:10px;color:#555">Detección</th>'+
+      '<th style="padding:6px 8px;text-align:left;font-size:10px;color:#555">¿Qué jugador es?</th>'+
+    '</tr></thead>';
+  var _rowsDud = rowsHtml.filter(function(x){return x.dudoso;}).map(function(x){return x.html;}).join('');
+  var _rowsRes = rowsHtml.filter(function(x){return !x.dudoso;}).map(function(x){return x.html;}).join('');
+  var _nRes    = rowsHtml.filter(function(x){return !x.dudoso;}).length;
 
   modal.innerHTML=
     '<div style="background:#fff;border-radius:10px;max-width:620px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3)">'+
       '<div style="padding:14px 20px;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff;z-index:2">'+
-        '<div style="font-size:14px;font-weight:700;color:#0D1B2A">🔗 Asociar nombres del CSV con perfiles del club</div>'+
-        '<div style="font-size:10px;color:#888;margin-top:3px">Revisá que cada nombre del CSV apunte al jugador correcto. Lo que confirmes se recuerda para próximas importaciones.</div>'+
+        '<div style="font-size:14px;font-weight:700;color:#0D1B2A">'+(esGps
+            ? '🔗 ¿Son los mismos jugadores?'
+            : '🔗 Asociar nombres del CSV con perfiles del club')+'</div>'+
+        '<div style="font-size:10px;color:#888;margin-top:3px">'+(esGps
+            ? 'Estos nombres del GPS no coinciden exactamente con ningún perfil (puede faltar una tilde, estar en mayúsculas o con el apellido primero). Decime a quién corresponde cada uno: <strong>queda memorizado</strong> y las próximas importaciones lo resuelven solas, sin crear jugadores repetidos.'
+            : 'Revisá que cada nombre del CSV apunte al jugador correcto. Lo que confirmes se recuerda para próximas importaciones.')+'</div>'+
       '</div>'+
       '<div style="padding:14px 20px">'+
-        '<div style="overflow-x:auto;max-height:55vh;overflow-y:auto;border:1px solid #eee;border-radius:6px">'+
-          '<table style="width:100%;border-collapse:collapse">'+
-            '<thead style="background:#f5f5f5;position:sticky;top:0"><tr>'+
-              '<th style="padding:6px 8px;text-align:left;font-size:10px;color:#555">Nombre en CSV</th>'+
-              '<th style="padding:6px 8px;text-align:center;font-size:10px;color:#555">Detección</th>'+
-              '<th style="padding:6px 8px;text-align:left;font-size:10px;color:#555">Perfil del club</th>'+
-            '</tr></thead><tbody>'+rowsHtml+'</tbody>'+
-          '</table>'+
-        '</div>'+
+        (function(){
+          var nf=matches.filter(function(m){return m.source==='fuzzy';}).length;
+          var nr=matches.length-nf;
+          if(!nf) return '';
+          return '<div style="font-size:11px;color:#0D1B2A;margin-bottom:8px">'+
+            '<strong>'+nf+'</strong> por decidir'+
+            (nr?' · <span style="color:#1D9E75">'+nr+' ya reconocido'+(nr>1?'s':'')+'</span>':'')+
+            '</div>';
+        })()+
+        (_rowsDud
+          ? '<div style="overflow-x:auto;max-height:55vh;overflow-y:auto;border:1px solid #eee;border-radius:6px">'+
+              '<table style="width:100%;border-collapse:collapse">'+_cabTabla+'<tbody>'+_rowsDud+'</tbody></table>'+
+            '</div>'
+          : '')+
+        (_rowsRes
+          ? '<details style="margin-top:8px;border:1px solid #eee;border-radius:6px"'+(_rowsDud?'':' open')+'>'+
+              '<summary style="cursor:pointer;font-size:10.5px;color:#1D9E75;padding:6px 10px">'+
+                'Ver los '+_nRes+' nombres ya reconocidos (por si hay que corregir alguno)</summary>'+
+              '<div style="overflow-x:auto;max-height:40vh;overflow-y:auto;border-top:1px solid #eee">'+
+                '<table style="width:100%;border-collapse:collapse">'+_cabTabla+'<tbody>'+_rowsRes+'</tbody></table>'+
+              '</div>'+
+            '</details>'
+          : '')+
         (clubNames.length?'':'<div style="background:#fffbf0;border:1px solid #EF9F27;border-radius:6px;padding:8px;font-size:10px;color:#7a5000;margin-top:8px">No hay perfiles de jugadores cargados. Los nombres se guardarán tal cual vienen del CSV.</div>')+
+        '<div id="cnm-aviso" style="display:none;background:#fdecec;border:1px solid #E24B4A;border-radius:6px;padding:8px 10px;font-size:10.5px;color:#8a1f1e;margin-top:8px"></div>'+
         '<div style="display:flex;gap:8px;margin-top:12px">'+
-          '<button onclick="cargaNameReviewConfirm()" class="btn bg" style="font-size:12px;padding:7px 16px">✓ Confirmar y continuar</button>'+
-          '<button onclick="document.getElementById(\'carga-namematch-modal\').remove()" class="btn" style="font-size:11px;padding:7px 12px;background:#fff;color:#666;border:1px solid #ccc">Cancelar</button>'+
+          '<button id="cnm-ok" onclick="cargaNameReviewConfirm()" class="btn bg" style="font-size:12px;padding:7px 16px">✓ Confirmar y continuar</button>'+
+          '<button onclick="cargaNameReviewCancelar()" class="btn" style="font-size:11px;padding:7px 12px;background:#fff;color:#666;border:1px solid #ccc">Cancelar</button>'+
           '<span style="font-size:9.5px;color:#aaa;align-self:center;margin-left:auto">'+matches.length+' nombre(s)</span>'+
         '</div>'+
       '</div>'+
     '</div>';
   document.body.appendChild(modal);
+  // Cerrar con Escape o tocando afuera: el modal tapa toda la pantalla y antes
+  // la única salida era el botón Cancelar.
+  modal.addEventListener('click', function(e){ if(e.target===modal) cargaNameReviewCancelar(); });
+  if(!window._cnmEsc){
+    window._cnmEsc=function(e){ if(e.key==='Escape' && document.getElementById('carga-namematch-modal')) cargaNameReviewCancelar(); };
+    document.addEventListener('keydown', window._cnmEsc);
+  }
+  cargaNameReviewChecar();
 }
+function cargaNameReviewCancelar(){
+  var st=window._cargaNameReview;
+  var m=document.getElementById('carga-namematch-modal');
+  if(m) m.remove();
+  window._cargaNameReview=null;          // no dejar estado colgado
+  var msg=document.getElementById('mc-imp-msg');
+  if(msg && st && st.type==='gps'){
+    msg.style.color='#B26A00';
+    msg.textContent='Importación cancelada: faltan asociar nombres.';
+    setTimeout(function(){ if(msg.textContent.indexOf('cancelada')>=0) msg.textContent=''; },5000);
+  }
+}
+window.cargaNameReviewCancelar=cargaNameReviewCancelar;
+
+// ── Equivalencias aprendidas: verlas y borrarlas ────────────────────────────
+// Si alguna vez se asoció mal un nombre, queda memorizado y no vuelve a
+// preguntar. Acá se revisa y se corrige.
+function cargaAliasPanel(){
+  var vj=document.getElementById('carga-alias-modal'); if(vj) vj.remove();
+  var esc=function(x){ return String(x==null?'':x)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+  var claves=Object.keys(CARGA_NAME_ALIASES||{}).sort(function(a,b){return a.localeCompare(b,'es');});
+  var filas=claves.map(function(k){
+    var destino=CARGA_NAME_ALIASES[k];
+    var propio=(typeof cargaNormName==='function') && cargaNormName(destino)===k;
+    return '<tr style="border-bottom:1px solid #f0f0f0">'+
+      '<td style="padding:5px 8px;font-size:11px;font-weight:600">'+esc(k)+'</td>'+
+      '<td style="padding:5px 8px;font-size:11px;color:#0C447C">'+
+        (propio?'<span style="color:#888">— se guarda tal cual (jugador propio) —</span>':esc(destino))+'</td>'+
+      '<td style="padding:5px 8px;text-align:right">'+
+        '<button onclick="cargaAliasBorrar('+JSON.stringify(k).replace(/"/g,'&quot;')+')" '+
+        'style="border:1px solid #E24B4A55;background:#fff;color:#E24B4A;cursor:pointer;border-radius:4px;font-size:10px;padding:2px 8px">Olvidar</button>'+
+      '</td></tr>';
+  }).join('');
+  var m=document.createElement('div');
+  m.id='carga-alias-modal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10001;display:flex;align-items:center;justify-content:center;padding:20px';
+  m.innerHTML='<div style="background:#fff;border-radius:10px;max-width:600px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3)">'+
+    '<div style="padding:14px 20px;border-bottom:1px solid #eee">'+
+      '<div style="font-size:14px;font-weight:700;color:#0D1B2A">🔗 Equivalencias de nombres aprendidas</div>'+
+      '<div style="font-size:10px;color:#888;margin-top:3px">Así se traducen los nombres de los archivos a los perfiles del club. Si alguna quedó mal, olvidala y en la próxima importación te vuelve a preguntar.</div>'+
+    '</div>'+
+    '<div style="padding:14px 20px">'+
+      (claves.length
+        ? '<div style="border:1px solid #eee;border-radius:6px;overflow:hidden"><table style="width:100%;border-collapse:collapse">'+
+          '<thead style="background:#f5f5f5"><tr>'+
+            '<th style="padding:6px 8px;text-align:left;font-size:10px;color:#555">Nombre en el archivo</th>'+
+            '<th style="padding:6px 8px;text-align:left;font-size:10px;color:#555">Jugador</th>'+
+            '<th></th></tr></thead><tbody>'+filas+'</tbody></table></div>'
+        : '<div style="font-size:11px;color:#aaa;padding:14px;text-align:center">Todavía no hay ninguna equivalencia aprendida.</div>')+
+      '<div style="display:flex;gap:8px;margin-top:12px;align-items:center">'+
+        '<button onclick="document.getElementById(\'carga-alias-modal\').remove()" class="btn" style="font-size:11px;padding:6px 14px;background:#fff;color:#666;border:1px solid #ccc">Cerrar</button>'+
+        '<span style="font-size:9.5px;color:#aaa;margin-left:auto">'+claves.length+' equivalencia(s)</span>'+
+      '</div>'+
+    '</div></div>';
+  m.addEventListener('click', function(e){ if(e.target===m) m.remove(); });
+  document.body.appendChild(m);
+}
+window.cargaAliasPanel=cargaAliasPanel;
+
+function cargaAliasBorrar(clave){
+  if(!CARGA_NAME_ALIASES || CARGA_NAME_ALIASES[clave]===undefined) return;
+  var destino=CARGA_NAME_ALIASES[clave];
+  if(!confirm('¿Olvidar que «'+clave+'» es '+destino+'?\n\nEn la próxima importación te va a volver a preguntar.')) return;
+  delete CARGA_NAME_ALIASES[clave];
+  // La misma equivalencia puede estar guardada con la clave del otro
+  // importador: se borran las dos para que no quede una a medias.
+  try{
+    if(typeof csvNormName==='function'){
+      var otra=csvNormName(clave);
+      if(otra!==clave && CARGA_NAME_ALIASES[otra]===destino) delete CARGA_NAME_ALIASES[otra];
+    }
+  }catch(e){}
+  try{ if(typeof saveData==='function') saveData(); }catch(e){}
+  cargaAliasPanel();
+}
+window.cargaAliasBorrar=cargaAliasBorrar;
 window.cargaShowNameReview=cargaShowNameReview;
+
+// Dos nombres del archivo no pueden apuntar al mismo jugador: sumaría dos veces
+// la misma sesión. Se avisa y se bloquea hasta resolverlo.
+function cargaNameReviewChecar(){
+  var st=window._cargaNameReview;
+  var aviso=document.getElementById('cnm-aviso'), ok=document.getElementById('cnm-ok');
+  if(!st||!aviso||!ok) return;
+  // Sólo en GPS dos nombres al mismo jugador son un error: sumaría dos veces la
+  // misma sesión. En wellness y PSE el mismo jugador en dos fechas distintas es
+  // normal, así que ahí no se bloquea nada.
+  if(st.type!=='gps'){
+    aviso.style.display='none';
+    ok.disabled=false; ok.style.opacity=''; ok.style.cursor='';
+    return;
+  }
+  var porDestino={}, choques=[];
+  st.matches.forEach(function(m,i){
+    var sel=document.getElementById('cnm-sel-'+i);
+    var v=sel?sel.value:'';
+    if(!v) return;                               // "nuevo" puede repetirse
+    (porDestino[v]=porDestino[v]||[]).push(m.csv);
+  });
+  Object.keys(porDestino).forEach(function(d){
+    if(porDestino[d].length>1) choques.push({destino:d, fuentes:porDestino[d]});
+  });
+  if(choques.length){
+    aviso.innerHTML='<strong>Hay nombres repetidos apuntando al mismo jugador.</strong><br>'+
+      choques.map(function(c){
+        var e=function(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+        return '«'+c.fuentes.map(e).join('» y «')+'» → '+e(c.destino);
+      }).join('<br>')+
+      '<br>Si los dejás así, esa sesión contaría dos veces al mismo jugador. Elegí un jugador distinto para uno de ellos, o marcalo como nuevo.';
+    aviso.style.display='';
+    ok.disabled=true; ok.style.opacity='0.45'; ok.style.cursor='not-allowed';
+  } else {
+    aviso.style.display='none';
+    ok.disabled=false; ok.style.opacity=''; ok.style.cursor='';
+  }
+}
+window.cargaNameReviewChecar=cargaNameReviewChecar;
 
 function cargaNameReviewConfirm(){
   var st=window._cargaNameReview;
   if(!st)return;
+  // Revalidar acá también: el botón deshabilitado no es garantía suficiente.
+  if(st.type==='gps'){
+    var _dest={}, _choque=false;
+    st.matches.forEach(function(m,i){
+      var sel=document.getElementById('cnm-sel-'+i); var v=sel?sel.value:'';
+      if(!v) return;
+      if(_dest[v]) _choque=true; else _dest[v]=true;
+    });
+    if(_choque){ cargaNameReviewChecar(); return; }
+  }
+  // Si alguien quedó como "jugador nuevo" pero teníamos una sugerencia fuerte,
+  // preguntar una vez: marcarlo nuevo crea un duplicado que después no avisa.
+  var _dudas=[];
+  st.matches.forEach(function(m,i){
+    var sel=document.getElementById('cnm-sel-'+i);
+    if(sel && !sel.value && m.score>=0.6 && m.resolved) _dudas.push(m.csv+' → '+m.resolved);
+  });
+  if(_dudas.length && !window._cnmConfirmoNuevos){
+    var txt='Marcaste como jugador NUEVO a:\n\n'+_dudas.join('\n')+
+      '\n\nPero se parece mucho a un jugador que ya tenés. Si es el mismo, cancelá y elegilo de la lista.\n\n¿Crear igual un jugador nuevo?';
+    if(!confirm(txt)) return;
+    window._cnmConfirmoNuevos=true;
+    setTimeout(function(){ window._cnmConfirmoNuevos=false; },0);
+  }
   // Build resolution map from the selects
   var resolution={}; // csvNormKey → clubName (or original csv name)
   st.matches.forEach(function(m,i){
@@ -28263,9 +29008,20 @@ function cargaNameReviewConfirm(){
       // Learn the alias for next time (only if it differs from an exact match)
       if(cargaNormName(chosen)!==key){
         CARGA_NAME_ALIASES[key]=chosen;
+        // También con la clave del otro importador, para que lo aprendido acá
+        // sirva en las planillas de wellness y PSE, y al revés.
+        if(typeof csvNormName==='function'){
+          var k2=csvNormName(m.csv);
+          if(csvNormName(chosen)!==k2) CARGA_NAME_ALIASES[k2]=chosen;
+        }
       }
     } else {
       resolution[key]=m.csv; // keep original
+      // Decir "es un jugador nuevo" TAMBIÉN es una decisión tomada: se apunta
+      // el nombre contra sí mismo. Si no, cada importación volvía a preguntar
+      // por él una y otra vez, y la sesión no llegaba a guardarse nunca.
+      CARGA_NAME_ALIASES[key]=m.csv;
+      if(typeof csvNormName==='function') CARGA_NAME_ALIASES[csvNormName(m.csv)]=m.csv;
     }
   });
   // Apply to all rows
@@ -38667,6 +39423,7 @@ var SB_SETTINGS_KEYS = [
   'WELLNESS_LAYOUT',
   'PSE_LAYOUT',
   'CARGA_NAME_ALIASES',
+  'GYM_BLOQUES',
   'NUT_COL_MAP',
   'MOB_COL_MAP',
   'FIX_FIXTURE',
