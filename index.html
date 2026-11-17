@@ -176,6 +176,189 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 #pdf-print-area{display:none}
 </style>
 <!-- Supabase JS SDK v2 (CDN) -->
+<script id="escala-js">
+/* ══ v204 · UNA DIVISIÓN POR VEZ ══════════════════════════════════════════
+   El dashboard guarda sus datos en el navegador con nombres fijos
+   ('videoteca_v1', 'hoyAsist_v1', 'tstData_v1'…). Con una sola división eso
+   alcanzaba. Con ocho, cada una necesita su propio cajón: si no, la 8va abre
+   y encuentra la videoteca de la 5ta.
+
+   Acá se le agrega la división al nombre de cada clave de DATOS, en un solo
+   lugar, antes de que el resto del archivo lea una sola línea del disco. Las
+   claves de CONFIGURACIÓN del dispositivo (el tema, el escudo del club, el
+   PIN, el mapeo del CSV) se dejan compartidas a propósito: son del club o de
+   la computadora, no de una división.
+
+   Por qué acá y no en cada lugar donde se guarda: hay más de doscientas
+   llamadas repartidas por el archivo. Interceptar en un punto no se puede
+   olvidar de ninguna, y si mañana aparece una clave nueva sin clasificar, la
+   consola lo avisa en vez de mezclar datos en silencio.             */
+
+(function(){
+  var LEGADO = '5ta División';          // la división con la que nació el dashboard
+  var activa;
+  try{ activa = window.localStorage.getItem('gps_cat_activa') || LEGADO; }
+  catch(e){ activa = LEGADO; }
+
+  window.CAT_LEGADO = LEGADO;
+  window.CAT_ACTIVA = activa;
+
+  // ── Claves de DATOS: una copia por división ────────────────────────────
+  var PORCAT = {};
+  ('gps_dash_v9 FIX_DATA videoteca_v1 '
+  + 'RESI_TESTS resiDeleted_v1 resiNameMap_v1 '
+  + 'tstData_v1 tstCatalog_v1 tstCond_v1 tstDeleted_v1 tstExMap_v1 tstGroups_v1 tstNameMap_v1 '
+  + 'vbtSessions_v1 vbtZones_v1 vbtV1rm_v1 vbtExMap_v1 vbtNameMap_v1 vbtDeleted_v1 '
+  + 'hoyTodos_v1 hoyTodosDel_v1 hoyFlags_v1 hoyFlagsD_v1 hoyFlagsDTs_v1 '
+  + 'hoyAsist_v1 hoyAsistTs_v1 hoyCond_v1 hoyCondTs_v1 hoyCfg_v1 '
+  + 'planCmpRoles_v1 planDeleted_v1 planGroupDefaults_v1 plan_cmp_state plan_hist_cmp_state '
+  + 'profDeleted_v1 profDirty_v1 '
+  + 'drills_pending drills_deleted drills_deleted_migrated_at drills_id_hwm '
+  + 'DRILLS_ID_HWM DRILLS_TOMB drills_tomb_cloud '
+  + 'cargaCustomWeeks_v1 cargaWeekCtx_v1 nameMergePending_v1 wellPsePending_v1 '
+  + 'evalBackups_v1 gym_prog_ex_state gymCatsOrdTs_v1 nut_import_hist_v1 '
+  + 'mc_del_queue_v1 mc_week_deleted_v1 mc_role_targets mc_role_active_group '
+  + 'mc_role_metric_by_group mc_compensatorio_day group_agg_mode '
+  + '_sbFirmasClaves _fixMigrateHash').split(/\s+/).forEach(function(k){ if(k) PORCAT[k]=1; });
+
+  // ── Claves COMPARTIDAS: una sola para todas las divisiones ─────────────
+  var GLOBALES = {};
+  ('gps_cat_activa tema_v1 railFijo_v1 libView_v1 ckioPin_v1 clubSettings_v1 '
+  + 'gps_csv_mapping_v1 sb_egreso_v1 gym_eval_pdf_cfg_v1 '
+  + 'pdf_match_layout pdf_match_layout_mode mc_pdf_layout mc_pdf_layout_mode '
+  + '_escala_mudanza_v204').split(/\s+/).forEach(function(k){ if(k) GLOBALES[k]=1; });
+
+  window.ESCALA_PORCAT = PORCAT;
+  window.ESCALA_GLOBALES = GLOBALES;
+
+  // Red de seguridad: si aparece una clave que no está en ninguna de las dos
+  // listas, se deja pasar sin tocar (que funcione) pero se anota, así se ve
+  // en la consola y en las pruebas en vez de descubrirse con datos mezclados.
+  window.__escalaDesconocidas = [];
+  function anotar(k){
+    if(window.__escalaDesconocidas.indexOf(k) >= 0) return;
+    window.__escalaDesconocidas.push(k);
+    console.info('[escala] Clave sin clasificar: «' + k + '» (se comparte entre divisiones).');
+  }
+  function esDeLibreria(k){
+    return k.indexOf('sb-') === 0 || k.indexOf('supabase') === 0 || k.indexOf('__probe_') === 0;
+  }
+
+  function nombreReal(k){
+    if(typeof k !== 'string') k = String(k);
+    if(PORCAT[k]) return k + '::' + window.CAT_ACTIVA;
+    if(!GLOBALES[k] && !esDeLibreria(k)) anotar(k);
+    return k;
+  }
+  window.ESCALA_CLAVE = nombreReal;
+
+  // ── La intercepción ────────────────────────────────────────────────────
+  // Se parchean los métodos del prototipo, pero sólo actúan cuando el objeto
+  // es localStorage. Así sessionStorage queda intacto, y el acceso por
+  // propiedad (localStorage.algo) sigue funcionando como siempre.
+  var LS, P, og, os, or;
+  try{
+    LS = window.localStorage;
+    P  = Object.getPrototypeOf(LS);
+    og = P.getItem; os = P.setItem; or = P.removeItem;
+
+    P.getItem    = function(k){ return og.call(this, this === LS ? nombreReal(k) : k); };
+    P.setItem    = function(k, v){ return os.call(this, this === LS ? nombreReal(k) : k, v); };
+    P.removeItem = function(k){ return or.call(this, this === LS ? nombreReal(k) : k); };
+
+    // ── Mudanza, una sola vez ────────────────────────────────────────────
+    // Lo que estaba guardado sin división es de la 5ta. Se copia a su clave
+    // nueva y se libera el lugar viejo, de a una clave por vez: si alguna no
+    // entra por cuota, se deja donde está y esa división la vuelve a bajar de
+    // la nube. El espejo grande va último, por ser el que más ocupa.
+    if(!og.call(LS, '_escala_mudanza_v204')){
+      var claves = Object.keys(PORCAT).filter(function(k){ return k !== 'gps_dash_v9'; });
+      claves.push('gps_dash_v9');
+      var movidas = 0;
+      claves.forEach(function(k){
+        try{
+          var v = og.call(LS, k);
+          if(v === null) return;
+          var nueva = k + '::' + LEGADO;
+          if(og.call(LS, nueva) === null) os.call(LS, nueva, v);
+          or.call(LS, k);
+          movidas++;
+        }catch(e){ /* sin lugar: se deja la vieja y la nube repone */ }
+      });
+      try{ os.call(LS, '_escala_mudanza_v204', new Date().toISOString()); }catch(e){}
+      if(movidas) console.log('[escala] ' + movidas + ' clave(s) mudadas a «' + LEGADO + '».');
+    }
+  }catch(e){ console.warn('[escala] No se pudo separar el almacenamiento por división:', e); }
+
+  // ── v204b · Cajones contaminados por v203 ──────────────────────────────
+  // Con v203, entrar a otra división guardaba en el cajón de esa división los
+  // 71 ejercicios que venían escritos en el archivo (más lo que estaba en
+  // memoria). Ese cajón quedó en la computadora, y si la nube se vacía, el
+  // dashboard ve datos locales que la nube no tiene y los vuelve a subir.
+  //
+  // Se reconoce sin ambigüedad: los 71 tienen número y nombre fijos. Un
+  // cuerpo técnico real no puede tener 30 ejercicios con el MISMO número y el
+  // MISMO nombre que los de la 5ta. Si un cajón los tiene, se vacía entero
+  // (sólo en esta computadora; la nube se limpia desde Administración).
+  var SEMILLA = {};
+  ["0~FF B1", "1~FF B2", "2~FF B1 (feb)", "3~FF B2 (feb)", "4~FF B1 vs Col.", "5~FF B2 vs Col.", "6~11v11 área-área", "7~11v11 3-4", "8~11v11+2C gestación", "9~10vs10+1 sal. 3-4", "10~10vs4 B1 3-4", "11~10vs4 B2a 3-4", "12~10vs4 B2b 3-4", "13~Salidas 11v11", "14~Presiones 11v11", "15~10v10+1 B1 circ.", "16~10v10+1 B2 circ.", "17~8vs8+3C+4AP área", "18~8vs8+3C", "19~9vs9", "20~6vs6+1C+2AB", "21~4v4+2C área-área", "22~4vs2+2 1-4→3-4 A", "23~4vs2+2 1-4→3-4 B", "24~2vs1 3vs2 banda", "25~3vs2+1 repo int.", "26~4vs2+1 trans.", "27~Definición del.", "28~Inicio vs pres.", "29~Desborde y centro", "30~Cuadrados 2+1v1", "31~Técnica duelos A", "32~Duelos 1vs1", "33~Duelo caótico A", "34~1vs1 ext.+DEL A", "35~1vs1 carril int. A", "36~Paredes 1v1+1ap", "37~Duelos EXT INT A", "38~Duelos EXT INT B", "39~2+1v1 transición", "40~Duelos 2v1→3v2", "41~Técnica duelos B", "42~1vs1 ext.+DEL B", "43~1vs1 carril int. B", "44~Duelo caótico B", "45~12x18 COD B1", "46~12x18 COD B2", "47~EC Acc Dec", "48~EC COD", "49~Tempo 15x45 A", "50~Tempo 15x45 B", "51~15x45 en 100mts", "52~E.C Velocidad 3x25", "53~E.C Velocidad", "54~15x15 VIFT 100% B1", "55~15x15 VIFT 100% B2", "56~15x15 VIFT 100% B3", "57~15x15 VIFT 100% B4", "58~15x15 90% VIFT A", "59~15x15 90% VIFT B", "60~15x15 100 2B", "61~20x20 x10", "62~20x20 x12 B1", "63~20x20 x12 B2", "64~20x20 x10 x2", "65~100 VIFT 15x15", "66~Rueda pases", "67~Coordinac. of.", "68~Ruta pases Y", "69~Rueda presión", "70~ABP"].forEach(function(x){ SEMILLA[x] = 1; });
+
+  function contaminado(v){
+    if(v == null) return false;
+    var txt = (typeof v === 'string') ? v : '';
+    // Filtro barato antes de leer todo: los nombres más característicos.
+    if(txt && txt.indexOf('"FF B1 vs Col."') < 0 && txt.indexOf('"FF B2 (feb)"') < 0) return false;
+    var p;
+    try{ p = (typeof v === 'string') ? JSON.parse(v) : v; }catch(e){ return false; }
+    if(!p || !Array.isArray(p.D)) return false;
+    var n = 0;
+    for(var i = 0; i < p.D.length; i++){
+      var r = p.D[i];
+      if(r && SEMILLA[String(r.id) + '~' + r.n]) n++;
+      if(n >= 30) return true;
+    }
+    return false;
+  }
+
+  // Vacía TODO lo local de una división (nunca la 5ta).
+  function purgar(div){
+    if(!div || div === LEGADO) return 0;
+    var n = 0;
+    try{
+      var LS2 = window.localStorage, P2 = Object.getPrototypeOf(LS2);
+      Object.keys(PORCAT).forEach(function(k){
+        var real = k + '::' + div;
+        if(og.call(LS2, real) !== null){ or.call(LS2, real); n++; }
+      });
+    }catch(e){}
+    try{
+      if(window._dstoreCrudo) window._dstoreCrudo.del('gps_dash_v9::' + div);
+      else (window.__escalaIdbPendiente = window.__escalaIdbPendiente || {})[div] = 1;
+    }catch(e){}
+    (window.__escalaPurgadas = window.__escalaPurgadas || []).push(div);
+    console.log('[escala] Cajón local de «' + div + '» vaciado (' + n + ' clave/s).');
+    return n;
+  }
+  window.ESCALA_CONTAMINADO = contaminado;
+  window.ESCALA_PURGAR = purgar;
+
+  try{
+    var LS3 = window.localStorage, pref = 'gps_dash_v9::', divs = [];
+    for(var i = 0; i < LS3.length; i++){
+      var k = LS3.key(i);
+      if(k && k.indexOf(pref) === 0){
+        var div = k.slice(pref.length);
+        if(div && div !== LEGADO) divs.push(div);
+      }
+    }
+    divs.forEach(function(div){
+      if(contaminado(og.call(LS3, pref + div))) purgar(div);
+    });
+  }catch(e){ console.warn('[escala] revisión de cajones:', e); }
+
+  console.log('[escala] Trabajando en «' + window.CAT_ACTIVA + '».');
+})();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 /* Ocultar el dashboard hasta que sbInit decida qué mostrar.
@@ -2265,8 +2448,8 @@ function recomputeAll(){D.forEach(r=>{if(r.raw)computeRatios(r);});}
 
 const BC={all:'#3B4D88','Activaciones':'#1D9E75','Específicos por puesto':'#EF9F27','Asociación':'#3B4D88','Transiciones':'#7F77DD','Duelos':'#D4537E','Técnicos':'#0F6E56','Fútbol reducido':'#D85A30','Posicionales — Inicio':'#0C447C','Posicionales — Gestación':'#185FA5','Posicionales — Finalización':'#5B8FD4','Sin categoría':'#aaa'};
 const CS={'Activaciones':'ACT','Específicos por puesto':'ESP','Asociación':'ASO','Transiciones':'TRA','Duelos':'DUE','Técnicos':'TÉC','Fútbol reducido':'FRE','Posicionales — Inicio':'P-INI','Posicionales — Gestación':'P-GES','Posicionales — Finalización':'P-FIN'};
-const CATS=['all','Activaciones','Específicos por puesto','Asociación','Transiciones','Duelos','Técnicos','Fútbol reducido','Posicionales — Inicio','Posicionales — Gestación','Posicionales — Finalización','Sin categoría'];
-const CATN=['Todos','Activaciones','Esp. por puesto','Asociación','Transiciones','Duelos','Técnicos','Fútbol red.','Pos. — Inicio','Pos. — Gestación','Pos. — Finaliz.','Sin cat.'];
+var CATS=['all','Activaciones','Específicos por puesto','Asociación','Transiciones','Duelos','Técnicos','Fútbol reducido','Posicionales — Inicio','Posicionales — Gestación','Posicionales — Finalización','Sin categoría'];
+var CATN=['Todos','Activaciones','Esp. por puesto','Asociación','Transiciones','Duelos','Técnicos','Fútbol red.','Pos. — Inicio','Pos. — Gestación','Pos. — Finaliz.','Sin cat.'];
 
 function ecol(v){if(!v)return'#aaa';if(v<70)return'#E24B4A';if(v<=110)return'#1D9E75';if(v<=300)return'#3B4D88';return'#7F77DD';}
 function cc(v){if(v>=1.5)return{bg:'#85B7EB44',tx:'#0C447C',bd:'#85B7EB77'};if(v>=0.9)return{bg:'#1D9E7522',tx:'#085041',bd:'#1D9E7566'};if(v>=0.7)return{bg:'#EF9F2722',tx:'#633806',bd:'#EF9F2766'};return{bg:'#E24B4A22',tx:'#791F1F',bd:'#E24B4A66'};}
@@ -2346,6 +2529,12 @@ const D=[
   {id:69,n:"Rueda presión",cat:"Técnicos",min:18,mts:0.61,hsr:0.56,h2:0.08,h25:0.00,acc:2.44,dcc:1.75,rhie:1.17,vmax:22.0,spr:0.0,jug:null,jug0:null,L:null,A:null,L0:null,A0:null},
   {id:70,n:"ABP",cat:"Técnicos",min:16,mts:0.27,hsr:0.13,h2:0.06,h25:0.00,acc:0.25,dcc:0.18,rhie:0.49,vmax:23.4,spr:0.0,jug:null,jug0:null,L:null,A:null,L0:null,A0:null},
 ];
+// ── v204 · Los 71 ejercicios de arriba son de la 5ta ──────────────────────
+// Estaban escritos en el archivo desde cuando el dashboard era de una sola
+// división, y por eso aparecían también en la 8va. Para la 5ta siguen siendo
+// el punto de partida (sus datos reales ya los pisaron hace meses); cualquier
+// otra división arranca en blanco y carga los suyos.
+if(window.CAT_ACTIVA !== window.CAT_LEGADO){ D.length = 0; }
 D.forEach(r=>{r.raw=bkRaw(r);});
 
 // PITCH MAP
@@ -3028,7 +3217,7 @@ function drawCards(rows){
     '<div style="position:absolute;top:7px;right:7px;display:flex;gap:4px">'+
       (r.video?'<button onclick="event.stopPropagation();vidOpen(\''+String(r.video).replace(/'/g,"\\'")+'\')" style="border:none;background:rgba(255,255,255,0.94);color:#D9534F;border-radius:7px;width:26px;height:26px;font-size:12px;cursor:pointer;font-weight:800" title="Ver video">▶</button>':'')+
       '<span onclick="event.stopPropagation();toggleStarred('+r.id+')" style="background:rgba(255,255,255,0.94);border-radius:7px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;color:'+(r.starred?'#FFD700':'#ccc')+'" title="Destacado">★</span>'+
-      '<span onclick="event.stopPropagation();delRow('+r.id+')" style="background:rgba(255,255,255,0.94);border-radius:7px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;color:var(--gy-rojo,#B33A2B)" title="Eliminar ejercicio">🗑</span>'+
+      '<span onclick="event.stopPropagation();delRow('+r.id+')" style="background:rgba(255,255,255,0.94);border-radius:7px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;color:var(--sobre-blanco-rojo,#B33A2B)" title="Eliminar ejercicio">🗑</span>'+
     '</div>';
     var chips='<div data-dims-row="'+r.id+'" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+
       '<span class="lib-chip" style="background:'+mcc.bg+';color:'+mcc.tx+';border:1px solid '+mcc.bd+'" title="Metros por minuto (color vs partido)">'+(mtsPM!=null?Math.round(mtsPM)+' m/min':'—')+'</span>'+
@@ -5405,7 +5594,12 @@ window.renderMatchCharts=renderMatchCharts;
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-const STORAGE_KEY='gps_dash_v9';
+// ── v204 · La clave del espejo local ─────────────────────────────────────
+// Plana a propósito: el shim de arranque («escala-js») le agrega la división,
+// igual que a las otras 59 claves de datos. Así ningún lugar del archivo
+// puede equivocarse escribiendo 'gps_dash_v9' a mano, que fue exactamente el
+// problema de v203.
+var STORAGE_KEY = 'gps_dash_v9';
 
 // Construye el payload completo del estado del dashboard.
 // Se usa tanto para guardar en localStorage (saveData) como para exportar a JSON
@@ -5546,6 +5740,39 @@ function dstoreDel(key){
   });
 }
 window.dstoreSet=dstoreSet; window.dstoreGet=dstoreGet; window.dstoreDel=dstoreDel;
+
+// v204: IndexedDB guarda el payload con la misma clave que localStorage, así
+// que también va por división. Se deja una puerta cruda (_dstoreCrudo) para
+// la mudanza de lo que quedó guardado sin división.
+window._dstoreCrudo = { get: dstoreGet, set: dstoreSet, del: dstoreDel };
+(function(){
+  var g=dstoreGet, s_=dstoreSet, d=dstoreDel;
+  function real(k){
+    return (typeof k==='string' && window.ESCALA_PORCAT && window.ESCALA_PORCAT[k])
+      ? k + '::' + window.CAT_ACTIVA : k;
+  }
+  dstoreGet=function(k){
+    return g(real(k)).then(function(v){
+      // v204b: el respaldo en IndexedDB de una división que no es la 5ta
+      // puede estar contaminado por v203 aunque el de localStorage ya no.
+      if(k==='gps_dash_v9' && window.CAT_ACTIVA!==window.CAT_LEGADO
+         && typeof window.ESCALA_CONTAMINADO==='function' && window.ESCALA_CONTAMINADO(v)){
+        console.log('[escala] Respaldo de IndexedDB de «'+window.CAT_ACTIVA+'» contaminado: se descarta.');
+        try{ d(real(k)); }catch(e){}
+        try{ window.ESCALA_PURGAR(window.CAT_ACTIVA); }catch(e){}
+        return null;
+      }
+      return v;
+    });
+  };
+  dstoreSet=function(k,v){ return s_(real(k),v); };
+  dstoreDel=function(k){ return d(real(k)); };
+  window.dstoreGet=dstoreGet; window.dstoreSet=dstoreSet; window.dstoreDel=dstoreDel;
+  try{
+    Object.keys(window.__escalaIdbPendiente||{}).forEach(function(div){ d('gps_dash_v9::'+div); });
+    window.__escalaIdbPendiente = {};
+  }catch(e){}
+})();
 
 function saveData(){
   // v92: IndexedDB es el hogar real del payload; localStorage es solo un
@@ -5838,7 +6065,7 @@ try{ if(typeof drillsSanitizeRaw==='function') drillsSanitizeRaw(); }catch(e){}
 // Si IndexedDB está vacío (primera vez), se siembra desde localStorage.
 (function(){
   if(typeof dstoreGet!=='function')return;
-  dstoreGet(STORAGE_KEY).then(function(s){
+  function arranque(s){
     if(s==null){
       try{
         var raw=localStorage.getItem(STORAGE_KEY);
@@ -5867,6 +6094,19 @@ try{ if(typeof drillsSanitizeRaw==='function') drillsSanitizeRaw(); }catch(e){}
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',applyAll);
     else applyAll();
+  }
+  // v203: si la clave con categoría todavía no existe y estamos en la de
+  // siempre, se busca el payload viejo en IndexedDB y se muda. Sin esto, un
+  // espejo de localStorage desactualizado por cuota pisaría datos buenos.
+  dstoreGet(STORAGE_KEY).then(function(s){
+    if(s!=null || CAT_ACTIVA!==CAT_LEGADO) return arranque(s);
+    return window._dstoreCrudo.get('gps_dash_v9').then(function(v){
+      if(v!=null){
+        try{ dstoreSet(STORAGE_KEY, v); }catch(e){}
+        console.log('[v203] Copia de IndexedDB mudada a «' + CAT_LEGADO + '».');
+      }
+      return arranque(v);
+    });
   });
 })();
 rebuildCatBtns();
@@ -9553,7 +9793,7 @@ function nameSyncAfterMerge(oldNames, canonical){
       if(typeof sbScheduleMicrocicloSync==='function') sbScheduleMicrocicloSync();
       if(typeof MATCHES!=='undefined'&&MATCHES.length&&typeof _sbMatchToPayload==='function'){
         var mtp=MATCHES.map(_sbMatchToPayload).filter(Boolean);
-        if(mtp.length) sbClient.from('matches').upsert(mtp,{onConflict:'id'}).then(function(){});
+        if(mtp.length) sbClient.from('matches').upsert(mtp,{onConflict:'id,categoria'}).then(function(){});
       }
       // Tests y alias viajan por app_settings
       if(typeof sbScheduleTanda3Sync==='function') sbScheduleTanda3Sync();   // TST_DATA, alias
@@ -9758,7 +9998,12 @@ window.nameAuditMergeAll=nameAuditMergeAll;
 
 function nameAuditAfterMerge(moved, n){
   try{ if(typeof saveData==='function')saveData(); }catch(e){}
-  try{ if(typeof dstoreSet==='function'&&typeof _buildFullPayload==='function') dstoreSet(_buildFullPayload(true)); }catch(e){}
+  // v204: esto llamaba dstoreSet(payload) con un solo argumento, así que el
+  // payload entero iba como CLAVE y el valor quedaba vacío: IndexedDB lo
+  // rechazaba y el respaldo nunca se escribía. saveData() de la línea de
+  // arriba ya guarda bien en los dos lados, así que alcanza con eso.
+  try{ if(typeof dstoreSet==='function'&&typeof _buildFullPayload==='function')
+        dstoreSet(STORAGE_KEY, JSON.stringify(_buildFullPayload(true))); }catch(e){}
   try{ if(typeof renderProfilesTable==='function')renderProfilesTable(); }catch(e){}
   try{ if(typeof cargaRender==='function'&&typeof mainView!=='undefined'&&mainView==='carga')cargaRender(); }catch(e){}
   try{ if(typeof hoyRender==='function'&&typeof mainView!=='undefined'&&mainView==='hoy')hoyRender(); }catch(e){}
@@ -14548,7 +14793,7 @@ window.plExportPDF=plExportPDF;
 (function(){
   try{
     if(typeof PLAYER_PROFILES==='undefined')return;
-    var s=localStorage.getItem('gps_dash_v9'); if(!s)return;
+    var s=localStorage.getItem(STORAGE_KEY); if(!s)return;
     var p=JSON.parse(s);
     if(p.PLAYER_PROFILES)Object.assign(PLAYER_PROFILES,p.PLAYER_PROFILES);
   }catch(e){}
@@ -14584,7 +14829,7 @@ window.plExportPDF=plExportPDF;
 var _planEditIdx = null;      // index in PLAN_WEEKS being edited, or null = new
 
 // Cargar PLAN_WEEKS desde localStorage en cuanto la variable existe
-(function(){ try{ var p=JSON.parse(localStorage.getItem('gps_dash_v9')||'{}'); if(p.PLAN_WEEKS&&p.PLAN_WEEKS.length){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});} }catch(e){} })();
+(function(){ try{ var p=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'); if(p.PLAN_WEEKS&&p.PLAN_WEEKS.length){PLAN_WEEKS.length=0;p.PLAN_WEEKS.forEach(function(w){PLAN_WEEKS.push(w);});} }catch(e){} })();
 var _planEditData = null;     // working copy of the week being edited
 var _planModalDayIdx = null;  // which day (0-5) the modal is adding to
 var _planModalBlockIdx = null;// which block within that day
@@ -15470,6 +15715,11 @@ window.sbDedupe=sbDedupe;
 
 // Sube por tandas: un upsert de 148 filas con imágenes excede el tiempo máximo
 // de Postgres (57014). En tandas chicas entra sin problema.
+// v205 · Cinco tablas (ejercicios de prep física y de gimnasio, sesiones de
+// gimnasio, partidos y perfiles) identificaban cada fila SÓLO por su id. Con
+// varias divisiones, el ejercicio 5 de la 8va y el 5 de la 5ta eran la misma
+// fila para la base: guardar uno pisaba el otro y se lo llevaba de división.
+// Desde paso4 la clave es id + categoria, y todos los guardados lo dicen así.
 function sbUpsertChunked(table, rows, opts, chunk){
   chunk = chunk || 25;
   var lotes=[];
@@ -19774,6 +20024,11 @@ document.addEventListener('DOMContentLoaded',function(){
   --gy-tenue:#5a6472;        /* texto secundario legible sobre fondo claro */
   --gy-verde:#17805F;        /* verde con blanco encima a 4,6:1 */
   --gy-rojo:#C0392B;
+  /* v204: el tacho de la biblioteca vive sobre una pastilla BLANCA que no
+     cambia con el tema. Si usa --gy-rojo, en modo oscuro el rojo se aclara
+     (#FF7A72) y queda casi ilegible sobre blanco: 2.25 de contraste. Este
+     rojo no tiene versión oscura a propósito. */
+  --sobre-blanco-rojo:#B33A2B;
 }
 html[data-tema="oscuro"]{ --gy-tenue:#9aa5b5; --gy-verde:#35C79A; --gy-rojo:#FF7A72; --gy-sobre-verde:#06231B;
   --gy-acc-tex:#93A6EE; --gy-ambar:#E8A33D; --gy-ambar-fuerte:#F0B65C;
@@ -20181,6 +20436,802 @@ html[data-tema="oscuro"]{
 
 </div>
 
+<script id="acceso-js">
+/* ══ v203 · QUIÉN ENTRA Y QUÉ VE ══════════════════════════════════════════
+   Lee de Supabase el rol del usuario, las categorías que tiene asignadas y
+   los permisos de su rol. Corre DESPUÉS del login y ANTES de bajar un solo
+   dato, porque de acá sale sobre qué categoría se trabaja.
+
+   Si las tablas todavía no existen (alguien abre una versión vieja de la
+   base), no rompe nada: sigue como antes. Lo que no hace nunca es dejar
+   entrar a alguien que está en la base pero desactivado o sin categorías. */
+
+var MI_ROL = null;
+var MI_NOMBRE = null;
+var MIS_CATEGORIAS = [];
+var MIS_PERMISOS = {};
+
+// ¿Este usuario puede 'ver' o 'cargar' en esta área?
+function accesoPuede(area, minimo){
+  if(!MI_ROL) return true;                 // todavía no se cargó: no estorbar
+  var p = MIS_PERMISOS[area] || 'nada';
+  if(minimo === 'ver') return p === 'ver' || p === 'cargar';
+  return p === 'cargar';
+}
+window.accesoPuede = accesoPuede;
+
+function accesoSigla(c){
+  var m = String(c||'').match(/^(\d+)/);
+  if(m) return m[1] + 'ª';
+  var w = String(c||'').trim().split(/\s+/)[0] || '?';
+  var k = w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  var mapa = {primera:'1ª', segunda:'2ª', tercera:'3ª', cuarta:'4ª', quinta:'5ª',
+              sexta:'6ª', septima:'7ª', octava:'8ª', novena:'9ª', reserva:'Res'};
+  return mapa[k] || w.slice(0,3);
+}
+
+function accesoBloquear(titulo, detalle){
+  try{ var l = document.getElementById('sb-loading'); if(l) l.style.display='none'; }catch(e){}
+  var d = document.createElement('div');
+  d.id = 'acceso-bloqueo';
+  d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0f1420;color:#e6e9ef;'
+    + 'display:flex;align-items:center;justify-content:center;padding:24px;'
+    + 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+  d.innerHTML = '<div style="max-width:430px;text-align:center">'
+    + '<div style="font-size:34px;margin-bottom:12px">🔒</div>'
+    + '<div style="font-size:19px;font-weight:800;margin-bottom:8px">' + accesoEsc(titulo) + '</div>'
+    + '<div style="font-size:13.5px;line-height:1.6;color:#a8b1c0;margin-bottom:20px">' + accesoEsc(detalle) + '</div>'
+    + '<button onclick="sbDoLogout()" style="background:#2D6CDF;color:#fff;border:none;'
+    + 'border-radius:9px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer;'
+    + 'font-family:inherit">Cerrar sesión</button></div>';
+  document.body.appendChild(d);
+}
+function accesoEsc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Cambiar de categoría = guardar lo pendiente y recargar.
+// Recargar es a propósito: el espejo local, las tablas en memoria y medio
+// dashboard quedaron armados para la categoría anterior. Intentar cambiarlos
+// en caliente es la forma más corta de mezclar datos de dos divisiones.
+function accesoCambiarCategoria(cat){
+  if(!cat || cat === CAT_ACTIVA) return;
+  if(MIS_CATEGORIAS.indexOf(cat) < 0) return;
+  try{ if(typeof saveData === 'function') saveData(); }catch(e){}
+  try{ localStorage.setItem('gps_cat_activa', cat); }catch(e){}
+  setTimeout(function(){ location.reload(); }, 150);
+}
+window.accesoCambiarCategoria = accesoCambiarCategoria;
+
+function accesoPintarSelector(){
+  var viejo = document.getElementById('acceso-grupo') || document.getElementById('acceso-cat');
+  if(viejo) viejo.remove();
+  var viejoAdm = document.getElementById('admin-grupo');
+  if(viejoAdm) viejoAdm.remove();
+  var rail = document.getElementById('rail');
+  var unica = MIS_CATEGORIAS.length <= 1;
+
+  var cont = document.createElement('div');
+  cont.id = 'acceso-cat';
+  cont.style.cssText = 'position:relative';
+
+  var btn = document.createElement('button');
+  btn.className = 'rail-item';
+  btn.title = unica ? ('Categoría: ' + CAT_ACTIVA)
+                    : ('Categoría: ' + CAT_ACTIVA + ' — tocá para cambiar');
+  btn.style.cssText = 'font-weight:800;color:var(--club-c2,#3B4D88)';
+  btn.innerHTML = '<span class="ri-ico">' + accesoEsc(accesoSigla(CAT_ACTIVA)) + '</span>'
+    + '<span class="ri-txt">' + accesoEsc(CAT_ACTIVA) + (unica ? '' : ' ▾') + '</span>';
+  if(!unica) btn.onclick = function(ev){ ev.stopPropagation(); accesoAbrirMenu(btn); };
+  cont.appendChild(btn);
+
+  if(rail){
+    // Los .rail-item viven dentro de .rail-grupo, no colgando del rail: el
+    // selector entra como su propio grupo, justo debajo del escudo.
+    var grupo = document.createElement('div');
+    grupo.className = 'rail-grupo';
+    grupo.id = 'acceso-grupo';
+    var tit = document.createElement('div');
+    tit.className = 'rail-tit';
+    tit.textContent = 'Categoría';
+    grupo.appendChild(tit);
+    grupo.appendChild(cont);
+    var top = rail.querySelector('.rail-top');
+    if(top && top.parentNode === rail) rail.insertBefore(grupo, top.nextSibling);
+    else rail.insertBefore(grupo, rail.firstChild);
+
+    // v204: el panel de administración, como su propio grupo debajo del
+    // selector. Para los demás roles el botón no se dibuja: no es que esté
+    // escondido, no existe en la página.
+    if(typeof adminPuede === 'function' && adminPuede()){
+      var ga = document.createElement('div');
+      ga.className = 'rail-grupo'; ga.id = 'admin-grupo';
+      var ta = document.createElement('div');
+      ta.className = 'rail-tit'; ta.textContent = 'Club';
+      ga.appendChild(ta);
+      var ba = document.createElement('button');
+      ba.className = 'rail-item'; ba.id = 'admin-boton';
+      ba.title = 'Administración: divisiones y cuentas';
+      ba.onclick = function(ev){ ev.stopPropagation(); adminAbrir(); };
+      ba.innerHTML = '<span class="ri-ico">👥</span><span class="ri-txt">Administración</span>';
+      ga.appendChild(ba);
+      rail.insertBefore(ga, grupo.nextSibling);
+    }
+    try{ if(typeof railTips === 'function') railTips(); }catch(e){}
+  } else {
+    var exp = document.querySelector('[onclick="exportData()"]');
+    if(exp && exp.parentNode) exp.parentNode.insertBefore(cont, exp);
+  }
+}
+
+function accesoAbrirMenu(btn){
+  var ya = document.getElementById('acceso-menu');
+  if(ya){ ya.remove(); return; }
+  // El panel lateral recorta lo que se sale de su ancho, así que el menú se
+  // cuelga del body y se posiciona al lado del botón.
+  var r = btn.getBoundingClientRect();
+  var m = document.createElement('div');
+  m.id = 'acceso-menu';
+  m.style.cssText = 'position:fixed;z-index:9600;'
+    + 'left:' + Math.round(r.right + 8) + 'px;top:' + Math.round(r.top) + 'px;'
+    + 'background:var(--sup-1,#fff);border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;'
+    + 'box-shadow:0 10px 30px rgba(0,0,0,.22);padding:6px;min-width:200px';
+  m.innerHTML = MIS_CATEGORIAS.map(function(c){
+    var on = (c === CAT_ACTIVA);
+    return '<button onclick="accesoCambiarCategoria(\'' + accesoEsc(c).replace(/'/g,"\\'") + '\')" '
+      + 'style="display:block;width:100%;text-align:left;border:none;cursor:pointer;'
+      + 'border-radius:8px;padding:8px 11px;font-size:12.5px;font-family:inherit;'
+      + 'background:' + (on ? 'color-mix(in srgb,var(--club-c2,#3B4D88) 13%,transparent)' : 'transparent') + ';'
+      + 'color:var(--tex-1,#15202e);font-weight:' + (on ? '800' : '600') + '">'
+      + (on ? '● ' : '○ ') + accesoEsc(c) + '</button>';
+  }).join('');
+  document.body.appendChild(m);
+  // Si se pasa del borde de abajo, se sube lo justo.
+  try{
+    var alto = m.getBoundingClientRect().height;
+    if(r.top + alto > window.innerHeight - 12){
+      m.style.top = Math.max(12, window.innerHeight - alto - 12) + 'px';
+    }
+  }catch(e){}
+  setTimeout(function(){
+    document.addEventListener('click', function cerrar(){
+      var e = document.getElementById('acceso-menu');
+      if(e) e.remove();
+      document.removeEventListener('click', cerrar);
+    });
+  }, 0);
+}
+
+// Devuelve una promesa que resuelve true si se puede seguir cargando datos.
+function accesoCargar(){
+  if(typeof sbClient === 'undefined' || !sbClient || !sbCurrentUser){
+    return Promise.resolve(true);
+  }
+  return Promise.all([
+    sbClient.from('usuarios').select('rol,nombre,activo').eq('auth_uid', sbCurrentUser.id).maybeSingle(),
+    sbClient.from('usuario_alcance').select('categoria').eq('auth_uid', sbCurrentUser.id),
+    sbClient.from('categorias').select('nombre,orden')
+  ]).then(function(r){
+    var u = r[0], a = r[1], c = r[2];
+
+    // Las tablas todavía no existen: el dashboard sigue como antes.
+    if(u.error || a.error){
+      console.warn('[acceso] Sin tablas de usuarios; se sigue sin control de acceso.', u.error || a.error);
+      return true;
+    }
+    if(!u.data){
+      accesoBloquear('Tu cuenta todavía no está habilitada',
+        'Entraste bien, pero nadie te asignó un rol ni una categoría. Pedile a Matías que te dé de alta.');
+      return false;
+    }
+    if(u.data.activo === false){
+      accesoBloquear('Tu cuenta está desactivada',
+        'Tu usuario existe pero está dado de baja. Hablá con Matías si tendría que estar activo.');
+      return false;
+    }
+
+    MI_ROL = u.data.rol;
+    MI_NOMBRE = u.data.nombre;
+
+    var orden = {};
+    (c.data || []).forEach(function(x){ orden[x.nombre] = (x.orden == null ? 99 : x.orden); });
+    MIS_CATEGORIAS = (a.data || []).map(function(x){ return x.categoria; })
+      .sort(function(x, y){
+        return (orden[x] == null ? 99 : orden[x]) - (orden[y] == null ? 99 : orden[y])
+            || String(x).localeCompare(String(y), 'es');
+      });
+
+    if(!MIS_CATEGORIAS.length){
+      accesoBloquear('Tu cuenta no tiene ninguna categoría',
+        'Tenés rol «' + MI_ROL + '» pero no te asignaron divisiones. Pedile a Matías que te las agregue.');
+      return false;
+    }
+
+    // Si la categoría del espejo no es suya, se corrige y se recarga una vez.
+    if(MIS_CATEGORIAS.indexOf(CAT_ACTIVA) < 0){
+      var yaRecargo = false;
+      try{ yaRecargo = !!sessionStorage.getItem('acceso_recarga'); }catch(e){}
+      if(yaRecargo){
+        accesoBloquear('No se pudo abrir tu categoría',
+          'Tenés asignada «' + MIS_CATEGORIAS[0] + '» pero el dashboard no logró cambiar a ella. Avisale a Matías.');
+        return false;
+      }
+      try{ sessionStorage.setItem('acceso_recarga', '1'); }catch(e){}
+      try{ localStorage.setItem('gps_cat_activa', MIS_CATEGORIAS[0]); }catch(e){}
+      console.log('[acceso] Cambiando a «' + MIS_CATEGORIAS[0] + '» y recargando.');
+      location.reload();
+      return false;
+    }
+    try{ sessionStorage.removeItem('acceso_recarga'); }catch(e){}
+
+    return sbClient.from('roles_permisos').select('area,permiso').eq('rol', MI_ROL)
+      .then(function(p){
+        MIS_PERMISOS = {};
+        (p.data || []).forEach(function(x){ MIS_PERMISOS[x.area] = x.permiso; });
+        console.log('[acceso] ' + (MI_NOMBRE || sbCurrentUser.email) + ' · rol ' + MI_ROL
+          + ' · ' + MIS_CATEGORIAS.length + ' categoría(s) · trabajando en ' + CAT_ACTIVA);
+        try{ accesoPintarSelector(); }catch(e){ console.warn('[acceso] selector:', e); }
+        return true;
+      });
+  }).catch(function(e){
+    console.warn('[acceso] No se pudo leer el acceso; se sigue sin control.', e);
+    return true;
+  });
+}
+window.accesoCargar = accesoCargar;
+</script>
+
+<script id="admin-js">
+/* ══ v204 · ADMINISTRACIÓN ════════════════════════════════════════════════
+   El panel de coordinación: divisiones y cuentas. Sólo lo ve quien tiene rol
+   'coordinacion'; para los demás el botón no existe, y si alguno llamara a
+   estas funciones a mano, las de Supabase lo frenan del otro lado.
+
+   Lo que se puede hacer sin SQL:
+     · agregar una división, renombrarla (arrastrando sus datos), ordenarla,
+       vaciarla o borrarla
+     · crear una cuenta con su contraseña
+     · dar de alta a alguien que ya entró pero no tiene rol
+     · cambiarle el rol o las divisiones a cualquiera, y darlo de baja
+
+   Lo que NO hace a propósito: borrar cuentas de Supabase. Dar de baja alcanza
+   (la cuenta queda sin poder entrar) y es reversible. Borrarla de verdad se
+   hace una sola vez, desde Supabase, y no conviene tenerlo a un clic.      */
+
+var ADMIN = {cuentas:[], alcance:{}, cats:[], roles:[], sinAsignar:[], datos:{},
+             tab:'usuarios', msg:'', msgTipo:'', cargando:false};
+
+var ADMIN_NOMBRE_ROL = {
+  coordinacion:'Coordinación', cuerpo_tecnico:'Cuerpo técnico', medico:'Médico',
+  nutricion:'Nutrición', captacion:'Captación', jugador:'Jugador', lectura:'Sólo lectura'
+};
+function adminRolTxt(r){ return ADMIN_NOMBRE_ROL[r] || r; }
+
+var ADMIN_ROLES = {
+  coordinacion:   'Ve y carga todo, en todas las divisiones',
+  cuerpo_tecnico: 'Su división: planifica, carga, ve todo lo suyo',
+  medico:         'Sólo lesiones',
+  nutricion:      'Sólo antropometrías',
+  captacion:      'Sólo la pestaña Captación',
+  jugador:        'Sólo su propio perfil',
+  lectura:        'Mira, no carga'
+};
+
+function adminPuede(){ return MI_ROL === 'coordinacion'; }
+function adminEsc(s){ return accesoEsc(s); }
+function adminAviso(t, tipo){ ADMIN.msg = t || ''; ADMIN.msgTipo = tipo || 'ok'; adminRender(); }
+
+// ── Abrir y cerrar ────────────────────────────────────────────────────────
+function adminAbrir(){
+  if(!adminPuede()) return;
+  if(document.getElementById('admin-ov')) return;
+  var ov = document.createElement('div');
+  ov.id = 'admin-ov';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9400;background:rgba(10,14,22,.55);'
+    + 'display:flex;align-items:flex-start;justify-content:center;padding:28px 16px;overflow:auto';
+  ov.onclick = function(ev){ if(ev.target === ov) adminCerrar(); };
+  ov.innerHTML = '<div id="admin-caja" style="width:100%;max-width:1040px;background:var(--sup-1,#fff);'
+    + 'border:1px solid var(--bor-1,#dfe3ea);border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.3);'
+    + 'overflow:hidden"></div>';
+  document.body.appendChild(ov);
+  document.addEventListener('keydown', adminTecla);
+  ADMIN.msg = ''; ADMIN.tab = 'usuarios';
+  adminRender();
+  adminCargar();
+}
+function adminCerrar(){
+  var ov = document.getElementById('admin-ov');
+  if(ov) ov.remove();
+  document.removeEventListener('keydown', adminTecla);
+}
+function adminTecla(ev){ if(ev.key === 'Escape') adminCerrar(); }
+window.adminAbrir = adminAbrir; window.adminCerrar = adminCerrar;
+
+// ── Traer todo de la base ─────────────────────────────────────────────────
+function adminCargar(){
+  if(!sbClient || !sbCurrentUser){ adminAviso('No hay sesión de Supabase abierta.', 'mal'); return; }
+  ADMIN.cargando = true; adminRender();
+  return Promise.all([
+    sbClient.from('usuarios').select('auth_uid,email,nombre,rol,activo,creado_en'),
+    sbClient.from('usuario_alcance').select('auth_uid,categoria'),
+    sbClient.from('categorias').select('nombre,orden,activa'),
+    sbClient.from('roles_permisos').select('rol'),
+    sbClient.rpc('admin_cuentas_sin_asignar'),
+    sbClient.rpc('admin_division_datos')
+  ]).then(function(r){
+    ADMIN.cargando = false;
+    if(r[0].error) throw r[0].error;
+    ADMIN.cuentas = (r[0].data || []).sort(function(a,b){
+      return String(a.rol).localeCompare(String(b.rol),'es')
+          || String(a.email||'').localeCompare(String(b.email||''),'es');
+    });
+    ADMIN.alcance = {};
+    (r[1].data || []).forEach(function(x){
+      (ADMIN.alcance[x.auth_uid] = ADMIN.alcance[x.auth_uid] || []).push(x.categoria);
+    });
+    ADMIN.cats = (r[2].data || []).sort(function(a,b){
+      return (a.orden||0) - (b.orden||0) || String(a.nombre).localeCompare(String(b.nombre),'es');
+    });
+    var vistos = {};
+    (r[3].data || []).forEach(function(x){ vistos[x.rol] = 1; });
+    ADMIN.roles = Object.keys(vistos).length ? Object.keys(vistos).sort() : Object.keys(ADMIN_ROLES);
+    // Las dos RPC pueden no existir todavía (si no corrió el paso 3): no es
+    // motivo para dejar el panel inservible, sólo se ocultan esas partes.
+    ADMIN.sinAsignar = (r[4] && !r[4].error && r[4].data) ? r[4].data : null;
+    ADMIN.datos = {};
+    if(r[5] && !r[5].error && r[5].data){
+      r[5].data.forEach(function(x){
+        ADMIN.datos[x.division] = (ADMIN.datos[x.division] || 0) + Number(x.filas || 0);
+      });
+    } else { ADMIN.datos = null; }
+    adminRender();
+  }).catch(function(e){
+    ADMIN.cargando = false;
+    adminAviso('No se pudo leer: ' + (e && e.message ? e.message : e), 'mal');
+  });
+}
+
+// ── Dibujar ───────────────────────────────────────────────────────────────
+function adminRender(){
+  var caja = document.getElementById('admin-caja');
+  if(!caja) return;
+  var pest = function(id, txt){
+    var on = ADMIN.tab === id;
+    return '<button onclick="ADMIN.tab=\'' + id + '\';adminRender()" style="border:none;cursor:pointer;'
+      + 'background:' + (on ? 'var(--sup-1,#fff)' : 'transparent') + ';font-family:inherit;'
+      + 'padding:11px 18px;font-size:13px;font-weight:' + (on ? '800' : '600') + ';'
+      + 'color:' + (on ? 'var(--club-c2,#3B4D88)' : 'var(--tex-2,#667)') + ';'
+      + 'border-bottom:2.5px solid ' + (on ? 'var(--club-c2,#3B4D88)' : 'transparent') + '">' + txt + '</button>';
+  };
+  var aviso = '';
+  if(ADMIN.msg){
+    var col = ADMIN.msgTipo === 'mal' ? '#B3261E' : '#0F6E56';
+    aviso = '<div style="margin:0 20px 14px;padding:10px 13px;border-radius:9px;font-size:12.5px;'
+      + 'line-height:1.5;background:color-mix(in srgb,' + col + ' 11%,transparent);'
+      + 'border:1px solid color-mix(in srgb,' + col + ' 35%,transparent);color:' + col + '">'
+      + adminEsc(ADMIN.msg) + '</div>';
+  }
+  caja.innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;padding:16px 20px 0">'
+    + '<div style="flex:1">'
+    + '<div style="font-size:17px;font-weight:800;color:var(--tex-1,#15202e)">Administración</div>'
+    + '<div style="font-size:11.5px;color:var(--tex-2,#667);margin-top:2px">'
+    + 'Club Atlético Tigre · ' + adminEsc(MI_NOMBRE || (sbCurrentUser && sbCurrentUser.email) || '') + '</div></div>'
+    + '<button onclick="adminCargar()" title="Volver a leer de la base" style="border:1px solid var(--bor-1,#dfe3ea);'
+    + 'background:transparent;color:var(--tex-2,#667);border-radius:8px;padding:7px 11px;font-size:12px;'
+    + 'cursor:pointer;font-family:inherit">Actualizar</button>'
+    + '<button onclick="adminCerrar()" style="border:none;background:transparent;color:var(--tex-2,#667);'
+    + 'font-size:22px;line-height:1;cursor:pointer;padding:2px 6px">×</button></div>'
+    + '<div style="display:flex;gap:2px;padding:12px 20px 0;border-bottom:1px solid var(--bor-1,#dfe3ea);margin-bottom:16px">'
+    + pest('usuarios','Cuentas') + pest('divisiones','Divisiones') + '</div>'
+    + aviso
+    + '<div style="padding:0 20px 22px">'
+    + (ADMIN.cargando ? '<div style="padding:30px;text-align:center;color:var(--tex-2,#667);font-size:13px">Leyendo…</div>'
+       : (ADMIN.tab === 'usuarios' ? adminHtmlUsuarios() : adminHtmlDivisiones()))
+    + '</div>';
+}
+
+function adminHtmlUsuarios(){
+  var h = '';
+
+  // ── Cuentas que entraron pero no tienen rol ──
+  if(ADMIN.sinAsignar === null){
+    h += '<div style="padding:10px 13px;border-radius:9px;font-size:12px;line-height:1.55;margin-bottom:16px;'
+      + 'background:color-mix(in srgb,#B06000 10%,transparent);border:1px solid color-mix(in srgb,#B06000 30%,transparent);'
+      + 'color:#B06000">Todavía no corriste <b>paso3_funciones_de_admin.sql</b> en Supabase. '
+      + 'El panel funciona igual, pero no puede ver las cuentas que entraron sin rol ni renombrar divisiones.</div>';
+  } else if(ADMIN.sinAsignar.length){
+    h += '<div style="margin-bottom:18px;border:1px solid color-mix(in srgb,#B06000 30%,transparent);'
+      + 'border-radius:11px;overflow:hidden">'
+      + '<div style="padding:9px 13px;font-size:12px;font-weight:800;color:#B06000;'
+      + 'background:color-mix(in srgb,#B06000 10%,transparent)">'
+      + ADMIN.sinAsignar.length + ' cuenta(s) entraron y están esperando permiso</div>';
+    ADMIN.sinAsignar.forEach(function(c, i){
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:9px 13px;border-top:1px solid var(--bor-1,#dfe3ea)">'
+        + '<div style="flex:1;font-size:12.5px;color:var(--tex-1,#15202e)">' + adminEsc(c.email) + '</div>'
+        + '<button onclick="adminAltaDeSinAsignar(' + i + ')" style="background:var(--club-c2,#3B4D88);color:#fff;'
+        + 'border:none;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;'
+        + 'font-family:inherit">Darle acceso</button></div>';
+    });
+    h += '</div>';
+  }
+
+  // ── Alta de una cuenta nueva ──
+  h += '<details id="admin-alta" style="margin-bottom:18px;border:1px solid var(--bor-1,#dfe3ea);border-radius:11px">'
+    + '<summary style="padding:11px 14px;cursor:pointer;font-size:13px;font-weight:700;'
+    + 'color:var(--club-c2,#3B4D88)">+ Crear una cuenta nueva</summary>'
+    + '<div style="padding:4px 14px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">'
+    + adminCampo('admin-n-nombre','Nombre y apellido','text','')
+    + adminCampo('admin-n-mail','Mail','email','')
+    + adminCampo('admin-n-pass','Contraseña (mínimo 6)','text','')
+    + '<label style="display:block"><span style="display:block;font-size:11px;color:var(--tex-2,#667);'
+    + 'margin-bottom:4px">Rol</span><select id="admin-n-rol" onchange="adminRender()" style="' + adminEstInput() + '">'
+    + ADMIN.roles.map(function(r){
+        return '<option value="' + adminEsc(r) + '"' + (r === 'cuerpo_tecnico' ? ' selected' : '') + '>'
+             + adminEsc(adminRolTxt(r)) + '</option>'; }).join('')
+    + '</select></label>'
+    + '<button onclick="adminCrearCuenta()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;'
+    + 'border-radius:9px;padding:9px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">'
+    + 'Crear</button>'
+    + '<div style="flex:1 0 100%;font-size:11.5px;color:var(--tex-2,#667);line-height:1.55;margin-top:2px">'
+    + 'Elegís vos la contraseña y se la pasás; la persona la puede cambiar después desde «Olvidé mi contraseña». '
+    + 'Las divisiones se eligen abajo, en la fila de la cuenta, una vez creada.<br>'
+    + 'Si Supabase te pide confirmar el mail, la cuenta existe pero no puede entrar hasta que haga clic en el mail '
+    + 'que recibe. Eso se desactiva en Supabase → Authentication → Sign In / Providers → Email → «Confirm email».'
+    + '</div></div></details>';
+
+  // ── Las cuentas ──
+  h += '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;overflow:hidden">'
+    + '<div style="display:grid;grid-template-columns:1.5fr 1.1fr 2.2fr 86px;gap:8px;padding:9px 13px;'
+    + 'background:var(--sup-2,#f6f7f9);font-size:11px;font-weight:800;color:var(--tex-2,#667);'
+    + 'text-transform:uppercase;letter-spacing:.4px">'
+    + '<div>Cuenta</div><div>Rol</div><div>Divisiones</div><div style="text-align:right">Estado</div></div>';
+
+  if(!ADMIN.cuentas.length){
+    h += '<div style="padding:20px;text-align:center;font-size:12.5px;color:var(--tex-2,#667)">Sin cuentas todavía.</div>';
+  }
+  ADMIN.cuentas.forEach(function(u, i){
+    var mias = ADMIN.alcance[u.auth_uid] || [];
+    var yo = u.auth_uid === (sbCurrentUser && sbCurrentUser.id);
+    h += '<div style="display:grid;grid-template-columns:1.5fr 1.1fr 2.2fr 86px;gap:8px;padding:11px 13px;'
+      + 'border-top:1px solid var(--bor-1,#dfe3ea);align-items:center;'
+      + (u.activo === false ? 'opacity:.55;' : '') + '">'
+      // cuenta
+      + '<div style="min-width:0">'
+      + '<div style="font-size:12.5px;font-weight:700;color:var(--tex-1,#15202e);overflow:hidden;'
+      + 'text-overflow:ellipsis">' + adminEsc(u.nombre || '(sin nombre)') + (yo ? ' · vos' : '') + '</div>'
+      + '<div style="font-size:11px;color:var(--tex-2,#667);overflow:hidden;text-overflow:ellipsis">'
+      + adminEsc(u.email || '') + '</div></div>'
+      // rol
+      + '<div><select id="admin-rol-' + i + '" onchange="adminGuardarRol(' + i + ')" '
+      + (yo ? 'disabled title="No te podés cambiar el rol a vos mismo" ' : '')
+      + 'style="' + adminEstInput() + 'width:100%">'
+      + ADMIN.roles.map(function(r){
+          return '<option value="' + adminEsc(r) + '"' + (r === u.rol ? ' selected' : '') + '>'
+               + adminEsc(adminRolTxt(r)) + '</option>'; }).join('')
+      + '</select>'
+      + '<div style="font-size:10.5px;color:var(--tex-3,#929DB1);margin-top:3px;line-height:1.35">'
+      + adminEsc(ADMIN_ROLES[u.rol] || '') + '</div></div>'
+      // divisiones
+      + '<div style="display:flex;flex-wrap:wrap;gap:4px">'
+      + ADMIN.cats.map(function(c){
+          var on = mias.indexOf(c.nombre) >= 0;
+          return '<button onclick="adminToggleCat(' + i + ',\'' + adminEsc(c.nombre).replace(/'/g,"\\'") + '\')" '
+            + 'title="' + adminEsc(c.nombre) + '" style="border:1px solid '
+            + (on ? 'var(--club-c2,#3B4D88)' : 'var(--bor-1,#dfe3ea)') + ';cursor:pointer;font-family:inherit;'
+            + 'border-radius:7px;padding:4px 8px;font-size:11px;font-weight:' + (on ? '800' : '600') + ';'
+            + 'background:' + (on ? 'color-mix(in srgb,var(--club-c2,#3B4D88) 14%,transparent)' : 'transparent') + ';'
+            + 'color:' + (on ? 'var(--club-c2,#3B4D88)' : 'var(--tex-2,#667)') + '">'
+            + adminEsc(accesoSigla(c.nombre)) + '</button>';
+        }).join('')
+      + (mias.length ? '' : '<span style="font-size:11px;color:#B3261E;align-self:center">sin divisiones: no puede entrar</span>')
+      + '</div>'
+      // estado
+      + '<div style="text-align:right">'
+      + (yo ? '<span style="font-size:11px;color:var(--tex-3,#929DB1)">activa</span>'
+            : '<button onclick="adminToggleActivo(' + i + ')" style="border:1px solid var(--bor-1,#dfe3ea);'
+              + 'background:transparent;border-radius:8px;padding:6px 10px;font-size:11.5px;cursor:pointer;'
+              + 'font-family:inherit;font-weight:700;color:' + (u.activo === false ? '#0F6E56' : '#B3261E') + '">'
+              + (u.activo === false ? 'Reactivar' : 'Dar de baja') + '</button>')
+      + '</div></div>';
+  });
+  h += '</div>';
+  h += '<div style="font-size:11.5px;color:var(--tex-2,#667);margin-top:10px;line-height:1.6">'
+    + 'Los cambios de rol, división y estado se guardan solos, en el momento. '
+    + 'La persona los ve la próxima vez que abre el dashboard.</div>';
+  return h;
+}
+
+function adminHtmlDivisiones(){
+  var h = '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;overflow:hidden">'
+    + '<div style="display:grid;grid-template-columns:30px 1fr 150px 190px;gap:8px;padding:9px 13px;'
+    + 'background:var(--sup-2,#f6f7f9);font-size:11px;font-weight:800;color:var(--tex-2,#667);'
+    + 'text-transform:uppercase;letter-spacing:.4px">'
+    + '<div>#</div><div>División</div><div>Cargado</div><div style="text-align:right">&nbsp;</div></div>';
+
+  ADMIN.cats.forEach(function(c, i){
+    var cuentas = 0;
+    Object.keys(ADMIN.alcance).forEach(function(k){ if(ADMIN.alcance[k].indexOf(c.nombre) >= 0) cuentas++; });
+    var filas = ADMIN.datos ? (ADMIN.datos[c.nombre] || 0) : null;
+    var esMia = c.nombre === CAT_ACTIVA;
+    h += '<div style="display:grid;grid-template-columns:30px 1fr 150px 190px;gap:8px;padding:10px 13px;'
+      + 'border-top:1px solid var(--bor-1,#dfe3ea);align-items:center">'
+      + '<div style="font-size:11px;color:var(--tex-3,#929DB1)">' + (i + 1) + '</div>'
+      + '<div><input id="admin-cat-' + i + '" value="' + adminEsc(c.nombre) + '" '
+      + 'onkeydown="if(event.key===\'Enter\')adminRenombrar(' + i + ')" style="' + adminEstInput()
+      + 'width:100%;font-weight:700' + (esMia ? ';color:var(--club-c2,#3B4D88)' : '') + '">'
+      + '<div style="font-size:10.5px;color:var(--tex-3,#929DB1);margin-top:3px">'
+      + cuentas + ' cuenta(s)' + (esMia ? ' · es la que estás usando' : '') + '</div></div>'
+      + '<div style="font-size:12px;color:var(--tex-2,#667)">'
+      + (filas === null ? '<span title="Hace falta el paso 3">—</span>'
+         : (filas ? filas.toLocaleString('es-AR') + ' filas' : '<span style="color:var(--tex-3,#929DB1)">vacía</span>'))
+      + '</div>'
+      + '<div style="text-align:right;display:flex;gap:4px;justify-content:flex-end">'
+      + adminBtnChico('▲', 'Subir en la lista', 'adminOrden(' + i + ',-1)', i === 0)
+      + adminBtnChico('▼', 'Bajar en la lista', 'adminOrden(' + i + ',1)', i === ADMIN.cats.length - 1)
+      + adminBtnChico('Renombrar', 'Cambia el nombre y arrastra todos sus datos', 'adminRenombrar(' + i + ')', false)
+      + adminBtnChico('Vaciar', 'Borra todos los datos de esta división', 'adminVaciar(' + i + ')', esMia)
+      + adminBtnChico('✕', 'Borrar la división (tiene que estar vacía)', 'adminBorrarDiv(' + i + ')', esMia)
+      + '</div></div>';
+  });
+  h += '</div>';
+
+  h += '<div style="margin-top:16px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">'
+    + adminCampo('admin-div-nueva','Agregar una división','text','')
+    + '<button onclick="adminCrearDiv()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;'
+    + 'border-radius:9px;padding:9px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">'
+    + 'Agregar</button></div>';
+
+  h += '<div style="font-size:11.5px;color:var(--tex-2,#667);margin-top:14px;line-height:1.65">'
+    + '<b>Renombrar</b> mueve también todos los datos cargados, así la división no queda vacía con otro nombre. '
+    + 'Si renombrás la que estás usando, el dashboard se recarga.<br>'
+    + '<b>Vaciar</b> borra todo lo cargado en esa división y no se puede deshacer: te va a pedir que escribas el nombre. '
+    + 'Sirve para dejar en cero una división donde se subió algo por error.<br>'
+    + '<b>✕</b> borra la división de la lista, y sólo si está vacía y nadie la tiene asignada.</div>';
+  return h;
+}
+
+function adminEstInput(){
+  return 'border:1px solid var(--bor-1,#dfe3ea);border-radius:8px;padding:7px 9px;font-size:12.5px;'
+    + 'font-family:inherit;background:var(--sup-1,#fff);color:var(--tex-1,#15202e);';
+}
+function adminCampo(id, lab, tipo, val){
+  return '<label style="display:block"><span style="display:block;font-size:11px;color:var(--tex-2,#667);'
+    + 'margin-bottom:4px">' + adminEsc(lab) + '</span><input id="' + id + '" type="' + tipo + '" '
+    + 'value="' + adminEsc(val) + '" style="' + adminEstInput() + 'min-width:190px"></label>';
+}
+function adminBtnChico(txt, tit, fn, apagado){
+  return '<button ' + (apagado ? 'disabled ' : 'onclick="' + fn + '" ')
+    + 'title="' + adminEsc(tit) + '" style="border:1px solid var(--bor-1,#dfe3ea);background:transparent;'
+    + 'border-radius:7px;padding:5px 8px;font-size:11px;font-family:inherit;cursor:' + (apagado ? 'default' : 'pointer')
+    + ';opacity:' + (apagado ? '.45' : '1')
+    + ';color:' + (apagado ? 'var(--tex-3,#929DB1)' : 'var(--tex-2,#667)') + '">' + txt + '</button>';
+}
+
+// ── Cuentas: acciones ─────────────────────────────────────────────────────
+function adminGuardarRol(i){
+  var u = ADMIN.cuentas[i]; if(!u) return;
+  var sel = document.getElementById('admin-rol-' + i); if(!sel) return;
+  var rol = sel.value;
+  sbClient.from('usuarios').update({rol: rol}).eq('auth_uid', u.auth_uid).then(function(r){
+    if(r.error) return adminAviso('No se pudo cambiar el rol: ' + r.error.message, 'mal');
+    u.rol = rol;
+    adminAviso((u.email || 'La cuenta') + ' ahora es ' + adminRolTxt(rol) + '.', 'ok');
+  });
+}
+function adminToggleActivo(i){
+  var u = ADMIN.cuentas[i]; if(!u) return;
+  if(u.auth_uid === (sbCurrentUser && sbCurrentUser.id)) return;
+  var nuevo = !(u.activo !== false);
+  sbClient.from('usuarios').update({activo: nuevo}).eq('auth_uid', u.auth_uid).then(function(r){
+    if(r.error) return adminAviso('No se pudo cambiar el estado: ' + r.error.message, 'mal');
+    u.activo = nuevo;
+    adminAviso((u.email || 'La cuenta') + (nuevo ? ' quedó activa.' : ' quedó dada de baja: no va a poder entrar.'), 'ok');
+  });
+}
+function adminToggleCat(i, cat){
+  var u = ADMIN.cuentas[i]; if(!u) return;
+  var mias = ADMIN.alcance[u.auth_uid] = ADMIN.alcance[u.auth_uid] || [];
+  var pos = mias.indexOf(cat);
+  if(pos >= 0){
+    sbClient.from('usuario_alcance').delete().eq('auth_uid', u.auth_uid).eq('categoria', cat).then(function(r){
+      if(r.error) return adminAviso('No se pudo quitar la división: ' + r.error.message, 'mal');
+      mias.splice(pos, 1);
+      adminAviso(cat + ': se la quitamos a ' + (u.email || 'esa cuenta') + '.', 'ok');
+    });
+  } else {
+    sbClient.from('usuario_alcance').insert({auth_uid: u.auth_uid, categoria: cat}).then(function(r){
+      if(r.error) return adminAviso('No se pudo agregar la división: ' + r.error.message, 'mal');
+      mias.push(cat);
+      adminAviso(cat + ': ahora la ve ' + (u.email || 'esa cuenta') + '.', 'ok');
+    });
+  }
+}
+
+// Crear la cuenta en Supabase sin tocar tu sesión: se usa un segundo cliente
+// que no guarda nada en el navegador. Si se usara el de siempre, al registrar
+// a otra persona el dashboard quedaría abierto con SU usuario, no con el tuyo.
+function adminCrearCuenta(){
+  var nombre = (document.getElementById('admin-n-nombre') || {}).value || '';
+  var mail   = ((document.getElementById('admin-n-mail') || {}).value || '').trim();
+  var pass   = (document.getElementById('admin-n-pass') || {}).value || '';
+  var rol    = (document.getElementById('admin-n-rol') || {}).value || 'cuerpo_tecnico';
+  if(!mail || mail.indexOf('@') < 0) return adminAviso('Falta un mail válido.', 'mal');
+  if(pass.length < 6) return adminAviso('La contraseña tiene que tener al menos 6 caracteres.', 'mal');
+  if(!window.supabase || !window.supabase.createClient)
+    return adminAviso('No está cargada la librería de Supabase. ¿Hay internet?', 'mal');
+
+  var cli2;
+  try{
+    cli2 = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
+             storageKey: 'sb-alta-temporal'}
+    });
+  }catch(e){ return adminAviso('No se pudo preparar el alta: ' + e.message, 'mal'); }
+
+  ADMIN.cargando = true; adminRender();
+  cli2.auth.signUp({email: mail, password: pass, options: {data: {name: nombre}}}).then(function(res){
+    ADMIN.cargando = false;
+    if(res.error) return adminAviso('Supabase no creó la cuenta: ' + res.error.message, 'mal');
+    var u = res.data && res.data.user;
+    if(!u || !u.id) return adminAviso('Supabase no devolvió la cuenta. Probá crearla desde Supabase → Authentication.', 'mal');
+    // Supabase, para no delatar qué mails existen, devuelve una cuenta "vacía"
+    // (sin identities) cuando el mail ya estaba registrado.
+    if(u.identities && u.identities.length === 0){
+      return adminAviso('Ese mail ya tiene cuenta. Si todavía no tiene rol, va a aparecer arriba en «esperando permiso».', 'mal');
+    }
+    return sbClient.from('usuarios').insert({
+      auth_uid: u.id, email: mail, nombre: nombre || mail.split('@')[0], rol: rol, activo: true
+    }).then(function(r){
+      if(r.error) throw r.error;
+      var falta = res.data.session ? '' : ' Supabase le mandó un mail de confirmación: hasta que haga clic no puede entrar.';
+      adminAviso('Cuenta creada para ' + mail + ' como ' + adminRolTxt(rol) + '. Ahora elegile las divisiones en su fila.' + falta, 'ok');
+      return adminCargar();
+    });
+  }).catch(function(e){
+    ADMIN.cargando = false;
+    adminAviso('Quedó a medias: ' + (e && e.message ? e.message : e), 'mal');
+  });
+}
+
+function adminAltaDeSinAsignar(i){
+  var c = (ADMIN.sinAsignar || [])[i]; if(!c) return;
+  sbClient.from('usuarios').insert({
+    auth_uid: c.uid, email: c.email, nombre: (c.email || '').split('@')[0],
+    rol: 'lectura', activo: true
+  }).then(function(r){
+    if(r.error) return adminAviso('No se pudo dar de alta: ' + r.error.message, 'mal');
+    adminAviso(c.email + ' quedó con rol «Sólo lectura» y sin divisiones. Elegile el rol y las divisiones en su fila.', 'ok');
+    return adminCargar();
+  });
+}
+
+// ── Divisiones: acciones ──────────────────────────────────────────────────
+function adminCrearDiv(){
+  var el = document.getElementById('admin-div-nueva');
+  var nom = ((el || {}).value || '').trim();
+  if(!nom) return adminAviso('Escribí el nombre de la división.', 'mal');
+  sbClient.rpc('admin_crear_division', {p_nombre: nom, p_orden: null}).then(function(r){
+    if(r.error){
+      // Sin el paso 3 corrido, se intenta igual por la vía directa.
+      return sbClient.from('categorias').insert({
+        nombre: nom, orden: (ADMIN.cats.length ? ADMIN.cats[ADMIN.cats.length-1].orden + 1 : 1), activa: true
+      }).then(function(r2){
+        if(r2.error) return adminAviso('No se pudo crear: ' + r2.error.message, 'mal');
+        adminAviso('División «' + nom + '» creada.', 'ok');
+        return adminCargar();
+      });
+    }
+    adminAviso('División «' + nom + '» creada. Ahora dale acceso a alguien desde la pestaña Cuentas.', 'ok');
+    return adminCargar();
+  });
+}
+function adminOrden(i, d){
+  var a = ADMIN.cats[i], b = ADMIN.cats[i + d];
+  if(!a || !b) return;
+  var oa = a.orden, ob = b.orden;
+  if(oa === ob){ oa = i + 1; ob = i + 1 + d; }
+  Promise.all([
+    sbClient.from('categorias').update({orden: ob}).eq('nombre', a.nombre),
+    sbClient.from('categorias').update({orden: oa}).eq('nombre', b.nombre)
+  ]).then(function(rs){
+    var mal = rs.filter(function(r){ return r.error; });
+    if(mal.length) return adminAviso('No se pudo reordenar: ' + mal[0].error.message, 'mal');
+    return adminCargar();
+  });
+}
+function adminRenombrar(i){
+  var c = ADMIN.cats[i]; if(!c) return;
+  var el = document.getElementById('admin-cat-' + i);
+  var nuevo = ((el || {}).value || '').trim();
+  if(!nuevo || nuevo === c.nombre) return;
+  var mio = c.nombre === CAT_ACTIVA;
+  // Lo pendiente sube antes de que cambie el nombre, si no queda colgado del
+  // nombre viejo en esta computadora.
+  try{ if(typeof saveData === 'function') saveData(); }catch(e){}
+  ADMIN.cargando = true; adminRender();
+  var antes = (typeof sbForceSyncSettings === 'function')
+    ? Promise.resolve(sbForceSyncSettings()).catch(function(){ return null; })
+    : Promise.resolve(null);
+  antes.then(function(){
+    return sbClient.rpc('admin_renombrar_division', {p_viejo: c.nombre, p_nuevo: nuevo});
+  }).then(function(r){
+    ADMIN.cargando = false;
+    if(r.error) return adminAviso('No se pudo renombrar: ' + r.error.message, 'mal');
+    if(mio){
+      try{ localStorage.setItem('gps_cat_activa', nuevo); }catch(e){}
+      adminAviso(String(r.data || '') + ' Recargando con el nombre nuevo…', 'ok');
+      setTimeout(function(){ location.reload(); }, 1200);
+      return null;
+    }
+    adminAviso(String(r.data || 'Listo.'), 'ok');
+    return adminCargar();
+  }).catch(function(e){
+    ADMIN.cargando = false;
+    adminAviso('No se pudo renombrar: ' + (e && e.message ? e.message : e), 'mal');
+  });
+}
+function adminBorrarDiv(i){
+  var c = ADMIN.cats[i]; if(!c) return;
+  sbClient.rpc('admin_borrar_division', {p_nombre: c.nombre}).then(function(r){
+    if(r.error) return adminAviso(r.error.message, 'mal');
+    adminAviso(String(r.data || 'Listo.'), 'ok');
+    return adminCargar();
+  });
+}
+function adminVaciar(i){
+  var c = ADMIN.cats[i]; if(!c) return;
+  var caja = document.getElementById('admin-caja'); if(!caja) return;
+  var ya = document.getElementById('admin-vaciar'); if(ya) ya.remove();
+  var d = document.createElement('div');
+  d.id = 'admin-vaciar';
+  d.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(10,14,22,.6);display:flex;'
+    + 'align-items:center;justify-content:center;padding:20px';
+  d.innerHTML = '<div style="max-width:430px;background:var(--sup-1,#fff);border-radius:14px;padding:20px;'
+    + 'border:1px solid var(--bor-1,#dfe3ea)">'
+    + '<div style="font-size:15px;font-weight:800;color:#B3261E;margin-bottom:8px">Vaciar «'
+    + adminEsc(c.nombre) + '»</div>'
+    + '<div style="font-size:12.5px;line-height:1.6;color:var(--tex-2,#667);margin-bottom:14px">'
+    + 'Se borran todos los datos cargados en esa división: jugadores, GPS, planificación, gimnasio, '
+    + 'captación, planillas. No se puede deshacer y no afecta a las otras divisiones.<br><br>'
+    + 'Para confirmar, escribí el nombre exacto:</div>'
+    + '<input id="admin-vaciar-txt" placeholder="' + adminEsc(c.nombre) + '" style="' + adminEstInput()
+    + 'width:100%;margin-bottom:14px">'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    + '<button onclick="document.getElementById(\'admin-vaciar\').remove()" style="border:1px solid '
+    + 'var(--bor-1,#dfe3ea);background:transparent;color:var(--tex-2,#667);border-radius:9px;padding:8px 14px;'
+    + 'font-size:12.5px;cursor:pointer;font-family:inherit">Cancelar</button>'
+    + '<button onclick="adminVaciarConfirmar(' + i + ')" style="background:#B3261E;color:#fff;border:none;'
+    + 'border-radius:9px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">'
+    + 'Vaciar</button></div></div>';
+  document.body.appendChild(d);
+  try{ document.getElementById('admin-vaciar-txt').focus(); }catch(e){}
+}
+function adminVaciarConfirmar(i){
+  var c = ADMIN.cats[i]; if(!c) return;
+  var txt = ((document.getElementById('admin-vaciar-txt') || {}).value || '').trim();
+  sbClient.rpc('admin_limpiar_division', {p_nombre: c.nombre, p_confirmar: txt}).then(function(r){
+    var d = document.getElementById('admin-vaciar'); if(d) d.remove();
+    if(r.error) return adminAviso(r.error.message, 'mal');
+    // v204b: si sólo se vacía la nube, esta computadora conserva su cajón
+    // local de esa división y lo vuelve a subir la próxima vez que se entra.
+    try{ if(typeof window.ESCALA_PURGAR==='function') window.ESCALA_PURGAR(c.nombre); }catch(e){}
+    adminAviso(String(r.data || 'Listo.') + ' También se vació el cajón local de esta computadora.', 'ok');
+    return adminCargar();
+  });
+}
+
+window.adminCargar = adminCargar; window.adminRender = adminRender;
+window.adminGuardarRol = adminGuardarRol; window.adminToggleActivo = adminToggleActivo;
+window.adminToggleCat = adminToggleCat; window.adminCrearCuenta = adminCrearCuenta;
+window.adminAltaDeSinAsignar = adminAltaDeSinAsignar; window.adminCrearDiv = adminCrearDiv;
+window.adminOrden = adminOrden; window.adminRenombrar = adminRenombrar;
+window.adminBorrarDiv = adminBorrarDiv; window.adminVaciar = adminVaciar;
+window.adminVaciarConfirmar = adminVaciarConfirmar; window.ADMIN = ADMIN;
+</script>
+
+
 <script id="capt-js">
 /* ══ CAPTACIÓN ════════════════════════════════════════════════════════════════
    Registros de visoría + fichas de jugadores observados + tablero.
@@ -20303,7 +21354,7 @@ function captGuardar(){
     var val = pend;
     if(val===undefined){
       try{
-        var raw=localStorage.getItem('gps_dash_v9');
+        var raw=localStorage.getItem(STORAGE_KEY);
         if(raw){ var p=JSON.parse(raw); val=p[nombre]; }
       }catch(e){}
     }
@@ -22488,7 +23539,7 @@ var _gymEditRows = [];  // filas del modal edición
 // ── Cargar datos de gimnasio desde localStorage (se ejecuta aquí, DESPUÉS de que las vars existen) ──
 (function gymLoadData(){
   try{
-    var raw = localStorage.getItem('gps_dash_v9');
+    var raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return;
     var p = JSON.parse(raw);
     if(p.GYM_SESSIONS && p.GYM_SESSIONS.length){ GYM_SESSIONS.length=0; p.GYM_SESSIONS.forEach(function(s){GYM_SESSIONS.push(s);}); }
@@ -23142,7 +24193,7 @@ var GYM_RUTINAS = [];
       window.__rutPendiente.forEach(function(x){ GYM_RUTINAS.push(x); });
       return;
     }
-    var raw=localStorage.getItem('gps_dash_v9');
+    var raw=localStorage.getItem(STORAGE_KEY);
     if(!raw) return;
     var p=JSON.parse(raw);
     if(Array.isArray(p.GYM_RUTINAS)) p.GYM_RUTINAS.forEach(function(x){ GYM_RUTINAS.push(x); });
@@ -26060,7 +27111,7 @@ window.vbtFindZone = vbtFindZone;
 // (Ya declarado en la zona alta del archivo para que gymLoadData no truene.
 // Acá solo está la documentación; NO redeclarar con `var` porque resetearía el objeto.)
 // Cargar GYM_EVALS desde localStorage
-(function(){ try{ var p=JSON.parse(localStorage.getItem('gps_dash_v9')||'{}'); if(p.GYM_EVALS) Object.assign(GYM_EVALS, p.GYM_EVALS); }catch(e){} })();
+(function(){ try{ var p=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'); if(p.GYM_EVALS) Object.assign(GYM_EVALS, p.GYM_EVALS); }catch(e){} })();
 
 // ── Helpers de fecha robustos para evaluaciones ──
 // Convierte CUALQUIER formato razonable a ISO 'YYYY-MM-DD'. Si no entiende, devuelve ''.
@@ -28655,7 +29706,7 @@ var ORIENT_LABELS = {
 // ── EVAL_ALIASES: { "nombre evaluacion": "nombre ejercicio gym" } ─────────────
 // (Ya declarado en la zona alta del archivo. NO redeclarar acá.)
 // Cargar EVAL_ALIASES desde localStorage
-(function(){ try{ var p=JSON.parse(localStorage.getItem('gps_dash_v9')||'{}'); if(p.EVAL_ALIASES) Object.assign(EVAL_ALIASES, p.EVAL_ALIASES); }catch(e){} })();
+(function(){ try{ var p=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'); if(p.EVAL_ALIASES) Object.assign(EVAL_ALIASES, p.EVAL_ALIASES); }catch(e){} })();
 
 // Resolve: dado un nombre de evaluacion, devuelve el nombre canónico de GYM_EXERCISE
 function evalResolveEx(name){
@@ -29577,6 +30628,11 @@ var FIX_PLANILLAS_DEFAULT = {
 // ── Mutable state (gets merged with localStorage) ──
 var FIX_FIXTURE = JSON.parse(JSON.stringify(FIX_FIXTURE_DEFAULT));
 var FIX_PLANILLAS = JSON.parse(JSON.stringify(FIX_PLANILLAS_DEFAULT));
+// ── v204 · El torneo y las 7 planillas de arriba son de la 5ta ───────────
+// Las 35 fechas con sus rivales y las planillas con los nombres (Perera,
+// Moyano, Wirz…) venían escritas en el archivo. Otra división tiene otro
+// torneo y otros jugadores: arranca con el fixture vacío y lo carga.
+if(window.CAT_ACTIVA !== window.CAT_LEGADO){ FIX_FIXTURE = []; FIX_PLANILLAS = {}; }
 // Exponer explícitamente en window — Safari/iPad a veces no propaga `var` top-level
 // a window cuando el script es grande. Sin esto, _sbReadGlobal devuelve undefined
 // y los datos no se suben a Supabase.
@@ -32234,7 +33290,7 @@ window.mcBuildTable = mcBuildTable;
 // WELLNESS_DATA/PSE_DATA/WELLNESS_LAYOUT/PSE_LAYOUT declared early (line ~1513)
 (function(){
   try{
-    var s=localStorage.getItem('gps_dash_v9');
+    var s=localStorage.getItem(STORAGE_KEY);
     if(!s)return;
     var p=JSON.parse(s);
     if(p.WELLNESS_DATA){WELLNESS_DATA.length=0;p.WELLNESS_DATA.forEach(function(r){WELLNESS_DATA.push(r);});}
@@ -36761,7 +37817,9 @@ function infRender(){
   var name=prof.name||key, norm=infNorm(name);
   var c1=infC1(), c2=infC2();
   var clubName=(typeof CLUB_SETTINGS!=='undefined'&&CLUB_SETTINGS.name)||'Club Atlético Tigre';
-  var clubCat=(typeof CLUB_SETTINGS!=='undefined'&&CLUB_SETTINGS.category)||'';
+  // v205: la división del informe es la que está abierta, no la que quedó
+  // guardada en la configuración del club (que es una sola para todas).
+  var clubCat=window.CAT_ACTIVA||(typeof CLUB_SETTINGS!=='undefined'&&CLUB_SETTINGS.category)||'';
   var escudo=(function(){ var el=document.querySelector('#boot-splash img'); return el?el.src:null; })();
   var estados={disponible:['DISPONIBLE','#1D9E75'],lesion:['LESIONADO','#D9534F'],reserva:['RESERVA','#3B4D88'],primera:['PRIMERA','#E8A13C']};
   var est=estados[prof.estado||'disponible']||estados.disponible;
@@ -39766,7 +40824,7 @@ var SUPABASE_URL = 'https://jvopjhvchsnhwchcnzun.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2b3BqaHZjaHNuaHdjaGNuenVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MjUxNTAsImV4cCI6MjA5NTQwMTE1MH0.O9RypkGnP66hSk51FXackEUB3algI-QUrOF4BvI6yUk';
 
 // Categoría activa (Etapa A: hard-coded; Etapa B: la elige el usuario)
-var SB_CATEGORIA = '5ta División';
+var SB_CATEGORIA = CAT_ACTIVA;   // v203: sale del usuario, ya no está fija
 
 // ═══════════════════════════════════════════════════════════════
 // LOADING OVERLAY HELPERS
@@ -39916,8 +40974,12 @@ function sbOnLoginSuccess(){
   console.log('[Supabase] Sesión activa:', sbCurrentUser.email);
   // Inyectar UI de "logueado como" en el header
   sbInjectUserBadge();
-  // Cargar datos de Supabase y mergear con localStorage
-  sbLoadInitialData().then(function(){
+  // v203: antes de bajar un solo dato hay que saber quién entró y sobre qué
+  // categoría trabaja. Si devuelve false, es porque bloqueó el acceso o está
+  // recargando para cambiar de categoría: en los dos casos no se carga nada.
+  accesoCargar().then(function(seguir){
+    if(!seguir) return;
+    sbLoadInitialData().then(function(){
     sbReady = true;
     console.log('[Supabase] Carga inicial completa.');
     sbLoadingSet(95, 'Renderizando vistas…', '');
@@ -40003,7 +41065,8 @@ function sbOnLoginSuccess(){
     // Renderizar el fixture igual, con datos locales
     if(typeof fixtureRender === 'function') try{ fixtureRender(); }catch(e){}
     if(typeof fixSubTab === 'function') try{ fixSubTab('fixture'); }catch(e){}
-  });
+    });
+  });   // v203: cierre de accesoCargar()
 }
 
 function sbInjectUserBadge(){
@@ -40127,7 +41190,7 @@ function sbProfilesUpsert(id, profile){
     updated_at: new Date(data._upd).toISOString()
   };
   return sbClient.from('player_profiles')
-    .upsert(payload, { onConflict: 'id' })
+    .upsert(payload, { onConflict: 'id,categoria' })
     .then(function(res){
       if(res.error) throw res.error;
       return res.data;
@@ -40284,7 +41347,7 @@ function sbScheduleProfileSync(){
         if(data._upd==null) data._upd=Date.now();
         return { id: id, name: p.name || '(sin nombre)', data: data, categoria: SB_CATEGORIA, updated_at: new Date(data._upd).toISOString() };
       });
-      sbClient.from('player_profiles').upsert(payload, { onConflict: 'id' }).then(function(res){
+      sbClient.from('player_profiles').upsert(payload, { onConflict: 'id,categoria' }).then(function(res){
         if(res.error){
           console.error('[Supabase] Sync error:', res.error);
         } else {
@@ -41207,7 +42270,7 @@ function sbScheduleTanda1Sync(){
       var gPayload = GYM_SESSIONS.map(_sbGymSessionToPayload).filter(function(p){return p.id;});
       if(gPayload.length){
         console.log('[Supabase] Sync gym_sessions (' + gPayload.length + ')');
-        sbClient.from('gym_sessions').upsert(gPayload, { onConflict: 'id' }).then(function(res){
+        sbClient.from('gym_sessions').upsert(gPayload, { onConflict: 'id,categoria' }).then(function(res){
           if(res.error) console.error('[Supabase] Sync gym_sessions error:', res.error);
           else console.log('[Supabase] Sync gym_sessions OK');
         });
@@ -41309,7 +42372,7 @@ function sbMigrateTanda1LocalToCloud(){
   if(nPlan) tasks.push(sbClient.from('plan_weeks').upsert(PLAN_WEEKS.map(_sbPlanWeekToPayload), { onConflict: 'name,created,categoria' }));
   if(nGym){
     var gP = GYM_SESSIONS.map(_sbGymSessionToPayload).filter(function(p){return p.id;});
-    if(gP.length) tasks.push(sbClient.from('gym_sessions').upsert(gP, { onConflict: 'id' }));
+    if(gP.length) tasks.push(sbClient.from('gym_sessions').upsert(gP, { onConflict: 'id,categoria' }));
   }
   if(nNut) tasks.push(sbClient.from('nutrition_data').upsert(_sbNutritionToPayloads(NUTRITION_DATA), { onConflict: 'player_key,categoria' }));
   if(nMob) tasks.push(sbClient.from('mobility_data').upsert(_sbMobilityToPayloads(MOBILITY_DATA), { onConflict: 'player_key,categoria' }));
@@ -41486,7 +42549,7 @@ function sbScheduleTanda2aSync(){
           envío = sbDedupe(envío, function(p){ return String(p.id); }, function(p){ return (p.data&&p.data._upd)||0; });
           if(!envío.length){ console.log('[Supabase] gym_exercises sin cambios para subir.'); return; }
           console.log('[Supabase] Sync gym_exercises (' + envío.length + ' de ' + ePayload.length + ')');
-          sbUpsertChunked('gym_exercises', envío, { onConflict: 'id' }, 15).then(function(res){
+          sbUpsertChunked('gym_exercises', envío, { onConflict: 'id,categoria' }, 15).then(function(res){
             if(res.error) console.error('[Supabase] Sync gym_exercises error:', res.error);
             else console.log('[Supabase] Sync gym_exercises OK');
           });
@@ -41660,7 +42723,7 @@ function sbMigrateTanda2aLocalToCloud(){
   var tasks = [];
   if(nEx){
     var eP = GYM_EXERCISES.map(_sbGymExerciseToPayload).filter(function(p){return p.id;});
-    if(eP.length) tasks.push(sbClient.from('gym_exercises').upsert(eP, { onConflict: 'id' }));
+    if(eP.length) tasks.push(sbClient.from('gym_exercises').upsert(eP, { onConflict: 'id,categoria' }));
   }
   if(nCat){
     var cP = GYM_CATS.map(function(c,i){return _sbGymCatToPayload(c,i);}).filter(function(p){return p.name;});
@@ -41779,7 +42842,7 @@ function sbUpsertOneDrill(d){
     if(typeof sbClient==='undefined' || !sbClient || !sbCurrentUser) return;
     var payload = _sbDrillToPayload(d);
     if(!payload) return;
-    sbClient.from('drills_exercises').upsert(payload, { onConflict: 'id' }).then(function(res){
+    sbClient.from('drills_exercises').upsert(payload, { onConflict: 'id,categoria' }).then(function(res){
       if(res.error){
         console.error('[Supabase] NO se pudo guardar el ejercicio id '+payload.id+' →', res.error.message||res.error, res.error);
         console.error('[Supabase] (queda guardado localmente; revisá que la tabla drills_exercises exista, que la columna id sea PRIMARY KEY/UNIQUE, y las políticas RLS de INSERT/UPDATE)');
@@ -42248,7 +43311,7 @@ function sbSyncAllDrillsNow(){
       return !(typeof drillIsDeletedRow==='function' && drillIsDeletedRow(row));
     });
     if(!payload.length) return;
-    sbClient.from('drills_exercises').upsert(payload, { onConflict: 'id' }).then(function(res){
+    sbClient.from('drills_exercises').upsert(payload, { onConflict: 'id,categoria' }).then(function(res){
       if(res.error) console.error('[Supabase] Sync inmediato drills error:', res.error);
       else console.log('[Supabase] Sync inmediato drills OK (' + payload.length + ')');
     });
@@ -42371,7 +43434,7 @@ function sbScheduleTanda2bSync(){
           // 3) Subir el estado actual (nunca incluye ids borrados)
           if(dPayload.length){
             console.log('[Supabase] Sync drills_exercises (' + dPayload.length + ')');
-            sbUpsertChunked('drills_exercises', sbDedupe(dPayload, function(p){return String(p.id);}, function(p){return (p.data&&p.data._upd)||0;}), { onConflict: 'id' }, 15).then(function(r2){
+            sbUpsertChunked('drills_exercises', sbDedupe(dPayload, function(p){return String(p.id);}, function(p){return (p.data&&p.data._upd)||0;}), { onConflict: 'id,categoria' }, 15).then(function(r2){
               if(r2.error) console.error('[Supabase] Sync drills_exercises error:', r2.error);
               else {
                 console.log('[Supabase] Sync drills_exercises OK');
@@ -42397,7 +43460,7 @@ function sbScheduleTanda2bSync(){
       var mPayload = MATCHES.map(_sbMatchToPayload).filter(function(p){return p.id;});
       if(mPayload.length){
         console.log('[Supabase] Sync matches (' + mPayload.length + ')');
-        sbClient.from('matches').upsert(mPayload, { onConflict: 'id' }).then(function(res){
+        sbClient.from('matches').upsert(mPayload, { onConflict: 'id,categoria' }).then(function(res){
           if(res.error) console.error('[Supabase] Sync matches error:', res.error);
           else console.log('[Supabase] Sync matches OK');
         });
@@ -42556,11 +43619,11 @@ function sbMigrateTanda2bLocalToCloud(){
   if(nD){
     var _tombM = _drillTombAllSet(); // v125: no resubir borrados
     var dP = D.map(_sbDrillToPayload).filter(function(p){return p && p.id!=null && !_tombM[Number(p.id)];});
-    if(dP.length) tasks.push(sbClient.from('drills_exercises').upsert(dP, { onConflict: 'id' }));
+    if(dP.length) tasks.push(sbClient.from('drills_exercises').upsert(dP, { onConflict: 'id,categoria' }));
   }
   if(nM){
     var mP = MATCHES.map(_sbMatchToPayload).filter(function(p){return p.id;});
-    if(mP.length) tasks.push(sbClient.from('matches').upsert(mP, { onConflict: 'id' }));
+    if(mP.length) tasks.push(sbClient.from('matches').upsert(mP, { onConflict: 'id,categoria' }));
   }
   Promise.all(tasks).then(function(results){
     var anyErr = results.some(function(r){ return r.error; });
@@ -49838,7 +50901,7 @@ function ckioEnter(){
       (escSrc?'<img src="'+escSrc+'" style="width:58px;height:58px;object-fit:contain;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.35))">':'')+
       '<div style="flex:1;min-width:0">'+
         '<div style="color:#fff;font-size:19px;font-weight:800;font-family:system-ui,sans-serif;line-height:1.15">'+(cs.name||'')+'</div>'+
-        '<div style="color:rgba(255,255,255,0.75);font-size:12.5px;font-family:system-ui,sans-serif">'+(cs.category?cs.category+' · ':'')+fecha+'</div>'+
+        '<div style="color:rgba(255,255,255,0.75);font-size:12.5px;font-family:system-ui,sans-serif">'+((window.CAT_ACTIVA||cs.category)?(window.CAT_ACTIVA||cs.category)+' · ':'')+fecha+'</div>'+
       '</div>'+
       '<button onclick="ckioExitAsk()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:rgba(255,255,255,0.8);border-radius:9px;padding:8px 13px;font-size:10.5px;font-weight:700;cursor:pointer;font-family:system-ui,sans-serif">STAFF · SALIR</button>'+
     '</div>'+
@@ -50036,7 +51099,7 @@ function clubOpenSettings(){
     '<label style="display:block;font-size:11px;font-weight:700;color:#555;padding-top:6px">Nombre del club'+
       '<input id="club-name" value="'+(CLUB_SETTINGS.name||'').replace(/"/g,'&quot;')+'" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px 10px;font-size:13px;border:1px solid #ddd;border-radius:8px"></label>'+
     '<label style="display:block;font-size:11px;font-weight:700;color:#555;padding-top:10px;padding-bottom:8px">Categoría / división (texto)'+
-      '<input id="club-category" value="'+(CLUB_SETTINGS.category||'').replace(/"/g,'&quot;')+'" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px 10px;font-size:13px;border:1px solid #ddd;border-radius:8px"></label>'+
+      '<input id="club-category" readonly title="Sale de la división abierta. Se cambia desde Administración → Divisiones." value="'+String(window.CAT_ACTIVA||CLUB_SETTINGS.category||'').replace(/"/g,'&quot;')+'" style="width:100%;box-sizing:border-box;margin-top:4px;padding:9px 10px;font-size:13px;border:1px solid #ddd;border-radius:8px;opacity:.7"></label>'+
     '<div id="club-pal-hint" style="display:none;font-size:10.5px;color:var(--gy-verde-tex,#127A57);font-weight:700;padding:2px 0 6px"></div>'+
     colorRow('c1','Color oscuro','Membrete del informe, fondos institucionales')+
     colorRow('c2','Color principal','Botones, pestañas activas, acentos')+
@@ -53268,7 +54331,7 @@ function hoyInformeOpen(){
     var hx=48;
     if(esc&&esc.complete&&esc.naturalWidth){ try{ ctx.drawImage(esc,40,36,108,108); hx=176; }catch(e){} }
     txt('INFORME DEL DÍA',hx,86,46,'#fff',true);
-    txt(fmt+(_CB.category?' · '+_CB.category:'')+(_CB.name?' · '+_CB.name:''),hx,132,26,'rgba(255,255,255,0.85)');
+    txt(fmt+((window.CAT_ACTIVA||_CB.category)?' · '+(window.CAT_ACTIVA||_CB.category):'')+(_CB.name?' · '+_CB.name:''),hx,132,26,'rgba(255,255,255,0.85)');
     if(mdLbl){ rr(W-190,54,140,54,12,GOLD); txt(mdLbl,W-120,90,28,NAVY,true,'center'); }
 
     var y=236;
@@ -53728,7 +54791,7 @@ function railMarca(){
     var cs=(typeof CLUB_SETTINGS!=='undefined')?CLUB_SETTINGS:null;
     var n=document.getElementById('rail-club-name'), c=document.getElementById('rail-club-cat');
     if(n&&cs&&cs.name) n.textContent=cs.name;
-    if(c&&cs&&cs.category) c.textContent=cs.category;
+    if(c&&cs&&(window.CAT_ACTIVA||cs.category)) c.textContent=window.CAT_ACTIVA||cs.category;
     var img=document.getElementById('rail-escudo');
     var src=(cs&&cs.escudo)||window._clubDefaultEscudoSrc||
             (document.getElementById('club-escudo-hdr')||{}).src||'';
