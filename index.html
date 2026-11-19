@@ -1029,6 +1029,7 @@ body.rail-fijo .rail-item::after{opacity:0!important}
     <button class="rail-item" data-view="gym"      onclick="setMainView('gym')"><span class="ri-ico">💪</span><span class="ri-txt">Prep. física</span></button>
     <button class="rail-item" data-view="train"    onclick="setMainView('train')"><span class="ri-ico">🎬</span><span class="ri-txt">Videoteca</span></button>
     <button class="rail-item" data-view="capt"     onclick="setMainView('capt')"><span class="ri-ico">🔎</span><span class="ri-txt">Captación</span></button>
+    <button class="rail-item" data-view="club"     onclick="setMainView('club')" style="display:none"><span class="ri-ico">🏛</span><span class="ri-txt">Club</span></button>
   </div>
 
   <div class="rail-grupo">
@@ -5165,11 +5166,11 @@ const MATCH_METRICS=[
 
 // Navegación principal
 let mainView='fixture';
-var _SMV_COLORS={hoy:'#1E2A52',train:'#3B4D88',match:'#3B4D88',players:'#1D9E75',micro:'#3B4D88',plan:'#EF9F27',profiles:'#9C59D1',gym:'#D85A30',fixture:'#1D9E75',carga:'#9C59D1',capt:'#2D6CDF'};
+var _SMV_COLORS={hoy:'#1E2A52',train:'#3B4D88',match:'#3B4D88',players:'#1D9E75',micro:'#3B4D88',plan:'#EF9F27',profiles:'#9C59D1',gym:'#D85A30',fixture:'#1D9E75',carga:'#9C59D1',capt:'#2D6CDF',club:'#0D1B2A'};
 function setMainView(v){
   mainView=v;
   try{ if(typeof railSync==='function') railSync(v); }catch(e){}   // v198
-  ['hoy','train','match','players','micro','plan','profiles','gym','fixture','carga','capt'].forEach(function(vv){
+  ['hoy','train','match','players','micro','plan','profiles','gym','fixture','carga','capt','club'].forEach(function(vv){
     var el=document.getElementById('view-'+vv);
     if(el)el.style.display=v===vv?'':'none';
     var btn=document.getElementById('nav-'+vv);
@@ -5186,6 +5187,7 @@ function setMainView(v){
   }
   if(v==='micro'){mcRebuildWeekSel();if(typeof mcRebuildLoadMetricSelector==='function')mcRebuildLoadMetricSelector();mcRenderWeek();mcRenderLoad();mcRenderBandConfig();mcEstInit();}
   if(v==='capt'){ if(typeof captRefrescar==='function') captRefrescar(); }
+  if(v==='club'){ if(typeof clubRender==='function') clubRender(); }   // v207
   if(v==='profiles'){if(typeof renderProfilesTable==='function')renderProfilesTable();}
   if(v==='players'){if(typeof plRebuild==='function')plRebuild();}
   if(v==='plan'){
@@ -10367,6 +10369,7 @@ function toggleProfileEstado(key){
   var p=PLAYER_PROFILES[key]; if(!p)return;
   var cycle={disponible:'lesion', lesion:'reserva', reserva:'primera', primera:'nodisp', nodisp:'disponible'};
   p.estado=cycle[p.estado||'disponible']||'disponible';
+  p._estUpd=Date.now();   // v207
   if(typeof profSaveOne==='function') profSaveOne(key); else saveData();
   renderProfilesTable();
 }
@@ -20317,6 +20320,7 @@ html[data-tema="oscuro"]{
 <!-- ══════════════════════════════════════════════════════════════
      VISTA CAPTACIÓN
 ══════════════════════════════════════════════════════════════ -->
+<div id="view-club" style="display:none;padding:14px 16px"><div id="club-container"></div></div>
 <div id="view-capt" style="display:none">
 
   <div class="gy-tabs" role="tablist">
@@ -20716,15 +20720,19 @@ var ADMIN = {cuentas:[], alcance:{}, cats:[], roles:[], sinAsignar:[], datos:{},
              tab:'usuarios', msg:'', msgTipo:'', cargando:false};
 
 var ADMIN_NOMBRE_ROL = {
-  coordinacion:'Coordinación', cuerpo_tecnico:'Cuerpo técnico', medico:'Médico',
+  coordinacion:'Coordinación', coordinacion_pf:'Coordinación PF', coordinacion_medica:'Coordinación médica',
+  coordinacion_nutricion:'Coordinación nutrición', cuerpo_tecnico:'Cuerpo técnico', medico:'Médico',
   nutricion:'Nutrición', captacion:'Captación', jugador:'Jugador', lectura:'Sólo lectura'
 };
 function adminRolTxt(r){ return ADMIN_NOMBRE_ROL[r] || r; }
 
 var ADMIN_ROLES = {
   coordinacion:   'Ve y carga todo, en todas las divisiones',
+  coordinacion_pf:        'Mira todo el club (tests, carga, wellness, lesiones) sin modificar',
+  coordinacion_medica:    'Mira lesiones y antropometría de todo el club sin modificar',
+  coordinacion_nutricion: 'Mira antropometría de todo el club sin modificar',
   cuerpo_tecnico: 'Su división: todo, incluso lesiones y antropometría',
-  medico:         'Sólo lesiones (Perfiles → Área médica)',
+  medico:         'Lesiones de sus divisiones (vista Club y Área médica)',
   nutricion:      'Sólo antropometría (Perfiles → Nutricional)',
   captacion:      'Sólo Captación, del club entero (no necesita divisiones)',
   jugador:        'Sólo su propio perfil',
@@ -21284,7 +21292,7 @@ var ROL_VISTAS = {
   train:['videoteca'], capt:['captacion'],
   match:['carga_gps'], players:['perfiles'], micro:['planificacion']
 };
-var ROL_ORDEN_VISTAS = ['hoy','fixture','plan','carga','profiles','gym','train','capt'];
+var ROL_ORDEN_VISTAS = ['hoy','fixture','plan','carga','profiles','gym','train','capt','club'];
 
 // Subpestaña de Perfiles → área
 var ROL_SUBTABS = {
@@ -21319,6 +21327,8 @@ function rolAreaDeClave(k){
 window.rolAreaDeClave = rolAreaDeClave;
 
 function rolPuedeVista(v){
+  // v207: la vista del club es sólo para coordinación y el médico/nutrición
+  if(v === 'club') return !!MI_ROL && typeof clubPuedeVer === 'function' && clubPuedeVer();
   if(!MI_ROL) return true;
   var a = ROL_VISTAS[v]; if(!a) return true;
   return a.some(function(x){ return accesoPuede(x, 'ver'); });
@@ -21329,6 +21339,9 @@ function rolPuedeSubtab(t){
   return accesoPuede(a, 'ver');
 }
 function rolPrimeraVista(){
+  // v207: coordinación por área y el médico arrancan en la vista del club
+  if(['coordinacion_pf','coordinacion_medica','coordinacion_nutricion','medico'].indexOf(MI_ROL) >= 0
+     && rolPuedeVista('club')) return 'club';
   for(var i = 0; i < ROL_ORDEN_VISTAS.length; i++) if(rolPuedeVista(ROL_ORDEN_VISTAS[i])) return ROL_ORDEN_VISTAS[i];
   return 'hoy';
 }
@@ -21416,6 +21429,11 @@ function rolAplicarPantalla(){
     var b = document.getElementById('nav-' + v);
     if(b) b.style.display = rolPuedeVista(v) ? '' : 'none';
   });
+  // v207: las utilidades (identidad del club, exportar/importar, métricas
+  // extra, dataset original) son de quien carga en la división.
+  document.querySelectorAll('#rail .ri-util').forEach(function(b){
+    b.style.display = accesoPuede('planificacion', 'cargar') ? '' : 'none';
+  });
   // Un grupo de la barra que quedó sin ningún botón visible, se oculta entero
   document.querySelectorAll('#rail .rail-grupo').forEach(function(g){
     var items = g.querySelectorAll('.rail-item');
@@ -21427,7 +21445,11 @@ function rolAplicarPantalla(){
     var b = document.getElementById('prof-subtab-' + t);
     if(b) b.style.display = rolPuedeSubtab(t) ? '' : 'none';
   });
-  try{ if(typeof mainView !== 'undefined' && !rolPuedeVista(mainView)) setMainView(rolPrimeraVista()); }catch(e){}
+  try{
+    var ir = rolPrimeraVista();
+    if(typeof mainView !== 'undefined' && (!rolPuedeVista(mainView) || (ir === 'club' && !window.__rolArranco))) setMainView(ir);
+    window.__rolArranco = true;
+  }catch(e){}
 }
 window.rolAplicarPantalla = rolAplicarPantalla;
 
@@ -21481,6 +21503,784 @@ function rolInstalar(){
 }
 window.rolInstalar = rolInstalar;
 </script>
+
+<script id="club-js">
+/* ══ v207 · VISTA DEL CLUB ════════════════════════════════════════════════
+   Una pestaña que mira TODAS las divisiones de la cuenta a la vez, para
+   coordinación y para el médico. No reemplaza a las divisiones: cada cuerpo
+   técnico sigue cargando en la suya. Esto es para registrar (sólo lesiones,
+   sólo quien puede) y para comparar y seguir en el tiempo.
+
+   Áreas de esta versión:
+     🚑 Lesiones   en curso, por división, análisis y por jugador. El médico
+                   registra, da altas y corrige desde acá, de a una lesión:
+                   la base (lesion_guardar / lesion_borrar) toca sólo esa.
+     📈 Tests      saltos, velocidad, fuerza, isométricos y resistencia de
+                   todo el club: comparación entre divisiones, evolución,
+                   ranking y la historia de cada jugador aunque haya cambiado
+                   de división.
+
+   Los datos se bajan al abrir cada área, sólo las columnas que hacen falta
+   (de los perfiles, únicamente lesiones/estado/puesto: nunca las fotos).   */
+
+var CLUB_ROLES = ['coordinacion','coordinacion_pf','coordinacion_medica','coordinacion_nutricion','medico','nutricion'];
+var CLUB_PALETA = ['#2D6CDF','#15805F','#EF9F27','#D9534F','#9C59D1','#0F9BB5','#8A6D3B','#E0559A','#5B6B7F','#3FA34D'];
+var CLUB = {
+  area: null, sel: null, datos: {}, cargando: {}, err: {},
+  les: {vista: 'curso', periodo: 365, buscar: ''},
+  tst: {vista: 'divisiones', test: null, buscar: ''},
+  _lista: []
+};
+window.CLUB = CLUB;
+
+function clubEsc(s){ return accesoEsc(s); }
+function clubCats(){ return (MIS_CATEGORIAS || []).filter(function(c){ return c && c !== 'Club'; }); }
+function clubAreas(){
+  var a = [];
+  if(accesoPuede('lesiones', 'ver'))     a.push({id: 'lesiones', ico: '🚑', txt: 'Lesiones'});
+  if(accesoPuede('evaluaciones', 'ver')) a.push({id: 'tests',    ico: '📈', txt: 'Tests físicos'});
+  return a;
+}
+function clubPuedeVer(){
+  return !!MI_ROL && CLUB_ROLES.indexOf(MI_ROL) >= 0 && clubCats().length > 0 && clubAreas().length > 0;
+}
+window.clubPuedeVer = clubPuedeVer;
+function clubPuedeCargarLesiones(){ return accesoPuede('lesiones', 'cargar'); }
+function clubSel(){
+  var cats = clubCats();
+  if(!CLUB.sel) return cats;
+  var s = cats.filter(function(c){ return CLUB.sel.indexOf(c) >= 0; });
+  return s.length ? s : cats;
+}
+function clubColor(div){
+  var i = clubCats().indexOf(div);
+  return CLUB_PALETA[(i < 0 ? 0 : i) % CLUB_PALETA.length];
+}
+function clubSigla(div){ return accesoSigla(div); }
+// Texto blanco o oscuro, el que más contraste dé sobre ese color (el verde y
+// el naranja con blanco no llegaban al mínimo de lectura).
+function clubTextoSobre(hex){
+  var m = String(hex || '').replace('#', '');
+  if(m.length !== 6) return '#fff';
+  var l = [0, 2, 4].map(function(i){ var v = parseInt(m.substr(i, 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+  var L = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+  var conBlanco = 1.05 / (L + 0.05), conOscuro = (L + 0.05) / 0.0632;   // #14202e
+  return conBlanco >= conOscuro ? '#fff' : '#14202e';
+}
+function clubChipDiv(div){
+  var c = clubColor(div);
+  return '<span title="' + clubEsc(div) + '" style="display:inline-block;min-width:26px;text-align:center;'
+    + 'padding:1px 6px;border-radius:6px;font-size:10.5px;font-weight:800;color:' + clubTextoSobre(c) + ';background:' + c + '">'
+    + clubEsc(clubSigla(div)) + '</span>';
+}
+function clubNorm(s){
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+}
+function clubHoy(){
+  var t = new Date();
+  return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+}
+function clubDias(a, b){
+  if(typeof medDias === 'function') return medDias(a, b);
+  var d1 = new Date(a), d2 = b ? new Date(b) : new Date();
+  return Math.max(0, Math.round((d2 - d1) / 86400000));
+}
+function clubFecha(d){ return d ? String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(2, 4) : '—'; }
+function clubKpi(lbl, val, col, sub){
+  return '<div style="flex:1;min-width:120px;background:var(--sup-1,#fff);border:1px solid var(--bor-1,#e4e6ec);'
+    + 'border-left:4px solid ' + col + ';border-radius:10px;padding:9px 12px">'
+    + '<div style="font-size:10.5px;font-weight:700;color:var(--tex-2,#667);text-transform:uppercase;letter-spacing:.3px">' + lbl + '</div>'
+    + '<div style="font-size:22px;font-weight:800;color:var(--tex-1,#15202e);line-height:1.2">' + val + '</div>'
+    + (sub ? '<div style="font-size:10.5px;color:var(--tex-3,#929DB1)">' + sub + '</div>' : '') + '</div>';
+}
+function clubBoton(txt, fn, on, extra){
+  return '<button onclick="' + fn + '" style="padding:5px 12px;border-radius:8px;font-size:11.5px;font-weight:700;'
+    + 'cursor:pointer;font-family:inherit;border:1px solid ' + (on ? 'var(--club-c2,#3B4D88)' : 'var(--bor-1,#dde2ea)') + ';'
+    + 'background:' + (on ? 'var(--club-c2,#3B4D88)' : 'transparent') + ';color:' + (on ? '#fff' : 'var(--tex-2,#556)') + ';'
+    + (extra || '') + '">' + txt + '</button>';
+}
+function clubTabla(cols, filas, opts){
+  opts = opts || {};
+  return '<div style="overflow-x:auto;border:1px solid var(--bor-1,#e4e6ec);border-radius:10px">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr>' + cols.map(function(c){
+        return '<th style="text-align:' + (c.r ? 'right' : 'left') + ';padding:8px 10px;font-size:10.5px;'
+          + 'text-transform:uppercase;letter-spacing:.3px;color:var(--tex-2,#667);background:var(--sup-2,#f6f7f9);'
+          + 'border-bottom:1px solid var(--bor-1,#e4e6ec);white-space:nowrap">' + c.t + '</th>';
+      }).join('') + '</tr></thead><tbody>'
+    + (filas.length ? filas.map(function(f){
+        return '<tr>' + f.map(function(v, i){
+          return '<td style="padding:7px 10px;border-bottom:1px solid var(--bor-1,#eef0f4);color:var(--tex-1,#15202e);'
+            + 'text-align:' + (cols[i] && cols[i].r ? 'right' : 'left') + ';vertical-align:middle">' + v + '</td>';
+        }).join('') + '</tr>';
+      }).join('')
+      : '<tr><td colspan="' + cols.length + '" style="padding:18px;text-align:center;color:var(--tex-3,#929DB1)">'
+        + (opts.vacio || 'Sin datos.') + '</td></tr>')
+    + '</tbody></table></div>';
+}
+function clubCsv(nombre, cols, filas){
+  var q = function(v){ v = String(v == null ? '' : v); return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  var txt = '﻿' + [cols].concat(filas).map(function(f){ return f.map(q).join(';'); }).join('\n');
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([txt], {type: 'text/csv;charset=utf-8'}));
+  a.download = nombre + '_' + clubHoy() + '.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+// ── Datos ─────────────────────────────────────────────────────────────────
+function clubCargar(area, forzar){
+  if(CLUB.datos[area] && !forzar) return Promise.resolve(CLUB.datos[area]);
+  if(CLUB.cargando[area]) return CLUB.cargando[area];
+  var cats = clubCats();
+  CLUB.err[area] = null;
+  var p;
+  if(area === 'lesiones'){
+    p = sbClient.from('player_profiles')
+      .select('id,name,categoria,injuries:data->injuries,estado:data->>estado,pos:data->>pos')
+      .in('categoria', cats)
+      .then(function(r){ if(r.error) throw r.error; return r.data || []; });
+  } else {
+    p = sbClient.from('app_settings').select('key,categoria,value')
+      .in('key', ['TST_DATA', 'TST_CATALOG', 'RESI_TESTS']).in('categoria', cats)
+      .then(function(r){ if(r.error) throw r.error; return r.data || []; });
+  }
+  CLUB.cargando[area] = p.then(function(d){
+    CLUB.datos[area] = d; CLUB.cargando[area] = null; return d;
+  }).catch(function(e){
+    CLUB.cargando[area] = null;
+    CLUB.err[area] = (e && e.message) ? e.message : String(e);
+    return null;
+  });
+  return CLUB.cargando[area];
+}
+
+// ── Pantalla ──────────────────────────────────────────────────────────────
+function clubRender(){
+  var cont = document.getElementById('club-container');
+  if(!cont) return;
+  if(!clubPuedeVer()){ cont.innerHTML = ''; return; }
+  var areas = clubAreas();
+  if(!CLUB.area || !areas.some(function(a){ return a.id === CLUB.area; })) CLUB.area = areas[0].id;
+  var cats = clubCats(), sel = clubSel();
+
+  var h = '<div style="background:#0D1B2A;border-radius:12px 12px 0 0;padding:13px 16px">'
+    + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    + '<span style="color:#fff;font-size:15px;font-weight:800">🏛 Club</span>'
+    + '<span style="color:#9fb3c8;font-size:11.5px">todas tus divisiones juntas · ' + cats.length + ' división(es)</span>'
+    + '<span style="margin-left:auto;display:flex;gap:6px">'
+    + '<button onclick="clubActualizar()" style="padding:5px 12px;border:1px solid #ffffff33;background:none;color:#cfe0f0;'
+    + 'border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↻ Actualizar</button></span></div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'
+    + areas.map(function(a){
+        var on = a.id === CLUB.area;
+        return '<button onclick="clubSetArea(\'' + a.id + '\')" style="padding:6px 13px;border-radius:8px;font-size:12px;'
+          + 'font-weight:700;cursor:pointer;font-family:inherit;border:1px solid ' + (on ? '#fff' : '#ffffff33') + ';'
+          + 'background:' + (on ? '#fff' : 'none') + ';color:' + (on ? '#0D1B2A' : '#cfe0f0') + '">' + a.ico + ' ' + a.txt + '</button>';
+      }).join('') + '</div>'
+    + (cats.length > 1 ? '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px;align-items:center">'
+      + '<span style="font-size:10.5px;color:#9fb3c8;font-weight:700;margin-right:3px">Divisiones</span>'
+      + cats.map(function(c, i){
+          var on = sel.indexOf(c) >= 0;
+          return '<button onclick="clubToggleDiv(' + i + ')" title="' + clubEsc(c) + '" style="padding:3px 9px;border-radius:7px;'
+            + 'font-size:11px;font-weight:800;cursor:pointer;font-family:inherit;border:1px solid ' + clubColor(c) + ';'
+            + 'background:' + (on ? clubColor(c) : 'transparent') + ';color:' + (on ? clubTextoSobre(clubColor(c)) : '#cfe0f0') + '">'
+            + clubEsc(clubSigla(c)) + '</button>';
+        }).join('')
+      + '<button onclick="clubTodas()" style="padding:3px 9px;border-radius:7px;font-size:11px;cursor:pointer;'
+      + 'font-family:inherit;border:1px solid #ffffff33;background:none;color:#9fb3c8">todas</button></div>' : '')
+    + '</div>';
+
+  h += '<div id="club-cuerpo" style="background:var(--sup-1,#fff);border:1px solid var(--bor-1,#e4e6ec);border-top:none;'
+    + 'border-radius:0 0 12px 12px;padding:15px 16px">';
+  var area = CLUB.area;
+  if(CLUB.err[area]){
+    h += '<div style="padding:22px;text-align:center;color:#B3261E;font-size:12.5px">No se pudo leer: '
+      + clubEsc(CLUB.err[area]) + '</div>';
+  } else if(!CLUB.datos[area]){
+    h += '<div style="padding:30px;text-align:center;color:var(--tex-3,#929DB1);font-size:12.5px">Leyendo todas las divisiones…</div>';
+    clubCargar(area).then(function(){ if(mainView === 'club') clubRender(); });
+  } else {
+    h += area === 'lesiones' ? clubHtmlLesiones() : clubHtmlTests();
+  }
+  h += '</div>';
+  cont.innerHTML = h;
+}
+window.clubRender = clubRender;
+function clubSetArea(a){ CLUB.area = a; clubRender(); }
+function clubToggleDiv(i){
+  var c = clubCats()[i]; if(!c) return;
+  var s = clubSel().slice();
+  var k = s.indexOf(c);
+  if(k >= 0){ if(s.length > 1) s.splice(k, 1); } else s.push(c);
+  CLUB.sel = s; clubRender();
+}
+function clubTodas(){ CLUB.sel = null; clubRender(); }
+function clubActualizar(){ CLUB.datos = {}; CLUB.err = {}; clubRender(); }
+window.clubSetArea = clubSetArea; window.clubToggleDiv = clubToggleDiv;
+window.clubTodas = clubTodas; window.clubActualizar = clubActualizar;
+
+// ══ LESIONES ═════════════════════════════════════════════════════════════
+function clubLesionesPlanas(){
+  var sel = clubSel(), out = [], perfiles = 0, porDiv = {};
+  (CLUB.datos.lesiones || []).forEach(function(p){
+    if(sel.indexOf(p.categoria) < 0) return;
+    perfiles++; porDiv[p.categoria] = (porDiv[p.categoria] || 0) + 1;
+    (Array.isArray(p.injuries) ? p.injuries : []).forEach(function(inj){
+      if(!inj || !inj.dateStart) return;
+      out.push(Object.assign({}, inj, {
+        _perfil: p.id, _div: p.categoria, _player: p.name || p.id, _pos: p.pos || '',
+        _dias: clubDias(inj.dateStart, inj.dateEnd), _activa: !inj.dateEnd
+      }));
+    });
+  });
+  out.sort(function(a, b){ return String(b.dateStart).localeCompare(String(a.dateStart)); });
+  return {lista: out, perfiles: perfiles, porDiv: porDiv};
+}
+function clubSev(d){
+  if(typeof medSeveridad === 'function') return medSeveridad(d);
+  if(d <= 3) return {k: 'min', label: 'Mínima', color: '#1D9E75'};
+  if(d <= 7) return {k: 'leve', label: 'Leve', color: '#8BC34A'};
+  if(d <= 28) return {k: 'mod', label: 'Moderada', color: '#EF9F27'};
+  return {k: 'sev', label: 'Severa', color: '#D9534F'};
+}
+
+function clubHtmlLesiones(){
+  var L = CLUB.les, base = clubLesionesPlanas(), todas = base.lista;
+  var desde = (function(){ var d = new Date(); d.setDate(d.getDate() - L.periodo); return d.toISOString().slice(0, 10); })();
+  var per = todas.filter(function(i){ return String(i.dateStart) >= desde; });
+  var activas = todas.filter(function(i){ return i._activa; });
+  var dias = per.reduce(function(a, i){ return a + (i._dias || 0); }, 0);
+  var carga = clubPuedeCargarLesiones();
+
+  var h = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+    + ['curso', 'divisiones', 'analisis', 'jugador'].map(function(v){
+        var t = {curso: '🚑 En curso', divisiones: '🏟 Por división', analisis: '📊 Análisis', jugador: '🔍 Por jugador'}[v];
+        return clubBoton(t, "clubLesVista('" + v + "')", L.vista === v);
+      }).join('')
+    + '<span style="flex:1"></span>'
+    + (carga ? '<button onclick="clubLesionForm(-1)" style="padding:6px 14px;border:none;background:#1D9E75;color:#fff;'
+        + 'border-radius:8px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">+ Registrar lesión</button>' : '')
+    + '<button onclick="clubLesCsv()" style="padding:6px 12px;border:1px solid var(--bor-1,#dde2ea);background:transparent;'
+    + 'color:var(--tex-2,#556);border-radius:8px;font-size:11.5px;cursor:pointer;font-family:inherit">⬇ CSV</button></div>';
+
+  if(L.vista !== 'curso'){
+    h += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+      + '<span style="font-size:10.5px;color:var(--tex-3,#929DB1);font-weight:700">Período</span>'
+      + [[90, '3 meses'], [180, '6 meses'], [365, '1 año'], [3650, 'Todo']].map(function(p){
+          return clubBoton(p[1], 'clubLesPeriodo(' + p[0] + ')', L.periodo === p[0]);
+        }).join('') + '</div>';
+  }
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
+    + clubKpi('En curso', activas.length, '#D9534F', 'lesiones sin alta')
+    + clubKpi('Lesiones', per.length, '#0D1B2A', L.periodo >= 3650 ? 'historial completo' : 'en el período')
+    + clubKpi('Días perdidos', dias, '#EF9F27', 'en el período')
+    + clubKpi('Por 100 jugadores', base.perfiles ? (per.length / base.perfiles * 100).toFixed(1).replace('.', ',') : '—', '#9C59D1',
+        base.perfiles + ' jugadores con perfil')
+    + '</div>';
+
+  if(L.vista === 'curso') h += clubLesCurso(activas, carga);
+  else if(L.vista === 'divisiones') h += clubLesDivisiones(per, base.porDiv);
+  else if(L.vista === 'analisis') h += clubLesAnalisis(per);
+  else h += clubLesJugador(todas, carga);
+  return h;
+}
+function clubLesVista(v){ CLUB.les.vista = v; clubRender(); }
+function clubLesPeriodo(p){ CLUB.les.periodo = p; clubRender(); }
+window.clubLesVista = clubLesVista; window.clubLesPeriodo = clubLesPeriodo;
+
+function clubLesAcciones(inj, carga){
+  if(!carga) return '';
+  CLUB._lista.push(inj);
+  var i = CLUB._lista.length - 1;
+  var b = function(t, fn, col){ return '<button onclick="' + fn + '(' + i + ')" style="padding:3px 8px;border-radius:6px;'
+    + 'font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1px solid ' + col + ';background:transparent;'
+    + 'color:' + col + ';margin-left:3px">' + t + '</button>'; };
+  return (inj._activa ? b('Alta', 'clubLesAlta', '#1D9E75') : '') + b('Editar', 'clubLesionForm', 'var(--tex-2,#667)')
+    + b('Borrar', 'clubLesBorrar', '#B3261E');
+}
+function clubLesCurso(activas, carga){
+  CLUB._lista = [];
+  var filas = activas.slice().sort(function(a, b){ return b._dias - a._dias; }).map(function(i){
+    var s = clubSev(i._dias);
+    return [clubChipDiv(i._div), '<b>' + clubEsc(i._player) + '</b>' + (i._pos ? ' <span style="color:var(--tex-3,#929DB1)">' + clubEsc(i._pos) + '</span>' : ''),
+      clubEsc((i.type || '') + (i.zone ? ' · ' + i.zone : '')), clubEsc(i.severity || '—'),
+      clubFecha(i.dateStart), '<b style="color:' + s.color + '">' + i._dias + ' d</b>',
+      clubLesAcciones(i, carga)];
+  });
+  return clubTabla([{t: 'Div.'}, {t: 'Jugador'}, {t: 'Lesión'}, {t: 'Gravedad'}, {t: 'Desde'}, {t: 'Días', r: 1}, {t: '', r: 1}],
+    filas, {vacio: '✅ Ninguna lesión en curso en las divisiones elegidas.'});
+}
+function clubLesDivisiones(per, porDiv){
+  var sel = clubSel(), max = 0;
+  var filas = sel.map(function(d){
+    var l = per.filter(function(i){ return i._div === d; });
+    var dias = l.reduce(function(a, i){ return a + (i._dias || 0); }, 0);
+    var jug = porDiv[d] || 0, act = l.filter(function(i){ return i._activa; }).length;
+    var x100 = jug ? l.length / jug * 100 : 0; if(x100 > max) max = x100;
+    return {d: d, n: l.length, dias: dias, jug: jug, act: act, x100: x100, media: l.length ? Math.round(dias / l.length) : 0};
+  });
+  var h = clubTabla([{t: 'División'}, {t: 'Jugadores', r: 1}, {t: 'Lesiones', r: 1}, {t: 'En curso', r: 1},
+      {t: 'Días perdidos', r: 1}, {t: 'Días / lesión', r: 1}, {t: 'Por 100 jugadores'}],
+    filas.map(function(f){
+      var w = max ? Math.max(2, f.x100 / max * 100) : 0;
+      return [clubChipDiv(f.d) + ' ' + clubEsc(f.d), f.jug, f.n, f.act ? '<b style="color:#D9534F">' + f.act + '</b>' : '0',
+        f.dias, f.media || '—',
+        '<div style="display:flex;align-items:center;gap:7px"><div style="flex:1;min-width:90px;height:9px;border-radius:5px;'
+        + 'background:var(--sup-2,#eef0f4)"><div style="width:' + w + '%;height:100%;border-radius:5px;background:' + clubColor(f.d) + '"></div></div>'
+        + '<b>' + f.x100.toFixed(1).replace('.', ',') + '</b></div>'];
+    }));
+  // Zonas × división
+  var zonas = {};
+  per.forEach(function(i){ var z = i.zone || i.type || 'Sin especificar'; zonas[z] = (zonas[z] || 0) + 1; });
+  var top = Object.keys(zonas).sort(function(a, b){ return zonas[b] - zonas[a]; }).slice(0, 10);
+  if(top.length){
+    var mx = 0, cel = {};
+    top.forEach(function(z){ sel.forEach(function(d){
+      var n = per.filter(function(i){ return i._div === d && (i.zone || i.type || 'Sin especificar') === z; }).length;
+      cel[z + '|' + d] = n; if(n > mx) mx = n; }); });
+    h += '<div style="font-size:12px;font-weight:800;color:var(--tex-1,#15202e);margin:18px 0 7px">Zonas más lesionadas, por división</div>'
+      + '<div style="overflow-x:auto"><table style="width:auto;border-collapse:separate;border-spacing:3px;font-size:11.5px">'
+      + '<tr><td></td>' + sel.map(function(d){ return '<td style="text-align:center">' + clubChipDiv(d) + '</td>'; }).join('') + '<td style="text-align:right;color:var(--tex-2,#667);font-size:10.5px;font-weight:700">Total</td></tr>'
+      + top.map(function(z){
+          return '<tr><td style="padding-right:8px;color:var(--tex-1,#15202e);white-space:nowrap">' + clubEsc(z) + '</td>'
+            + sel.map(function(d){
+                var n = cel[z + '|' + d], a = mx ? n / mx : 0;
+                return '<td style="min-width:34px;height:26px;text-align:center;border-radius:5px;font-weight:700;'
+                  + 'background:' + (n ? 'color-mix(in srgb,#B3261E ' + Math.round(14 + a * 72) + '%,transparent)' : 'var(--sup-2,#f3f4f7)') + ';'
+                  + 'color:' + (a > .45 ? '#fff' : 'var(--tex-1,#15202e)') + '">' + (n || '') + '</td>';
+              }).join('')
+            + '<td style="text-align:right;font-weight:800;padding-left:6px">' + zonas[z] + '</td></tr>';
+        }).join('') + '</table></div>';
+  }
+  return h;
+}
+function clubLesAnalisis(per){
+  if(!per.length) return '<div style="padding:22px;text-align:center;color:var(--tex-3,#929DB1);font-size:12px">Sin lesiones en este período.</div>';
+  // Por mes, apilado por división
+  var meses = [], hoy = new Date();
+  var nM = Math.min(24, Math.max(3, Math.ceil(CLUB.les.periodo / 30.4)));
+  for(var k = nM - 1; k >= 0; k--){ var d = new Date(hoy.getFullYear(), hoy.getMonth() - k, 1);
+    meses.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')); }
+  var sel = clubSel(), cuenta = {}, mx = 1;
+  meses.forEach(function(m){ var t = 0; sel.forEach(function(dv){
+    var n = per.filter(function(i){ return i._div === dv && String(i.dateStart).slice(0, 7) === m; }).length;
+    cuenta[m + '|' + dv] = n; t += n; }); if(t > mx) mx = t; });
+  var W = 760, H = 190, pad = 26, bw = (W - pad * 2) / meses.length;
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;height:auto;display:block">';
+  [0, .5, 1].forEach(function(f){ var y = H - 22 - f * (H - 40);
+    svg += '<line x1="' + pad + '" x2="' + (W - 6) + '" y1="' + y + '" y2="' + y + '" stroke="var(--bor-1,#e4e6ec)"/>'
+      + '<text x="' + (pad - 5) + '" y="' + (y + 3) + '" font-size="9" text-anchor="end" fill="var(--tex-3,#929DB1)">' + Math.round(f * mx) + '</text>'; });
+  meses.forEach(function(m, i){
+    var y = H - 22, x = pad + i * bw + 3;
+    sel.forEach(function(dv){ var n = cuenta[m + '|' + dv]; if(!n) return;
+      var hh = n / mx * (H - 40); y -= hh;
+      svg += '<rect x="' + x + '" y="' + y + '" width="' + Math.max(2, bw - 6) + '" height="' + hh + '" fill="' + clubColor(dv) + '"><title>'
+        + clubEsc(dv) + ' · ' + m + ': ' + n + '</title></rect>'; });
+    svg += '<text x="' + (x + (bw - 6) / 2) + '" y="' + (H - 8) + '" font-size="9" text-anchor="middle" fill="var(--tex-3,#929DB1)">'
+      + m.slice(5) + '/' + m.slice(2, 4) + '</text>';
+  });
+  svg += '</svg>';
+  var h = '<div style="font-size:12px;font-weight:800;color:var(--tex-1,#15202e);margin-bottom:6px">Lesiones nuevas por mes</div>' + svg
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 16px">' + sel.map(function(d){
+        return '<span style="font-size:11px;color:var(--tex-2,#667);display:flex;align-items:center;gap:4px">'
+          + '<span style="width:10px;height:10px;border-radius:3px;background:' + clubColor(d) + '"></span>' + clubEsc(d) + '</span>'; }).join('') + '</div>';
+  // Tipo y severidad
+  var barra = function(titulo, mapa, colorDe){
+    var ks = Object.keys(mapa).sort(function(a, b){ return mapa[b] - mapa[a]; }), m = Math.max.apply(null, ks.map(function(k){ return mapa[k]; }).concat([1]));
+    return '<div style="flex:1;min-width:260px"><div style="font-size:12px;font-weight:800;color:var(--tex-1,#15202e);margin-bottom:7px">' + titulo + '</div>'
+      + ks.map(function(k){ return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11.5px">'
+        + '<span style="width:120px;color:var(--tex-1,#15202e);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + clubEsc(k) + '</span>'
+        + '<div style="flex:1;height:10px;border-radius:5px;background:var(--sup-2,#eef0f4)"><div style="height:100%;border-radius:5px;width:'
+        + (mapa[k] / m * 100) + '%;background:' + colorDe(k) + '"></div></div><b style="width:28px;text-align:right">' + mapa[k] + '</b></div>'; }).join('') + '</div>';
+  };
+  var tipos = {}, sev = {};
+  per.forEach(function(i){ var t = i.type || 'Sin tipo'; tipos[t] = (tipos[t] || 0) + 1;
+    var s = clubSev(i._dias).label; sev[s] = (sev[s] || 0) + 1; });
+  var colSev = {}; per.forEach(function(i){ var s = clubSev(i._dias); colSev[s.label] = s.color; });
+  h += '<div style="display:flex;gap:18px;flex-wrap:wrap">'
+    + barra('Por tipo', tipos, function(){ return '#3B4D88'; })
+    + barra('Por gravedad (días de baja)', sev, function(k){ return colSev[k] || '#888'; }) + '</div>';
+  return h;
+}
+function clubLesJugador(todas, carga){
+  CLUB._lista = [];
+  var q = clubNorm(CLUB.les.buscar);
+  var h = '<input id="club-les-buscar" value="' + clubEsc(CLUB.les.buscar) + '" placeholder="Buscar jugador…" '
+    + 'oninput="CLUB.les.buscar=this.value;clearTimeout(window.__clubT);window.__clubT=setTimeout(function(){clubRender();var e=document.getElementById(\'club-les-buscar\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},250)" '
+    + 'style="width:100%;max-width:340px;padding:8px 11px;border:1px solid var(--bor-1,#dde2ea);border-radius:9px;font-size:12.5px;'
+    + 'font-family:inherit;background:var(--sup-1,#fff);color:var(--tex-1,#15202e);margin-bottom:12px">';
+  var lista = q ? todas.filter(function(i){ return clubNorm(i._player).indexOf(q) >= 0; }) : todas.slice(0, 60);
+  h += clubTabla([{t: 'Div.'}, {t: 'Jugador'}, {t: 'Lesión'}, {t: 'Inicio'}, {t: 'Alta'}, {t: 'Días', r: 1}, {t: 'Notas'}, {t: '', r: 1}],
+    lista.map(function(i){
+      var s = clubSev(i._dias);
+      return [clubChipDiv(i._div), '<b>' + clubEsc(i._player) + '</b>', clubEsc((i.type || '') + (i.zone ? ' · ' + i.zone : '')),
+        clubFecha(i.dateStart), i.dateEnd ? clubFecha(i.dateEnd) : '<b style="color:#D9534F">en curso</b>',
+        '<b style="color:' + s.color + '">' + i._dias + '</b>',
+        '<span style="color:var(--tex-2,#667)">' + clubEsc(String(i.notes || '').slice(0, 60)) + '</span>', clubLesAcciones(i, carga)];
+    }), {vacio: q ? 'Ningún jugador con ese nombre tiene lesiones.' : 'Sin lesiones registradas.'});
+  if(!q && todas.length > 60) h += '<div style="font-size:11px;color:var(--tex-3,#929DB1);margin-top:6px">Se muestran las 60 más recientes. Buscá un jugador para ver todo su historial.</div>';
+  return h;
+}
+function clubLesCsv(){
+  var l = clubLesionesPlanas().lista;
+  clubCsv('lesiones_club', ['División', 'Jugador', 'Puesto', 'Tipo', 'Zona', 'Gravedad', 'Inicio', 'Alta', 'Días', 'Notas'],
+    l.map(function(i){ return [i._div, i._player, i._pos, i.type, i.zone, i.severity, i.dateStart, i.dateEnd || '', i._dias, i.notes]; }));
+}
+window.clubLesCsv = clubLesCsv;
+
+// ── Registrar / editar / alta / borrar (sólo quien carga lesiones) ────────
+function clubLesionForm(idx){
+  if(!clubPuedeCargarLesiones()) return;
+  var inj = idx >= 0 ? CLUB._lista[idx] : null;
+  var ya = document.getElementById('club-les-ov'); if(ya) ya.remove();
+  var cats = clubCats();
+  var div0 = inj ? inj._div : (clubSel()[0] || cats[0]);
+  var tipos = (typeof INJ_ZONES === 'object' && INJ_ZONES) ? Object.keys(INJ_ZONES) : ['Muscular', 'Articular', 'Ósea', 'Tendinosa', 'Otro'];
+  var est = 'width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--bor-1,#dde2ea);border-radius:8px;'
+    + 'font-size:12.5px;font-family:inherit;background:var(--sup-1,#fff);color:var(--tex-1,#15202e)';
+  var lab = function(t, x){ return '<label style="display:block;margin-bottom:10px"><span style="display:block;font-size:11px;'
+    + 'color:var(--tex-2,#667);margin-bottom:4px;font-weight:700">' + t + '</span>' + x + '</label>'; };
+  var ov = document.createElement('div');
+  ov.id = 'club-les-ov';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9450;background:rgba(10,14,22,.55);display:flex;align-items:center;justify-content:center;padding:18px';
+  ov.onclick = function(e){ if(e.target === ov) ov.remove(); };
+  ov.innerHTML = '<div style="width:100%;max-width:460px;max-height:92vh;overflow:auto;background:var(--sup-1,#fff);border-radius:14px;'
+    + 'border:1px solid var(--bor-1,#e4e6ec);padding:18px 18px 14px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    + '<div style="font-size:15px;font-weight:800;color:var(--tex-1,#15202e);margin-bottom:12px">' + (inj ? 'Editar lesión' : 'Registrar lesión') + '</div>'
+    + (inj ? '<div style="margin-bottom:12px;font-size:12.5px">' + clubChipDiv(inj._div) + ' <b>' + clubEsc(inj._player) + '</b></div>'
+       : lab('División', '<select id="cl-div" onchange="clubLesFormJug()" style="' + est + '">' + cats.map(function(c){
+           return '<option' + (c === div0 ? ' selected' : '') + '>' + clubEsc(c) + '</option>'; }).join('') + '</select>')
+         + lab('Jugador', '<select id="cl-jug" style="' + est + '"></select>'))
+    + '<div style="display:flex;gap:10px">' + lab('Inicio', '<input id="cl-ini" type="date" value="' + clubEsc(inj ? inj.dateStart : clubHoy()) + '" style="' + est + '">')
+    + lab('Alta (si ya volvió)', '<input id="cl-fin" type="date" value="' + clubEsc(inj && inj.dateEnd ? inj.dateEnd : '') + '" style="' + est + '">') + '</div>'
+    + '<div style="display:flex;gap:10px">' + lab('Tipo', '<select id="cl-tipo" onchange="clubLesFormZonas()" style="' + est + '"><option value="">— elegir —</option>'
+      + tipos.map(function(t){ return '<option' + (inj && inj.type === t ? ' selected' : '') + '>' + clubEsc(t) + '</option>'; }).join('') + '</select>')
+    + lab('Zona', '<select id="cl-zona" style="' + est + '"></select>') + '</div>'
+    + lab('Gravedad', '<select id="cl-sev" style="' + est + '">' + ['', 'Leve', 'Moderada', 'Grave'].map(function(s){
+        return '<option value="' + s + '"' + (inj && inj.severity === s ? ' selected' : '') + '>' + (s || '— sin especificar —') + '</option>'; }).join('') + '</select>')
+    + lab('Notas', '<textarea id="cl-notas" rows="3" style="' + est + ';resize:vertical">' + clubEsc(inj ? inj.notes || '' : '') + '</textarea>')
+    + '<div id="cl-msg" style="font-size:12px;min-height:16px;margin-bottom:8px"></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    + '<button onclick="document.getElementById(\'club-les-ov\').remove()" style="padding:8px 14px;border:1px solid var(--bor-1,#dde2ea);'
+    + 'background:transparent;color:var(--tex-2,#556);border-radius:9px;font-size:12.5px;cursor:pointer;font-family:inherit">Cancelar</button>'
+    + '<button id="cl-guardar" onclick="clubLesFormGuardar(' + idx + ')" style="padding:8px 16px;border:none;background:#1D9E75;color:#fff;'
+    + 'border-radius:9px;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit">Guardar</button></div></div>';
+  document.body.appendChild(ov);
+  if(!inj) clubLesFormJug();
+  clubLesFormZonas(inj ? inj.zone : null);
+}
+function clubLesFormJug(){
+  var div = (document.getElementById('cl-div') || {}).value, sel = document.getElementById('cl-jug');
+  if(!sel) return;
+  var js = (CLUB.datos.lesiones || []).filter(function(p){ return p.categoria === div; })
+    .sort(function(a, b){ return String(a.name || '').localeCompare(String(b.name || ''), 'es'); });
+  sel.innerHTML = js.length ? js.map(function(p){ return '<option value="' + clubEsc(p.id) + '">' + clubEsc(p.name || p.id) + '</option>'; }).join('')
+    : '<option value="">(esa división no tiene jugadores con perfil)</option>';
+}
+function clubLesFormZonas(actual){
+  var t = (document.getElementById('cl-tipo') || {}).value, z = document.getElementById('cl-zona');
+  if(!z) return;
+  var zs = (typeof INJ_ZONES === 'object' && INJ_ZONES && INJ_ZONES[t]) ? INJ_ZONES[t].slice() : [];
+  if(actual && zs.indexOf(actual) < 0) zs.unshift(actual);
+  z.innerHTML = '<option value="">' + (zs.length ? '— elegir —' : '—') + '</option>'
+    + zs.map(function(x){ return '<option' + (x === actual ? ' selected' : '') + '>' + clubEsc(x) + '</option>'; }).join('');
+}
+function clubLesFormGuardar(idx){
+  var inj = idx >= 0 ? CLUB._lista[idx] : null;
+  var msg = document.getElementById('cl-msg');
+  var div = inj ? inj._div : (document.getElementById('cl-div') || {}).value;
+  var perfil = inj ? inj._perfil : (document.getElementById('cl-jug') || {}).value;
+  var lesion = {
+    id: inj ? inj.id : Date.now(),
+    dateStart: document.getElementById('cl-ini').value,
+    dateEnd: document.getElementById('cl-fin').value || null,
+    type: document.getElementById('cl-tipo').value,
+    zone: document.getElementById('cl-zona').value,
+    severity: document.getElementById('cl-sev').value,
+    notes: document.getElementById('cl-notas').value.trim()
+  };
+  var mal = function(t){ msg.style.color = '#B3261E'; msg.textContent = t; };
+  if(!perfil) return mal('Elegí el jugador.');
+  if(!lesion.dateStart) return mal('La fecha de inicio es obligatoria.');
+  if(!lesion.type) return mal('Elegí el tipo de lesión.');
+  if(lesion.dateEnd && lesion.dateEnd < lesion.dateStart) return mal('El alta no puede ser anterior al inicio.');
+  var b = document.getElementById('cl-guardar'); if(b){ b.disabled = true; b.textContent = 'Guardando…'; }
+  clubLesRpc('lesion_guardar', {p_perfil: perfil, p_categoria: div, p_lesion: lesion}).then(function(ok){
+    if(ok){ var o = document.getElementById('club-les-ov'); if(o) o.remove(); }
+    else if(b){ b.disabled = false; b.textContent = 'Guardar'; }
+  });
+}
+function clubLesAlta(idx){
+  var inj = CLUB._lista[idx]; if(!inj) return;
+  var d = prompt('Fecha de alta de ' + inj._player + ' (AAAA-MM-DD):', clubHoy());
+  if(!d) return;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return alert('La fecha tiene que ser AAAA-MM-DD.');
+  var l = {id: inj.id, dateStart: inj.dateStart, dateEnd: d, type: inj.type, zone: inj.zone, severity: inj.severity, notes: inj.notes};
+  clubLesRpc('lesion_guardar', {p_perfil: inj._perfil, p_categoria: inj._div, p_lesion: l});
+}
+function clubLesBorrar(idx){
+  var inj = CLUB._lista[idx]; if(!inj) return;
+  if(!confirm('¿Borrar la lesión de ' + inj._player + ' del ' + clubFecha(inj.dateStart) + '? No se puede deshacer.')) return;
+  clubLesRpc('lesion_borrar', {p_perfil: inj._perfil, p_categoria: inj._div, p_lesion_id: inj.id});
+}
+// Llama a la base y, si sale bien, actualiza lo que se ve y la copia local
+// de la división abierta (si es la misma), sin volver a subir nada.
+function clubLesRpc(fn, args){
+  return sbClient.rpc(fn, args).then(function(r){
+    if(r.error) throw r.error;
+    var res = r.data || {};
+    (CLUB.datos.lesiones || []).forEach(function(p){
+      if(p.id === args.p_perfil && p.categoria === args.p_categoria){ p.injuries = res.injuries || []; p.estado = res.estado; }
+    });
+    try{
+      if(args.p_categoria === CAT_ACTIVA && typeof PLAYER_PROFILES !== 'undefined' && PLAYER_PROFILES[args.p_perfil]){
+        var lp = PLAYER_PROFILES[args.p_perfil];
+        lp.injuries = res.injuries || []; if(res.estado != null) lp.estado = res.estado;
+        ['_injUpd', '_estUpd', '_upd'].forEach(function(k){ if(res[k] != null) lp[k] = res[k]; });
+        if(typeof saveData === 'function') saveData();
+      }
+    }catch(e){}
+    clubRender();
+    return true;
+  }).catch(function(e){
+    var t = (e && e.message) ? e.message : String(e);
+    var m = document.getElementById('cl-msg');
+    if(m){ m.style.color = '#B3261E'; m.textContent = 'No se guardó: ' + t; }
+    else alert('No se guardó: ' + t);
+    return false;
+  });
+}
+window.clubLesionForm = clubLesionForm; window.clubLesFormJug = clubLesFormJug;
+window.clubLesFormZonas = clubLesFormZonas; window.clubLesFormGuardar = clubLesFormGuardar;
+window.clubLesAlta = clubLesAlta; window.clubLesBorrar = clubLesBorrar;
+
+// ══ TESTS ════════════════════════════════════════════════════════════════
+var CLUB_GRUPOS = {salto: 'Saltos', velocidad: 'Velocidad', fuerza: 'Fuerza (1RM)', fuerza_iso: 'Fuerza isométrica',
+  resistencia: 'Resistencia', otro: 'Otros'};
+function clubTestsDatos(){
+  var cat = {}, recs = [], sel = clubSel();
+  var seed = (typeof TST_CATALOG_SEED !== 'undefined' && Array.isArray(TST_CATALOG_SEED)) ? TST_CATALOG_SEED : [];
+  seed.forEach(function(t){ cat[t.id] = {id: t.id, name: t.name, unit: t.unit, better: t.better, group: t.group || 'otro', lat: t.lat}; });
+  var filas = CLUB.datos.tests || [];
+  filas.forEach(function(r){ if(r.key === 'TST_CATALOG' && Array.isArray(r.value)) r.value.forEach(function(t){
+    if(t && t.id && !cat[t.id]) cat[t.id] = {id: t.id, name: t.name, unit: t.unit, better: t.better || 'up', group: t.group || 'otro', lat: t.lat}; }); });
+  var RT = (typeof RESI_TYPES === 'object' && RESI_TYPES) ? RESI_TYPES : {};
+  filas.forEach(function(r){
+    if(sel.indexOf(r.categoria) < 0) return;
+    if(r.key === 'TST_DATA' && Array.isArray(r.value)) r.value.forEach(function(x){
+      if(!x || !x.testId || !x.name || !x.date) return;
+      var v = (typeof x.val === 'number') ? x.val : null;
+      var I = (typeof x.valI === 'number') ? x.valI : null, D = (typeof x.valD === 'number') ? x.valD : null;
+      if(v == null && (I != null || D != null)) v = (I != null && D != null) ? (I + D) / 2 : (I != null ? I : D);
+      if(v == null || isNaN(v)) return;
+      recs.push({div: r.categoria, player: x.name, n: clubNorm(x.name), date: x.date, testId: x.testId, v: v, I: I, D: D});
+    });
+    if(r.key === 'RESI_TESTS' && Array.isArray(r.value)) r.value.forEach(function(t){
+      if(!t || !t.date || !Array.isArray(t.players)) return;
+      var tid = 'resi:' + (t.type || 'otro'), def = RT[t.type] || {};
+      if(!cat[tid]) cat[tid] = {id: tid, name: def.short || def.name || t.name || 'Resistencia', unit: def.metricUnit || '',
+        better: 'up', group: 'resistencia'};
+      t.players.forEach(function(p){
+        var v = parseFloat(String(p && p.value != null ? p.value : '').replace(',', '.'));
+        if(!p || !p.name || isNaN(v)) return;
+        recs.push({div: r.categoria, player: p.name, n: clubNorm(p.name), date: t.date, testId: tid, v: v});
+      });
+    });
+  });
+  return {cat: cat, recs: recs};
+}
+// El último valor de cada jugador (por división) en un test
+function clubUltimos(recs){
+  var by = {};
+  recs.forEach(function(r){ var k = r.div + '|' + r.n; if(!by[k] || r.date > by[k].date) by[k] = r; });
+  return Object.keys(by).map(function(k){ return by[k]; });
+}
+function clubStats(vs){
+  if(!vs.length) return null;
+  var m = vs.reduce(function(a, b){ return a + b; }, 0) / vs.length;
+  var de = vs.length > 1 ? Math.sqrt(vs.reduce(function(a, b){ return a + (b - m) * (b - m); }, 0) / (vs.length - 1)) : 0;
+  return {n: vs.length, media: m, de: de, min: Math.min.apply(null, vs), max: Math.max.apply(null, vs)};
+}
+function clubNum(v, t){
+  if(v == null || isNaN(v)) return '—';
+  var dec = (t && (t.unit === 's')) ? 2 : (Math.abs(v) < 20 ? 2 : (Math.abs(v) < 200 ? 1 : 0));
+  return Number(v).toFixed(dec).replace('.', ',');
+}
+
+function clubHtmlTests(){
+  var T = CLUB.tst, D = clubTestsDatos();
+  var conDatos = {};
+  D.recs.forEach(function(r){ conDatos[r.testId] = (conDatos[r.testId] || 0) + 1; });
+  var ids = Object.keys(conDatos).filter(function(id){ return D.cat[id]; });
+  if(!ids.length) return '<div style="padding:28px;text-align:center;color:var(--tex-3,#929DB1);font-size:12.5px">'
+    + 'Todavía no hay tests cargados en las divisiones elegidas.</div>';
+  if(!T.test || ids.indexOf(T.test) < 0){
+    ids.sort(function(a, b){ return conDatos[b] - conDatos[a]; });
+    T.test = ids[0];
+  }
+  var t = D.cat[T.test];
+  var grupos = {};
+  ids.forEach(function(id){ var g = D.cat[id].group || 'otro'; (grupos[g] = grupos[g] || []).push(id); });
+  var h = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+    + '<select onchange="CLUB.tst.test=this.value;clubRender()" style="padding:7px 10px;border:1px solid var(--bor-1,#dde2ea);'
+    + 'border-radius:9px;font-size:12.5px;font-weight:700;font-family:inherit;background:var(--sup-1,#fff);color:var(--tex-1,#15202e)">'
+    + Object.keys(grupos).map(function(g){
+        return '<optgroup label="' + clubEsc(CLUB_GRUPOS[g] || g) + '">' + grupos[g].map(function(id){
+          return '<option value="' + clubEsc(id) + '"' + (id === T.test ? ' selected' : '') + '>' + clubEsc(D.cat[id].name)
+            + (D.cat[id].unit ? ' (' + clubEsc(D.cat[id].unit) + ')' : '') + ' · ' + conDatos[id] + '</option>'; }).join('') + '</optgroup>';
+      }).join('') + '</select>'
+    + ['divisiones', 'evolucion', 'ranking', 'jugador'].map(function(v){
+        var tx = {divisiones: '🏟 Por división', evolucion: '📈 Evolución', ranking: '🏆 Ranking', jugador: '🔍 Por jugador'}[v];
+        return clubBoton(tx, "clubTstVista('" + v + "')", T.vista === v); }).join('')
+    + '<span style="flex:1"></span><button onclick="clubTstCsv()" style="padding:6px 12px;border:1px solid var(--bor-1,#dde2ea);'
+    + 'background:transparent;color:var(--tex-2,#556);border-radius:8px;font-size:11.5px;cursor:pointer;font-family:inherit">⬇ CSV</button></div>'
+    + '<div style="font-size:11px;color:var(--tex-3,#929DB1);margin-bottom:12px">' + (t.better === 'down' ? '↓ menor es mejor' : '↑ mayor es mejor')
+    + (t.lat === 'uni' ? ' · unilateral: se usa el promedio de izquierda y derecha' : '') + '</div>';
+  var recs = D.recs.filter(function(r){ return r.testId === T.test; });
+  if(T.vista === 'divisiones') h += clubTstDivisiones(recs, t);
+  else if(T.vista === 'evolucion') h += clubTstEvolucion(recs, t);
+  else if(T.vista === 'ranking') h += clubTstRanking(recs, t);
+  else h += clubTstJugador(D, t);
+  return h;
+}
+function clubTstVista(v){ CLUB.tst.vista = v; clubRender(); }
+window.clubTstVista = clubTstVista;
+
+function clubTstDivisiones(recs, t){
+  var sel = clubSel(), ult = clubUltimos(recs);
+  var porDiv = sel.map(function(d){
+    var u = ult.filter(function(r){ return r.div === d; });
+    var st = clubStats(u.map(function(r){ return r.v; }));
+    var fechas = recs.filter(function(r){ return r.div === d; }).map(function(r){ return r.date; }).sort();
+    return {d: d, u: u, st: st, ultima: fechas[fechas.length - 1]};
+  });
+  var todos = ult.map(function(r){ return r.v; });
+  var h = clubTabla([{t: 'División'}, {t: 'Jugadores', r: 1}, {t: 'Media', r: 1}, {t: 'DE', r: 1}, {t: 'Mejor', r: 1}, {t: 'Más bajo', r: 1}, {t: 'Última evaluación'}],
+    porDiv.map(function(x){
+      if(!x.st) return [clubChipDiv(x.d) + ' ' + clubEsc(x.d), '0', '—', '—', '—', '—', '<span style="color:var(--tex-3,#929DB1)">sin datos</span>'];
+      var mejor = t.better === 'down' ? x.st.min : x.st.max, peor = t.better === 'down' ? x.st.max : x.st.min;
+      return [clubChipDiv(x.d) + ' ' + clubEsc(x.d), x.st.n, '<b>' + clubNum(x.st.media, t) + '</b>', clubNum(x.st.de, t),
+        clubNum(mejor, t), clubNum(peor, t), clubFecha(x.ultima)];
+    }));
+  if(!todos.length) return h;
+  // Puntos por división: cada jugador, más la media
+  var mn = Math.min.apply(null, todos), mx = Math.max.apply(null, todos);
+  if(mn === mx){ mn -= 1; mx += 1; }
+  var rg = mx - mn; mn -= rg * .08; mx += rg * .08;
+  var W = 760, H = 250, pl = 46, pb = 26, cw = (W - pl - 10) / Math.max(1, sel.length);
+  var Y = function(v){ return 10 + (1 - (v - mn) / (mx - mn)) * (H - pb - 14); };
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;height:auto;display:block;margin-top:16px">';
+  for(var g = 0; g <= 4; g++){ var v = mn + (mx - mn) * g / 4, y = Y(v);
+    svg += '<line x1="' + pl + '" x2="' + (W - 6) + '" y1="' + y + '" y2="' + y + '" stroke="var(--bor-1,#e4e6ec)"/>'
+      + '<text x="' + (pl - 6) + '" y="' + (y + 3) + '" font-size="9" text-anchor="end" fill="var(--tex-3,#929DB1)">' + clubNum(v, t) + '</text>'; }
+  porDiv.forEach(function(x, i){
+    var cx = pl + i * cw + cw / 2, col = clubColor(x.d);
+    x.u.forEach(function(r, k){
+      var jit = ((k * 37) % 21 - 10) / 10 * Math.min(cw * .28, 22);
+      svg += '<circle cx="' + (cx + jit) + '" cy="' + Y(r.v) + '" r="3.6" fill="' + col + '" fill-opacity=".55"><title>'
+        + clubEsc(r.player) + ': ' + clubNum(r.v, t) + ' ' + clubEsc(t.unit || '') + ' (' + clubFecha(r.date) + ')</title></circle>';
+    });
+    if(x.st){ var ym = Y(x.st.media);
+      svg += '<line x1="' + (cx - cw * .32) + '" x2="' + (cx + cw * .32) + '" y1="' + ym + '" y2="' + ym + '" stroke="' + col + '" stroke-width="3" stroke-linecap="round"/>'; }
+    svg += '<text x="' + cx + '" y="' + (H - 8) + '" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--tex-2,#667)">' + clubEsc(clubSigla(x.d)) + '</text>';
+  });
+  svg += '</svg>';
+  return h + '<div style="font-size:12px;font-weight:800;color:var(--tex-1,#15202e);margin-top:16px">Cada punto es un jugador (su última evaluación); la línea es la media de la división</div>' + svg;
+}
+function clubTstEvolucion(recs, t){
+  var sel = clubSel(), meses = {};
+  recs.forEach(function(r){ meses[String(r.date).slice(0, 7)] = 1; });
+  var ms = Object.keys(meses).sort();
+  if(!ms.length) return '';
+  var series = sel.map(function(d){
+    return {d: d, pts: ms.map(function(m){
+      var st = clubStats(recs.filter(function(r){ return r.div === d && String(r.date).slice(0, 7) === m; }).map(function(r){ return r.v; }));
+      return st ? {m: m, v: st.media, n: st.n} : null; })};
+  });
+  var vals = [];
+  series.forEach(function(s){ s.pts.forEach(function(p){ if(p) vals.push(p.v); }); });
+  if(!vals.length) return '<div style="padding:20px;text-align:center;color:var(--tex-3,#929DB1)">Sin datos.</div>';
+  var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+  if(mn === mx){ mn -= 1; mx += 1; }
+  var rg = mx - mn; mn -= rg * .1; mx += rg * .1;
+  var W = 760, H = 250, pl = 46, pb = 26;
+  var X = function(i){ return pl + (ms.length === 1 ? (W - pl) / 2 : i * (W - pl - 16) / (ms.length - 1)); };
+  var Y = function(v){ return 10 + (1 - (v - mn) / (mx - mn)) * (H - pb - 14); };
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;height:auto;display:block">';
+  for(var g = 0; g <= 4; g++){ var v = mn + (mx - mn) * g / 4, y = Y(v);
+    svg += '<line x1="' + pl + '" x2="' + (W - 6) + '" y1="' + y + '" y2="' + y + '" stroke="var(--bor-1,#e4e6ec)"/>'
+      + '<text x="' + (pl - 6) + '" y="' + (y + 3) + '" font-size="9" text-anchor="end" fill="var(--tex-3,#929DB1)">' + clubNum(v, t) + '</text>'; }
+  var paso = Math.ceil(ms.length / 12);
+  ms.forEach(function(m, i){ if(i % paso) return;
+    svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" font-size="9" text-anchor="middle" fill="var(--tex-3,#929DB1)">' + m.slice(5) + '/' + m.slice(2, 4) + '</text>'; });
+  series.forEach(function(s){
+    var col = clubColor(s.d), d = '', prev = false;
+    s.pts.forEach(function(p, i){ if(!p){ prev = false; return; } d += (prev ? 'L' : 'M') + X(i) + ' ' + Y(p.v) + ' '; prev = true; });
+    if(d) svg += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="2.2"/>';
+    s.pts.forEach(function(p, i){ if(!p) return;
+      svg += '<circle cx="' + X(i) + '" cy="' + Y(p.v) + '" r="3.8" fill="' + col + '"><title>' + clubEsc(s.d) + ' · ' + p.m + ': '
+        + clubNum(p.v, t) + ' (' + p.n + ' evaluaciones)</title></circle>'; });
+  });
+  svg += '</svg>';
+  return '<div style="font-size:12px;font-weight:800;color:var(--tex-1,#15202e);margin-bottom:6px">Media de cada división, mes a mes</div>' + svg
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">' + series.filter(function(s){ return s.pts.some(Boolean); }).map(function(s){
+        return '<span style="font-size:11px;color:var(--tex-2,#667);display:flex;align-items:center;gap:4px"><span style="width:14px;height:3px;border-radius:2px;background:'
+          + clubColor(s.d) + '"></span>' + clubEsc(s.d) + '</span>'; }).join('') + '</div>';
+}
+function clubTstRanking(recs, t){
+  var ult = clubUltimos(recs).sort(function(a, b){ return t.better === 'down' ? a.v - b.v : b.v - a.v; });
+  var n = ult.length;
+  return clubTabla([{t: '#', r: 1}, {t: 'Div.'}, {t: 'Jugador'}, {t: 'Valor', r: 1}, {t: 'Percentil del club', r: 1}, {t: 'Fecha'}],
+    ult.slice(0, 40).map(function(r, i){
+      var pct = n > 1 ? Math.round((n - 1 - i) / (n - 1) * 100) : 100;
+      return [i + 1, clubChipDiv(r.div), '<b>' + clubEsc(r.player) + '</b>', '<b>' + clubNum(r.v, t) + '</b> ' + clubEsc(t.unit || ''),
+        'P' + pct, clubFecha(r.date)];
+    })) + (n > 40 ? '<div style="font-size:11px;color:var(--tex-3,#929DB1);margin-top:6px">Los 40 mejores de ' + n + ' jugadores evaluados. El CSV trae todos.</div>' : '');
+}
+function clubTstJugador(D, t){
+  var q = clubNorm(CLUB.tst.buscar);
+  var h = '<input id="club-tst-buscar" value="' + clubEsc(CLUB.tst.buscar) + '" placeholder="Buscar jugador (ve todos sus tests, en todas las divisiones)…" '
+    + 'oninput="CLUB.tst.buscar=this.value;clearTimeout(window.__clubT);window.__clubT=setTimeout(function(){clubRender();var e=document.getElementById(\'club-tst-buscar\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}},250)" '
+    + 'style="width:100%;max-width:420px;padding:8px 11px;border:1px solid var(--bor-1,#dde2ea);border-radius:9px;font-size:12.5px;'
+    + 'font-family:inherit;background:var(--sup-1,#fff);color:var(--tex-1,#15202e);margin-bottom:12px">';
+  if(!q) return h + '<div style="font-size:12px;color:var(--tex-3,#929DB1)">Escribí parte del nombre. Sirve también para seguir a un jugador que pasó de una división a otra.</div>';
+  var mios = D.recs.filter(function(r){ return r.n.indexOf(q) >= 0; });
+  var nombres = {};
+  mios.forEach(function(r){ nombres[r.n] = r.player; });
+  var ks = Object.keys(nombres);
+  if(!ks.length) return h + '<div style="font-size:12px;color:var(--tex-3,#929DB1)">Ningún jugador con ese nombre tiene tests.</div>';
+  ks.slice(0, 6).forEach(function(k){
+    var rs = mios.filter(function(r){ return r.n === k; });
+    var porTest = {};
+    rs.forEach(function(r){ (porTest[r.testId] = porTest[r.testId] || []).push(r); });
+    h += '<div style="font-size:13px;font-weight:800;color:var(--tex-1,#15202e);margin:6px 0 6px">' + clubEsc(nombres[k]) + '</div>'
+      + clubTabla([{t: 'Test'}, {t: 'Evaluaciones (más vieja → más nueva)'}, {t: 'Cambio', r: 1}],
+        Object.keys(porTest).map(function(id){
+          var tt = D.cat[id] || {name: id}, l = porTest[id].sort(function(a, b){ return String(a.date).localeCompare(String(b.date)); });
+          var dif = l.length > 1 ? l[l.length - 1].v - l[0].v : null, buena = dif == null ? null : (tt.better === 'down' ? dif < 0 : dif > 0);
+          return ['<b>' + clubEsc(tt.name) + '</b>', l.map(function(r){
+              return '<span style="display:inline-flex;align-items:center;gap:3px;margin:1px 8px 1px 0;white-space:nowrap">' + clubChipDiv(r.div)
+                + ' <b>' + clubNum(r.v, tt) + '</b><span style="color:var(--tex-3,#929DB1);font-size:10.5px">' + clubFecha(r.date) + '</span></span>'; }).join(''),
+            dif == null ? '—' : '<b style="color:' + (buena ? '#1D9E75' : '#D9534F') + '">' + (dif > 0 ? '+' : '') + clubNum(dif, tt) + '</b>'];
+        }));
+  });
+  if(ks.length > 6) h += '<div style="font-size:11px;color:var(--tex-3,#929DB1);margin-top:6px">Hay ' + ks.length + ' jugadores que coinciden; afiná la búsqueda.</div>';
+  return h;
+}
+function clubTstCsv(){
+  var D = clubTestsDatos();
+  clubCsv('tests_club', ['División', 'Jugador', 'Test', 'Unidad', 'Fecha', 'Valor', 'Izquierda', 'Derecha'],
+    D.recs.sort(function(a, b){ return String(a.testId + a.date).localeCompare(String(b.testId + b.date)); }).map(function(r){
+      var t = D.cat[r.testId] || {};
+      return [r.div, r.player, t.name || r.testId, t.unit || '', r.date, String(r.v).replace('.', ','),
+        r.I != null ? String(r.I).replace('.', ',') : '', r.D != null ? String(r.D).replace('.', ',') : ''];
+    }));
+}
+window.clubTstCsv = clubTstCsv;
+</script>
+
 
 
 
@@ -30300,12 +31100,17 @@ function injSave(){
 
   if(!p.injuries) p.injuries = [];
   p.injuries.push(inj);
+  // v207: sello de la sección lesiones (la base no deja que una copia más
+  // vieja pise lesiones más nuevas) y del estado, si cambia.
+  p._injUpd = Date.now();
+  var _estAntes = p.estado;
   // v184: el estado se deduce de si queda alguna lesión SIN alta. Antes sólo
   // se marcaba 'lesion'; al cargar una lesión pasada ya cerrada de un jugador
   // marcado en rojo, el estado quedaba desactualizado.
   var _hayAbierta = p.injuries.some(function(x){ return x && x.dateStart && !x.dateEnd; });
   if(_hayAbierta) p.estado = 'lesion';
   else if(p.estado === 'lesion') p.estado = 'disponible';
+  if(p.estado !== _estAntes) p._estUpd = Date.now();
   // Ordenar por fecha, para que el historial quede cronológico aunque se
   // carguen lesiones viejas después.
   p.injuries.sort(function(a,b){ return String(a.dateStart||'').localeCompare(String(b.dateStart||'')); });
@@ -30334,6 +31139,7 @@ function injDelete(injId){
   var p = PLAYER_PROFILES[_injPlayerKey]; if(!p||!p.injuries) return;
   if(!confirm('¿Eliminar este registro de lesión?')) return;
   p.injuries = p.injuries.filter(function(i){ return i.id !== injId; });
+  p._injUpd = Date.now();   // v207
   saveData();
   if(typeof profSaveOne==='function'){ try{ profSaveOne(_injPlayerKey); }catch(e){} }   // v182
   injRenderList(); renderProfilesTable();
@@ -30350,9 +31156,10 @@ function injSetAlta(injId){
   var d = prompt('Fecha de alta (YYYY-MM-DD):', today);
   if(!d) return;
   inj.dateEnd = d;
+  p._injUpd = Date.now();   // v207
   // Si no quedan lesiones activas, marcar disponible
   var hasActive = p.injuries.some(function(i){ return !i.dateEnd; });
-  if(!hasActive) p.estado = 'disponible';
+  if(!hasActive && p.estado !== 'disponible'){ p.estado = 'disponible'; p._estUpd = Date.now(); }
   saveData();
   if(typeof profSaveOne==='function'){ try{ profSaveOne(_injPlayerKey); }catch(e){} }   // v182
   injRenderList(); renderProfilesTable();
@@ -54071,9 +54878,9 @@ function hoySetEstado(nameL, estado, opts){
     // guardarle el estado.
     var disp=hoyRoster().find(function(n){return hoyNorm(n)===nameL;})||nameL;
     var key=(typeof profKeyOf==='function')?profKeyOf(disp):String(disp).toLowerCase();
-    PLAYER_PROFILES[key]={name:disp, estado:estado};
+    PLAYER_PROFILES[key]={name:disp, estado:estado, _estUpd:Date.now()};
   } else {
-    prof.estado=estado;
+    prof.estado=estado; prof._estUpd=Date.now();   // v207
   }
   // v146: sellar y subir SOLO este perfil, para que el cambio de estado llegue
   // al compañero y no lo pise su copia vieja.
