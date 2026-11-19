@@ -21431,7 +21431,10 @@ function rolAplicarPantalla(){
   });
   // v207: las utilidades (identidad del club, exportar/importar, métricas
   // extra, dataset original) son de quien carga en la división.
+  // v207b: SÓLO las que tocan datos. Salir, modo oscuro y fijar el panel son
+  // de cualquiera (en v207 se ocultaban todas y el médico no podía salir).
   document.querySelectorAll('#rail .ri-util').forEach(function(b){
+    if(b.id === 'sb-user-badge' || b.id === 'rail-tema' || b.id === 'rail-fijar') return;
     b.style.display = accesoPuede('planificacion', 'cargar') ? '' : 'none';
   });
   // Un grupo de la barra que quedó sin ningún botón visible, se oculta entero
