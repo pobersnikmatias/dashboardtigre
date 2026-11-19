@@ -224,7 +224,7 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
   // ── Claves COMPARTIDAS: una sola para todas las divisiones ─────────────
   var GLOBALES = {};
   ('gps_cat_activa tema_v1 railFijo_v1 libView_v1 ckioPin_v1 clubSettings_v1 '
-  + 'gps_csv_mapping_v1 sb_egreso_v1 gym_eval_pdf_cfg_v1 '
+  + 'gps_csv_mapping_v1 sb_egreso_v1 gym_eval_pdf_cfg_v1 capt_club_v1 '
   + 'pdf_match_layout pdf_match_layout_mode mc_pdf_layout mc_pdf_layout_mode '
   + '_escala_mudanza_v204').split(/\s+/).forEach(function(k){ if(k) GLOBALES[k]=1; });
 
@@ -5664,10 +5664,9 @@ function _buildFullPayload(stripImages){
     GYM_RUTINAS:(typeof GYM_RUTINAS!=='undefined' && Array.isArray(GYM_RUTINAS))?JSON.parse(JSON.stringify(GYM_RUTINAS)):undefined,
     // v202 · Captacion. Las fotos van en su propia clave: son lo unico pesado
     // y asi un cambio en una ficha no obliga a re-subir todas las imagenes.
-    CAPT_CONFIG:(typeof CAPT_CONFIG!=='undefined' && CAPT_CONFIG)?JSON.parse(JSON.stringify(CAPT_CONFIG)):undefined,
-    CAPT_EVENTOS:(typeof CAPT_EVENTOS!=='undefined' && Array.isArray(CAPT_EVENTOS))?JSON.parse(JSON.stringify(CAPT_EVENTOS)):undefined,
-    CAPT_JUGADORES:(typeof CAPT_JUGADORES!=='undefined' && Array.isArray(CAPT_JUGADORES))?JSON.parse(JSON.stringify(CAPT_JUGADORES)):undefined,
-    CAPT_FOTOS:(typeof CAPT_FOTOS!=='undefined' && CAPT_FOTOS)?(stripImages?{}:{...CAPT_FOTOS}):undefined,
+    // v206: Captación es del club, no de una división. Ya no viaja dentro del
+    // cajón de cada división (se habría copiado ocho veces, y un cajón viejo
+    // podía pisar lo nuevo): vive en su propia clave, capt_club_v1.
     CARGA_LOAD_CONFIG:(typeof CARGA_LOAD_CONFIG!=='undefined')?CARGA_LOAD_CONFIG:null,
     // v196: el registro de asistencia vivía sólo en localStorage y se poda a
     // 120 días. Ahora que alimenta reportes, viaja también en el backup.
@@ -5867,7 +5866,10 @@ function applyPayload(p){
     // y se rellena ahi mismo. Sin esto, un plan guardado en la PC se perdia al
     // abrir la tablet con el espejo atrasado.
     // v202 · Captacion
-    ['CAPT_CONFIG','CAPT_EVENTOS','CAPT_JUGADORES','CAPT_FOTOS'].forEach(function(k){
+    var _captYaEsDelClub = false;
+    try{ _captYaEsDelClub = localStorage.getItem('capt_club_v1') !== null
+                         || window.CAT_ACTIVA !== window.CAT_LEGADO; }catch(e){}
+    if(!_captYaEsDelClub) ['CAPT_CONFIG','CAPT_EVENTOS','CAPT_JUGADORES','CAPT_FOTOS'].forEach(function(k){
       var inc=p[k];
       if(inc===undefined || inc===null) return;
       var actual;
@@ -5880,6 +5882,10 @@ function applyPayload(p){
         Object.keys(inc).forEach(function(kk){ actual[kk]=inc[kk]; });
       }
     });
+    // v206: si esto fue la mudanza (5ta, sin clave del club), queda guardada
+    try{ if(!_captYaEsDelClub && typeof captClubGuardarLocal==='function'
+           && typeof CAPT_EVENTOS!=='undefined' && (CAPT_EVENTOS.length || CAPT_JUGADORES.length))
+           captClubGuardarLocal(); }catch(e){}
     try{ if(typeof captRefrescar==='function') captRefrescar(); }catch(e){}
 
     if(Array.isArray(p.GYM_RUTINAS)){
@@ -20642,6 +20648,10 @@ function accesoCargar(){
             || String(x).localeCompare(String(y), 'es');
       });
 
+    // v206: Captación es del club. Un captador no necesita divisiones: trabaja
+    // en el espacio 'Club', donde sólo existe la pestaña Captación.
+    if(!MIS_CATEGORIAS.length && MI_ROL === 'captacion') MIS_CATEGORIAS = ['Club'];
+
     if(!MIS_CATEGORIAS.length){
       accesoBloquear('Tu cuenta no tiene ninguna categoría',
         'Tenés rol «' + MI_ROL + '» pero no te asignaron divisiones. Pedile a Matías que te las agregue.');
@@ -20672,6 +20682,9 @@ function accesoCargar(){
         console.log('[acceso] ' + (MI_NOMBRE || sbCurrentUser.email) + ' · rol ' + MI_ROL
           + ' · ' + MIS_CATEGORIAS.length + ' categoría(s) · trabajando en ' + CAT_ACTIVA);
         try{ accesoPintarSelector(); }catch(e){ console.warn('[acceso] selector:', e); }
+        // v206: cada rol, su área (qué se ve y qué se sube)
+        try{ if(typeof rolInstalar === 'function') rolInstalar(); }catch(e){ console.warn('[roles] instalar:', e); }
+        try{ if(typeof rolAplicarPantalla === 'function') rolAplicarPantalla(); }catch(e){ console.warn('[roles] pantalla:', e); }
         return true;
       });
   }).catch(function(e){
@@ -20710,10 +20723,10 @@ function adminRolTxt(r){ return ADMIN_NOMBRE_ROL[r] || r; }
 
 var ADMIN_ROLES = {
   coordinacion:   'Ve y carga todo, en todas las divisiones',
-  cuerpo_tecnico: 'Su división: planifica, carga, ve todo lo suyo',
-  medico:         'Sólo lesiones',
-  nutricion:      'Sólo antropometrías',
-  captacion:      'Sólo la pestaña Captación',
+  cuerpo_tecnico: 'Su división: todo, incluso lesiones y antropometría',
+  medico:         'Sólo lesiones (Perfiles → Área médica)',
+  nutricion:      'Sólo antropometría (Perfiles → Nutricional)',
+  captacion:      'Sólo Captación, del club entero (no necesita divisiones)',
   jugador:        'Sólo su propio perfil',
   lectura:        'Mira, no carga'
 };
@@ -20875,6 +20888,8 @@ function adminHtmlUsuarios(){
     + 'border-radius:9px;padding:9px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">'
     + 'Crear</button>'
     + '<div style="flex:1 0 100%;font-size:11.5px;color:var(--tex-2,#667);line-height:1.55;margin-top:2px">'
+    + '<b>Si Supabase no deja crear cuentas desde acá:</b> creala en Supabase → Authentication → Users → Add user → '
+    + 'Create new user (con «Auto Confirm User» tildado), tocá «Actualizar» y aparece arriba para darle acceso.<br>'
     + 'Elegís vos la contraseña y se la pasás; la persona la puede cambiar después desde «Olvidé mi contraseña». '
     + 'Las divisiones se eligen abajo, en la fila de la cuenta, una vez creada.<br>'
     + 'Si Supabase te pide confirmar el mail, la cuenta existe pero no puede entrar hasta que haga clic en el mail '
@@ -20925,7 +20940,9 @@ function adminHtmlUsuarios(){
             + 'color:' + (on ? 'var(--club-c2,#3B4D88)' : 'var(--tex-2,#667)') + '">'
             + adminEsc(accesoSigla(c.nombre)) + '</button>';
         }).join('')
-      + (mias.length ? '' : '<span style="font-size:11px;color:#B3261E;align-self:center">sin divisiones: no puede entrar</span>')
+      + (mias.length ? '' : (u.rol === 'captacion'
+          ? '<span style="font-size:11px;color:var(--tex-3,#929DB1);align-self:center">no hace falta: Captación es del club</span>'
+          : '<span style="font-size:11px;color:#B3261E;align-self:center">sin divisiones: no puede entrar</span>'))
       + '</div>'
       // estado
       + '<div style="text-align:right">'
@@ -21073,7 +21090,18 @@ function adminCrearCuenta(){
   ADMIN.cargando = true; adminRender();
   cli2.auth.signUp({email: mail, password: pass, options: {data: {name: nombre}}}).then(function(res){
     ADMIN.cargando = false;
-    if(res.error) return adminAviso('Supabase no creó la cuenta: ' + res.error.message, 'mal');
+    if(res.error){
+      // v205b: en este proyecto el registro abierto está apagado a propósito
+      // (así nadie de afuera puede crearse una cuenta). El camino es crearla
+      // desde Supabase y darle acceso desde «esperando permiso».
+      if(/not allowed|disabled/i.test(res.error.message || '')){
+        return adminAviso('Tu Supabase no deja crear cuentas desde acá (está bien que sea así: nadie de afuera puede '
+          + 'registrarse). Creala en supabase.com → tu proyecto → Authentication → Users → Add user → Create new user: '
+          + 'mail, contraseña y dejá tildado «Auto Confirm User». Después tocá «Actualizar» en este panel: la cuenta '
+          + 'aparece arriba en «esperando permiso» y le das acceso con un clic.', 'mal');
+      }
+      return adminAviso('Supabase no creó la cuenta: ' + res.error.message, 'mal');
+    }
     var u = res.data && res.data.user;
     if(!u || !u.id) return adminAviso('Supabase no devolvió la cuenta. Probá crearla desde Supabase → Authentication.', 'mal');
     // Supabase, para no delatar qué mails existen, devuelve una cuenta "vacía"
@@ -21231,6 +21259,230 @@ window.adminBorrarDiv = adminBorrarDiv; window.adminVaciar = adminVaciar;
 window.adminVaciarConfirmar = adminVaciarConfirmar; window.ADMIN = ADMIN;
 </script>
 
+<script id="roles-js">
+/* ══ v206 · CADA ROL, SU ÁREA ═════════════════════════════════════════════
+   Dos cosas, las dos a partir de la tabla de permisos (roles_permisos):
+
+   1. QUÉ SE VE. Cada pestaña de la barra lateral pertenece a una o más áreas,
+      y lo mismo cada subpestaña de Perfiles. Lo que el rol no puede ni mirar,
+      no se dibuja. El médico entra directo a Perfiles → Área médica; nutrición
+      a Perfiles → Nutricional; captación a Captación.
+
+   2. QUÉ SE SUBE. Todos los guardados a Supabase pasan por sbClient.from().
+      Se intercepta ahí, en un solo lugar: si el rol no puede cargar en el
+      área de esa tabla (o de esa clave de configuración), la fila no viaja.
+      La base lo impide igual (paso 5); esto evita que el dashboard intente
+      subir lo que no le corresponde y llene la consola de rechazos.
+
+   Si la base todavía no tiene las tablas de usuarios (MI_ROL vacío), nada de
+   esto actúa: el dashboard funciona como antes.                            */
+
+// Pestaña principal → áreas que la habilitan (alcanza con una en 'ver')
+var ROL_VISTAS = {
+  hoy:['hoy'], fixture:['carga_gps'], plan:['planificacion'], carga:['carga_gps'],
+  profiles:['perfiles','lesiones','antropometria'], gym:['gimnasio','evaluaciones'],
+  train:['videoteca'], capt:['captacion'],
+  match:['carga_gps'], players:['perfiles'], micro:['planificacion']
+};
+var ROL_ORDEN_VISTAS = ['hoy','fixture','plan','carga','profiles','gym','train','capt'];
+
+// Subpestaña de Perfiles → área
+var ROL_SUBTABS = {
+  general:'perfiles', competencia:'perfiles', asistencia:'perfiles', informes:'perfiles',
+  movilidad:'perfiles', nutricional:'antropometria', medica:'lesiones'
+};
+var ROL_ORDEN_SUBTABS = ['general','competencia','nutricional','movilidad','asistencia','medica','informes'];
+
+// Tabla de Supabase → área que hace falta para CARGAR en ella
+var ROL_TABLA_AREA = {
+  nutrition_data:'antropometria', mobility_data:'perfiles', eval_aliases:'perfiles',
+  wellness_data:'hoy', pse_data:'hoy',
+  microciclo:'planificacion', plan_weeks:'planificacion', drills_exercises:'planificacion',
+  matches:'carga_gps',
+  gym_sessions:'gimnasio', gym_exercises:'gimnasio', gym_cats:'gimnasio', gym_evals:'evaluaciones'
+};
+
+// Clave de configuración (app_settings) → área. La base usa la MISMA regla
+// (función area_de_clave del paso 5): si se cambia acá, se cambia allá.
+function rolAreaDeClave(k){
+  k = String(k || '');
+  if(k.indexOf('CAPT_') === 0) return 'captacion';
+  if(k.indexOf('HOY_') === 0 || k === 'WELLNESS_LAYOUT' || k === 'PSE_LAYOUT') return 'hoy';
+  if(k.indexOf('NUT_') === 0) return 'antropometria';
+  if(k.indexOf('MOB_') === 0) return 'perfiles';
+  if(k.indexOf('GYM_') === 0 || k.indexOf('VBT_') === 0) return 'gimnasio';
+  if(k.indexOf('TST_') === 0 || k.indexOf('RESI_') === 0 || k.indexOf('EVAL_') === 0) return 'evaluaciones';
+  if(k === 'VIDEOTECA') return 'videoteca';
+  if(k.indexOf('FIX_') === 0 || k.indexOf('CARGA_') === 0 || k === 'REF' || k === 'EXTRA_METRICS') return 'carga_gps';
+  return 'planificacion';
+}
+window.rolAreaDeClave = rolAreaDeClave;
+
+function rolPuedeVista(v){
+  if(!MI_ROL) return true;
+  var a = ROL_VISTAS[v]; if(!a) return true;
+  return a.some(function(x){ return accesoPuede(x, 'ver'); });
+}
+function rolPuedeSubtab(t){
+  if(!MI_ROL) return true;
+  var a = ROL_SUBTABS[t]; if(!a) return true;
+  return accesoPuede(a, 'ver');
+}
+function rolPrimeraVista(){
+  for(var i = 0; i < ROL_ORDEN_VISTAS.length; i++) if(rolPuedeVista(ROL_ORDEN_VISTAS[i])) return ROL_ORDEN_VISTAS[i];
+  return 'hoy';
+}
+function rolPrimeraSubtab(){
+  for(var i = 0; i < ROL_ORDEN_SUBTABS.length; i++) if(rolPuedeSubtab(ROL_ORDEN_SUBTABS[i])) return ROL_ORDEN_SUBTABS[i];
+  return 'general';
+}
+window.rolPuedeVista = rolPuedeVista; window.rolPuedeSubtab = rolPuedeSubtab;
+
+// ¿Este rol puede subir esta fila a esta tabla?
+function rolPuedeEscribir(tabla, fila, comando){
+  if(!MI_ROL) return true;
+  if(tabla === 'app_settings') return accesoPuede(rolAreaDeClave(fila && fila.key), 'cargar');
+  if(tabla === 'player_profiles'){
+    // Borrar un perfil es sólo de quien maneja perfiles. Escribirlo, también
+    // el médico: la base le deja cambiar únicamente lesiones y estado.
+    if(comando === 'delete') return accesoPuede('perfiles', 'cargar');
+    return accesoPuede('perfiles', 'cargar') || accesoPuede('lesiones', 'cargar');
+  }
+  var a = ROL_TABLA_AREA[tabla];
+  if(!a) return true;              // usuarios, categorías…: decide la base
+  return accesoPuede(a, 'cargar');
+}
+window.rolPuedeEscribir = rolPuedeEscribir;
+
+// Una consulta "vacía" que se puede encadenar (.select().eq()…) y resolver
+// como si Supabase hubiera respondido bien sin hacer nada.
+function rolNada(){
+  var resp = {data: null, error: null, count: 0, status: 204};
+  var px = new Proxy(function(){}, {
+    get: function(_, prop){
+      if(prop === 'then') return function(res, rej){ return Promise.resolve(resp).then(res, rej); };
+      if(prop === 'catch') return function(f){ return Promise.resolve(resp).catch(f); };
+      if(prop === 'finally') return function(f){ return Promise.resolve(resp).finally(f); };
+      return function(){ return px; };
+    },
+    apply: function(){ return px; }
+  });
+  return px;
+}
+var _rolBloqueos = {};
+function rolAnotarBloqueo(tabla, n){
+  if(!_rolBloqueos[tabla]) console.info('[roles] El rol «' + MI_ROL + '» no carga en «' + tabla + '»: no se sube.');
+  _rolBloqueos[tabla] = (_rolBloqueos[tabla] || 0) + n;
+}
+window.__rolBloqueos = _rolBloqueos;
+
+function rolEnvolverCliente(){
+  if(typeof sbClient === 'undefined' || !sbClient || sbClient.__rolEnvuelto) return;
+  var orig = sbClient.from.bind(sbClient);
+  sbClient.from = function(tabla){
+    var q = orig(tabla);
+    if(!MI_ROL || !q) return q;
+    ['upsert', 'insert'].forEach(function(m){
+      var f = q[m]; if(typeof f !== 'function') return;
+      q[m] = function(filas, opts){
+        var lista = Array.isArray(filas) ? filas : [filas];
+        var pasan = lista.filter(function(r){ return rolPuedeEscribir(tabla, r, m); });
+        if(pasan.length === lista.length) return f.call(q, filas, opts);
+        rolAnotarBloqueo(tabla, lista.length - pasan.length);
+        if(!pasan.length) return rolNada();
+        return f.call(q, Array.isArray(filas) ? pasan : pasan[0], opts);
+      };
+    });
+    ['update', 'delete'].forEach(function(m){
+      var f = q[m]; if(typeof f !== 'function') return;
+      q[m] = function(){
+        if(tabla === 'app_settings' || rolPuedeEscribir(tabla, null, m)) return f.apply(q, arguments);
+        rolAnotarBloqueo(tabla, 1);
+        return rolNada();
+      };
+    });
+    return q;
+  };
+  sbClient.__rolEnvuelto = true;
+}
+
+// ── Lo que se ve ──────────────────────────────────────────────────────────
+function rolAplicarPantalla(){
+  if(!MI_ROL) return;
+  document.querySelectorAll('#rail .rail-item[data-view]').forEach(function(b){
+    b.style.display = rolPuedeVista(b.getAttribute('data-view')) ? '' : 'none';
+  });
+  ROL_ORDEN_VISTAS.forEach(function(v){
+    var b = document.getElementById('nav-' + v);
+    if(b) b.style.display = rolPuedeVista(v) ? '' : 'none';
+  });
+  // Un grupo de la barra que quedó sin ningún botón visible, se oculta entero
+  document.querySelectorAll('#rail .rail-grupo').forEach(function(g){
+    var items = g.querySelectorAll('.rail-item');
+    if(!items.length) return;
+    var alguno = Array.prototype.some.call(items, function(it){ return it.style.display !== 'none'; });
+    g.style.display = alguno ? '' : 'none';
+  });
+  Object.keys(ROL_SUBTABS).forEach(function(t){
+    var b = document.getElementById('prof-subtab-' + t);
+    if(b) b.style.display = rolPuedeSubtab(t) ? '' : 'none';
+  });
+  try{ if(typeof mainView !== 'undefined' && !rolPuedeVista(mainView)) setMainView(rolPrimeraVista()); }catch(e){}
+}
+window.rolAplicarPantalla = rolAplicarPantalla;
+
+// Aviso fijo cuando la pestaña abierta es sólo para mirar
+function rolAvisoLectura(v){
+  var ya = document.getElementById('rol-lectura');
+  var areas = ROL_VISTAS[v] || [];
+  var soloVer = MI_ROL && areas.length
+    && !areas.some(function(a){ return accesoPuede(a, 'cargar'); })
+    && areas.some(function(a){ return accesoPuede(a, 'ver'); });
+  if(!soloVer){ if(ya) ya.remove(); return; }
+  if(ya) return;
+  var d = document.createElement('div');
+  d.id = 'rol-lectura';
+  d.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9000;padding:8px 13px;border-radius:9px;'
+    + 'font-size:12px;font-weight:700;background:var(--sup-1,#fff);color:var(--tex-2,#556);'
+    + 'border:1px solid var(--bor-1,#dfe3ea);box-shadow:0 6px 18px rgba(0,0,0,.12)';
+  d.textContent = '👁 Sólo lectura: lo que cambies acá no se guarda en la nube';
+  document.body.appendChild(d);
+}
+
+// setMainView y profSetSubtab respetan el rol, vengan de donde vengan.
+// Se instala después del login (desde accesoCargar), cuando ya existen todas
+// las funciones del archivo: profSetSubtab vive mucho más abajo que este bloque.
+function rolInstalar(){
+  if(window.__rolInstalado) return;
+  window.__rolInstalado = true;
+  rolEnvolverCliente();
+  if(typeof setMainView === 'function'){
+    var _smv = setMainView;
+    setMainView = function(v){
+      if(MI_ROL && !rolPuedeVista(v)) v = rolPrimeraVista();
+      var r = _smv.apply(this, [v].concat(Array.prototype.slice.call(arguments, 1)));
+      try{
+        if(MI_ROL && v === 'profiles' && typeof _profSubtab !== 'undefined' && !rolPuedeSubtab(_profSubtab)
+           && typeof profSetSubtab === 'function') profSetSubtab(rolPrimeraSubtab());
+      }catch(e){}
+      try{ rolAvisoLectura(v); }catch(e){}
+      return r;
+    };
+    window.setMainView = setMainView;
+  }
+  if(typeof profSetSubtab === 'function'){
+    var _pss = profSetSubtab;
+    profSetSubtab = function(t){
+      if(MI_ROL && !rolPuedeSubtab(t)) t = rolPrimeraSubtab();
+      return _pss.call(this, t);
+    };
+    window.profSetSubtab = profSetSubtab;
+  }
+}
+window.rolInstalar = rolInstalar;
+</script>
+
+
 
 <script id="capt-js">
 /* ══ CAPTACIÓN ════════════════════════════════════════════════════════════════
@@ -21343,16 +21595,66 @@ function captRegionDeProvincia(prov){
   });
   return res;
 }
+// v206 · Captación es UN espacio del club: misma clave local para todas las
+// divisiones y, en la nube, filas con categoria 'Club'.
+// Se guarda en los DOS lugares, como el cajón de cada división: localStorage
+// (rápido, pero chico: con muchas fotos se llena) e IndexedDB (grande). Al
+// abrir gana la copia más nueva (__ts).
+function captClubGuardarLocal(){
+  var json;
+  try{
+    json = JSON.stringify({
+      __ts: Date.now(),
+      CAPT_CONFIG: CAPT_CONFIG, CAPT_EVENTOS: CAPT_EVENTOS,
+      CAPT_JUGADORES: CAPT_JUGADORES, CAPT_FOTOS: CAPT_FOTOS
+    });
+  }catch(e){ console.warn('[Captación] no se pudo preparar el guardado:', e); return; }
+  try{ localStorage.setItem('capt_club_v1', json); }
+  catch(e){
+    // Sin lugar: se saca la copia rápida (vieja) para que no gane al abrir,
+    // y queda la de IndexedDB.
+    try{ localStorage.removeItem('capt_club_v1'); }catch(e2){}
+    console.warn('[Captación] localStorage lleno; queda guardada en IndexedDB.');
+  }
+  try{ if(typeof dstoreSet === 'function') dstoreSet('capt_club_v1', json); }catch(e){}
+}
+window.captClubGuardarLocal = captClubGuardarLocal;
+
+// Vuelca un paquete guardado sobre las variables (en el lugar: hay pantallas
+// que guardan referencias a estos arreglos).
+function captClubAplicar(club){
+  if(!club) return;
+  if(Array.isArray(club.CAPT_EVENTOS)){ CAPT_EVENTOS.length = 0; club.CAPT_EVENTOS.forEach(function(x){ CAPT_EVENTOS.push(x); }); }
+  if(Array.isArray(club.CAPT_JUGADORES)){ CAPT_JUGADORES.length = 0; club.CAPT_JUGADORES.forEach(function(x){ CAPT_JUGADORES.push(x); }); }
+  if(club.CAPT_FOTOS && typeof club.CAPT_FOTOS === 'object'){
+    Object.keys(CAPT_FOTOS).forEach(function(k){ delete CAPT_FOTOS[k]; });
+    Object.keys(club.CAPT_FOTOS).forEach(function(k){ CAPT_FOTOS[k] = club.CAPT_FOTOS[k]; });
+  }
+  var cfg = club.CAPT_CONFIG || {};
+  Object.keys(cfg).forEach(function(k){
+    if(cfg[k] != null && !(Array.isArray(cfg[k]) && !cfg[k].length)) CAPT_CONFIG[k] = cfg[k];
+  });
+}
+
 function captGuardar(){
+  captClubGuardarLocal();
   try{ if(typeof saveData==='function') saveData(); }catch(e){ console.warn('captGuardar:',e); }
 }
 
 /* ── carga inicial ──────────────────────────────────────────────────────── */
 (function captCargar(){
+  // v206: primero la clave del club. Si todavía no existe, sólo la 5ta toma lo
+  // que tenía en su cajón (es la mudanza); otra división arranca vacía y
+  // espera lo que baje de la nube.
+  var club = null;
+  try{ var rc = localStorage.getItem('capt_club_v1'); if(rc) club = JSON.parse(rc); }catch(e){ club = null; }
+  var mudar = !club && window.CAT_ACTIVA === window.CAT_LEGADO;
   function tomar(nombre, destino){
-    var pend = window['__'+nombre+'Pendiente'];
-    var val = pend;
-    if(val===undefined){
+    var val;
+    if(club){ val = club[nombre]; }
+    else if(!mudar){ return; }
+    else { val = window['__'+nombre+'Pendiente']; }
+    if(!club && val===undefined){
       try{
         var raw=localStorage.getItem(STORAGE_KEY);
         if(raw){ var p=JSON.parse(raw); val=p[nombre]; }
@@ -21375,7 +21677,28 @@ function captGuardar(){
     Object.keys(cfgPrev).forEach(function(k){
       if(cfgPrev[k]!=null && !(Array.isArray(cfgPrev[k]) && !cfgPrev[k].length)) CAPT_CONFIG[k]=cfgPrev[k];
     });
+    // Sólo si encontró algo: si el cajón de esta computadora no lo tenía (por
+    // ejemplo, porque vive en IndexedDB), se deja la puerta abierta para que
+    // la copia de IndexedDB o la nube lo completen.
+    if(mudar && (CAPT_EVENTOS.length || CAPT_JUGADORES.length)) captClubGuardarLocal();
   }catch(e){ console.warn('captCargar:',e); }
+
+  // La copia de IndexedDB, si es más nueva que la de localStorage (o si ésta
+  // no está porque no entró), es la que vale.
+  try{
+    if(typeof dstoreGet === 'function'){
+      dstoreGet('capt_club_v1').then(function(v){
+        if(!v) return;
+        var idb; try{ idb = (typeof v === 'string') ? JSON.parse(v) : v; }catch(e){ return; }
+        var ts = (club && club.__ts) || 0;
+        if(!idb || (idb.__ts || 0) <= ts) return;
+        captClubAplicar(idb);
+        try{ localStorage.setItem('capt_club_v1', (typeof v === 'string') ? v : JSON.stringify(v)); }catch(e){}
+        try{ if(typeof captRefrescar === 'function') captRefrescar(); }catch(e){}
+        console.log('[Captación] Se recuperó la copia de IndexedDB (más nueva).');
+      }).catch(function(){});
+    }
+  }catch(e){}
 })();
 
 /* ── navegación ─────────────────────────────────────────────────────────── */
@@ -43746,8 +44069,22 @@ function _sbWriteGlobal(name, value){
 
 function sbSettingsFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('app_settings').select('*').eq('categoria', SB_CATEGORIA)
-    .then(function(res){ if(res.error) throw res.error; return res.data || []; });
+  // v206: la configuración de la división, SIN Captación (filas viejas que
+  // pudieron quedar con la división), más la Captación del club.
+  var division = sbClient.from('app_settings').select('*').eq('categoria', SB_CATEGORIA)
+    .then(function(res){ if(res.error) throw res.error;
+      return (res.data || []).filter(function(r){ return String(r.key).indexOf('CAPT_') !== 0; }); });
+  var club = sbClient.from('app_settings').select('*').eq('categoria', 'Club')
+    .then(function(res){
+      if(res.error) return [];
+      var filas = (res.data || []).filter(function(r){ return String(r.key).indexOf('CAPT_') === 0; });
+      if(filas.length) return filas;
+      // Base sin el paso 5 todavía: la Captación sigue guardada en la 5ta.
+      return sbClient.from('app_settings').select('*').eq('categoria', window.CAT_LEGADO || '5ta División')
+        .then(function(r2){ if(r2.error) return [];
+          return (r2.data || []).filter(function(r){ return String(r.key).indexOf('CAPT_') === 0; }); });
+    }).catch(function(){ return []; });
+  return Promise.all([division, club]).then(function(r){ return r[0].concat(r[1]); });
 }
 
 // v202: cada saveData() subia TODAS las claves de nuevo, cambiaran o no. Con
@@ -43808,7 +44145,7 @@ function _sbSettingsToPayloads(todas){
     out.push({
       key: k,
       value: v,
-      categoria: SB_CATEGORIA,
+      categoria: (k.indexOf('CAPT_') === 0) ? 'Club' : SB_CATEGORIA,   // v206
       updated_at: new Date().toISOString()
     });
   });
@@ -44072,6 +44409,9 @@ sbLoadInitialData = function(){
       try{ _sbFirmaAnotar(row.key, row.value); }catch(e){}
     });
     console.log('[Supabase] Cargadas ' + rows.length + ' configuraciones.');
+    // v206: lo que bajó de Captación queda en la clave del club de este equipo
+    try{ if(rows.some(function(r){ return String(r.key).indexOf('CAPT_')===0; })
+           && typeof captClubGuardarLocal==='function') captClubGuardarLocal(); }catch(e){}
     // Si una clave no esta en la nube (fila borrada a mano), se olvida su firma
     // para que la proxima subida la vuelva a mandar.
     try{
