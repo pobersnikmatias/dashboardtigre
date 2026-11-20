@@ -1,3 +1,781 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tigre · Jugador</title>
+<meta name="theme-color" content="#0B2A5B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tigre">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="jugador.webmanifest">
+<link rel="apple-touch-icon" href="jugador-192.png">
+<link rel="icon" href="jugador-192.png">
+<style>
+:root{
+  --azul:#0B2A5B; --azul-2:#163C7A; --rojo:#C8102E;
+  --fondo:#F2F4F8; --sup:#FFFFFF; --sup-2:#E9EDF3; --borde:#D7DDE7;
+  --tex:#111A2B; --tex-2:#46516A; --tex-3:#5E6880;
+  --bien:#13795B; --bien-f:#E3F4EE; --ojo:#9A5B00; --ojo-f:#FFF3DC; --mal:#B3261E; --mal-f:#FCE8E6;
+  --serie:#2457C5; --serie-2:#9FB4E6; --grilla:#E3E7EE;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --fondo:#0C111C; --sup:#151C2B; --sup-2:#1F2839; --borde:#2C374D;
+    --tex:#EEF1F7; --tex-2:#B9C2D3; --tex-3:#97A1B6;
+    --bien:#4CC59A; --bien-f:#123A2E; --ojo:#F0B54A; --ojo-f:#3A2C10; --mal:#FF8A80; --mal-f:#3D1715;
+    --serie:#7FA6F5; --serie-2:#3A4F7E; --grilla:#263045;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--fondo);color:var(--tex);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;min-height:100vh}
+button{font-family:inherit;font-size:inherit;color:inherit}
+input,select{font-family:inherit;font-size:16px;color:var(--tex)}
+.oculto{display:none!important}
+
+/* ── cabecera ── */
+.cab{position:sticky;top:0;z-index:20;background:var(--azul);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+  display:flex;align-items:center;gap:10px}
+.cab .escudo{width:34px;height:34px;border-radius:9px;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
+.cab .quien{flex:1;min-width:0}
+.cab .nom{font-weight:800;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cab .div{font-size:12px;opacity:.85}
+.cab .menu{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:9px;width:38px;height:38px;font-size:18px;cursor:pointer}
+.estado{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:8px 16px;background:var(--sup-2);color:var(--tex-2)}
+.estado .punto{width:9px;height:9px;border-radius:50%;background:var(--bien);flex-shrink:0}
+.estado.sin .punto{background:var(--ojo)}
+.estado.pend{background:var(--ojo-f);color:var(--tex)}
+.estado.err{background:var(--mal-f);color:var(--tex)}
+.estado.err .punto{background:var(--mal)}
+
+main{padding:16px 16px calc(96px + env(safe-area-inset-bottom));max-width:560px;margin:0 auto}
+h2{font-size:19px;margin:4px 0 12px}
+h3{font-size:15px;margin:22px 0 8px}
+.tarj{background:var(--sup);border:1px solid var(--borde);border-radius:16px;padding:16px;margin-bottom:12px}
+.nota{font-size:12.5px;color:var(--tex-3)}
+.fila{display:flex;align-items:center;gap:10px}
+.crece{flex:1;min-width:0}
+
+/* ── botones ── */
+.btn{display:block;width:100%;padding:15px;border:0;border-radius:13px;font-size:16.5px;font-weight:800;cursor:pointer;text-align:center}
+.btn-1{background:var(--azul);color:#fff}
+.btn-2{background:var(--sup-2);color:var(--tex)}
+.btn-rojo{background:var(--rojo);color:#fff}
+.btn:disabled{opacity:.45;cursor:default}
+.chip{border:1.5px solid var(--borde);background:var(--sup);border-radius:999px;padding:8px 15px;font-weight:700;font-size:14px;cursor:pointer;color:var(--tex-2)}
+.chip.on{background:var(--azul);border-color:var(--azul);color:#fff}
+@media (prefers-color-scheme:dark){ .btn-1,.chip.on{background:#2F5DB8;border-color:#2F5DB8} }
+
+/* ── Hoy ── */
+.hoy{display:grid;gap:12px}
+.hoy .tarj{display:flex;align-items:center;gap:14px;padding:18px;margin:0}
+.hoy .ico{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;background:var(--sup-2)}
+.hoy .tit{font-weight:800;font-size:16.5px}
+.marca{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;margin-top:3px}
+.marca.ok{color:var(--bien)} .marca.esp{color:var(--ojo)} .marca.no{color:var(--tex-3)}
+.hoy .ir{padding:11px 16px;border-radius:11px;border:0;background:var(--azul);color:#fff;font-weight:800;cursor:pointer;flex-shrink:0}
+.hoy .ir.ok{background:var(--sup-2);color:var(--tex)}
+@media (prefers-color-scheme:dark){ .hoy .ir{background:#2F5DB8} .hoy .ir.ok{background:var(--sup-2)} }
+
+/* ── formularios ── */
+.preg{margin-bottom:20px}
+.preg .lab{display:flex;justify-content:space-between;align-items:baseline;font-weight:800;font-size:16px;margin-bottom:8px}
+.preg .val{font-size:15px;color:var(--tex-3);font-weight:700}
+.escala{display:grid;gap:6px}
+.escala button{padding:14px 0;border-radius:11px;border:2px solid var(--borde);background:var(--sup);font-weight:800;font-size:17px;cursor:pointer;color:var(--tex-2)}
+.escala button.on{background:var(--azul);border-color:var(--azul);color:#fff}
+@media (prefers-color-scheme:dark){ .escala button.on{background:#2F5DB8;border-color:#2F5DB8} }
+.extremos{display:flex;justify-content:space-between;font-size:11.5px;color:var(--tex-3);margin-top:4px}
+.borg button{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;margin-bottom:7px;border-radius:12px;border:2px solid var(--borde);
+  background:var(--sup);cursor:pointer;text-align:left}
+.borg .n{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;color:#fff;flex-shrink:0}
+.borg .d{font-weight:700;color:var(--tex-2);font-size:14.5px}
+.borg button.on{border-color:var(--tex);background:var(--sup-2)}
+.borg button.on .d{color:var(--tex)}
+select.campo,input.campo{width:100%;padding:13px 12px;border:2px solid var(--borde);border-radius:11px;background:var(--sup);margin-bottom:12px}
+label.mini{display:block;font-weight:700;font-size:13.5px;margin:4px 0 6px;color:var(--tex-2)}
+.listo{text-align:center;padding:30px 10px}
+.listo .grande{font-size:54px}
+.listo h2{margin:10px 0 6px}
+
+/* ── pestañas de abajo ── */
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--sup);border-top:1px solid var(--borde);display:flex;
+  padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+.tabs button{flex:1;border:0;background:transparent;padding:6px 2px;border-radius:10px;cursor:pointer;color:var(--tex-3);font-size:11.5px;font-weight:700;
+  display:flex;flex-direction:column;align-items:center;gap:2px}
+.tabs button .i{font-size:20px;line-height:1}
+.tabs button.on{color:var(--azul);background:var(--sup-2)}
+@media (prefers-color-scheme:dark){ .tabs button.on{color:#9DBBFF} }
+
+/* ── datos ── */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.kpi{background:var(--sup);border:1px solid var(--borde);border-radius:14px;padding:12px 14px}
+.kpi .k{font-size:12px;color:var(--tex-3);font-weight:700}
+.kpi .v{font-size:24px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
+.kpi .s{font-size:12px;color:var(--tex-3)}
+.grafico{position:relative}
+.grafico svg{display:block;width:100%;height:auto;touch-action:pan-y}
+.tip{position:absolute;top:0;transform:translateX(-50%);background:var(--tex);color:var(--fondo);font-size:12px;font-weight:700;padding:4px 8px;
+  border-radius:7px;white-space:nowrap;pointer-events:none}
+.test{padding:14px 16px}
+.test .top{display:flex;align-items:baseline;gap:8px}
+.test .nm{font-weight:800;flex:1;min-width:0}
+.test .ult{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+.test .u{font-size:12px;color:var(--tex-3);font-weight:700}
+.cambio{font-size:12.5px;font-weight:800;padding:2px 8px;border-radius:999px;display:inline-block}
+.cambio.mejor{background:var(--bien-f);color:var(--bien)} .cambio.peor{background:var(--mal-f);color:var(--mal)} .cambio.igual{background:var(--sup-2);color:var(--tex-2)}
+.barra{height:8px;border-radius:4px;background:var(--sup-2);position:relative;margin:10px 0 4px}
+.barra i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--serie)}
+.tabla{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
+.tabla th{text-align:left;font-size:11.5px;color:var(--tex-3);font-weight:700;padding:6px 4px;border-bottom:1px solid var(--borde)}
+.tabla td{padding:7px 4px;border-bottom:1px solid var(--grilla)}
+.tabla td.r,.tabla th.r{text-align:right}
+.vacio{text-align:center;color:var(--tex-3);padding:30px 16px;font-size:14px}
+
+/* ── ingreso ── */
+.ingreso{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:24px;max-width:420px;margin:0 auto}
+.ingreso .logo{width:74px;height:74px;border-radius:20px;background:var(--azul);margin:0 auto 14px;display:flex;align-items:center;justify-content:center}
+.ingreso h1{text-align:center;font-size:23px;margin:0 0 4px}
+.ingreso p{text-align:center;color:var(--tex-3);margin:0 0 22px;font-size:14px}
+.error{background:var(--mal-f);color:var(--mal);font-weight:700;font-size:13.5px;padding:10px 12px;border-radius:10px;margin-bottom:12px}
+.aviso{background:var(--ojo-f);color:var(--tex);font-size:13.5px;padding:12px 14px;border-radius:12px;margin-bottom:12px}
+
+/* ── menú ── */
+.velo{position:fixed;inset:0;background:rgba(5,10,20,.55);z-index:40;display:flex;align-items:flex-end;justify-content:center}
+.hoja{background:var(--sup);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+.hoja .btn{margin-top:10px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+'use strict';
+// ════════════════════════════════════════════════════════════════════════
+//  TIGRE · JUGADOR
+//  Página para el celular de cada jugador: responde Wellness y PSE y ve sus
+//  datos. Funciona sin señal: lo que responde queda guardado en el celular
+//  y se manda solo cuando vuelve la conexión.
+//  No usa ninguna librería: habla directo con Supabase.
+// ════════════════════════════════════════════════════════════════════════
+var SB_URL = 'https://jvopjhvchsnhwchcnzun.supabase.co';
+var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2b3BqaHZjaHNuaHdjaGNuenVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MjUxNTAsImV4cCI6MjA5NTQwMTE1MH0.O9RypkGnP66hSk51FXackEUB3algI-QUrOF4BvI6yUk';
+var DOMINIO = 'jugadores.tigre';          // usuario sin @ → usuario@jugadores.tigre
+var VERSION = 'j1';
+
+var DOLOR_ZONAS = ['Aductor','Cuádriceps','Gemelos','Isquiotibiales','Psoas','Sóleo','Tibial anterior','Otro'];
+var DOLOR_TIEMPOS = ['Hoy','1 día','2 días','3 días','4-7 días','Más de 1 semana','Más de 1 mes'];
+var BORG = {1:'Muy muy suave',2:'Muy suave',3:'Suave',4:'Moderado',5:'Algo duro',6:'Duro',7:'Muy duro',8:'Muy muy duro',9:'Casi máximo',10:'Máximo esfuerzo'};
+var WELL_DEF = {fields:[{key:'sueno',label:'Sueño',max:5},{key:'energia',label:'Energía',max:5},{key:'fisico',label:'Físico',max:5},{key:'emocional',label:'Emocional',max:5}]};
+var TESTS_DEF = [{"id":"cmj","name":"CMJ","unit":"cm","better":"up","lat":"bi"},{"id":"sj","name":"Squat Jump","unit":"cm","better":"up","lat":"bi"},{"id":"abk","name":"Abalakov","unit":"cm","better":"up","lat":"bi"},{"id":"cmj_uni","name":"CMJ unilateral","unit":"cm","better":"up","lat":"uni"},{"id":"hop","name":"Salto horizontal","unit":"cm","better":"up","lat":"bi"},{"id":"hop_uni","name":"Single hop distancia","unit":"cm","better":"up","lat":"uni"},{"id":"triple_hop","name":"Triple hop","unit":"cm","better":"up","lat":"uni"},{"id":"spr10","name":"Sprint 10 m","unit":"s","better":"down","lat":"bi"},{"id":"spr30","name":"Sprint 30 m","unit":"s","better":"down","lat":"bi"},{"id":"spr40","name":"Sprint 40 m","unit":"s","better":"down","lat":"bi"},{"id":"cod505","name":"505 (COD)","unit":"s","better":"down","lat":"uni"},{"id":"rm_banca","name":"Press banca (1RM)","unit":"kg","better":"up","lat":"bi"},{"id":"rm_sentadilla","name":"Sentadilla (1RM)","unit":"kg","better":"up","lat":"bi"},{"id":"rm_peso_muerto","name":"Peso muerto (1RM)","unit":"kg","better":"up","lat":"bi"},{"id":"rm_hip_thrust","name":"Hip thrust (1RM)","unit":"kg","better":"up","lat":"bi"},{"id":"imtp","name":"IMTP (pico)","unit":"N","better":"up","lat":"bi"},{"id":"iso_ext","name":"Iso cuádriceps","unit":"N","better":"up","lat":"uni"},{"id":"iso_flex","name":"Iso isquiotibiales","unit":"N","better":"up","lat":"uni"},{"id":"iso_add","name":"Iso aductores","unit":"N","better":"up","lat":"uni"},{"id":"iso_abd","name":"Iso abductores","unit":"N","better":"up","lat":"uni"}];
+var RESI_DEF = {"3015":{"short":"30-15 IFT","metricUnit":"km/h"},"yoyoir1":{"short":"Yo-Yo IR1","metricUnit":"m"},"yoyoir2":{"short":"Yo-Yo IR2","metricUnit":"m"},"matsudo":{"short":"Matsudo","metricUnit":"km/h"},"navette":{"short":"Navette","metricUnit":""},"otro":{"short":"Otro","metricUnit":""}};
+var ANT = [
+  {id:'peso', name:'Peso', unit:'kg', better:'none'},
+  {id:'adiposa', name:'Masa adiposa', unit:'%', better:'down'},
+  {id:'muscular', name:'Masa muscular', unit:'%', better:'up'},
+  {id:'suma6', name:'Suma 6 pliegues', unit:'mm', better:'down'},
+  {id:'imo', name:'Índice músculo/óseo', unit:'', better:'up'}
+];
+
+// ── Guardado en el celular (si el navegador no deja, se sigue en memoria) ──
+var MEM = {};
+function lget(k, def){ try{ var v = localStorage.getItem(k); return v == null ? def : JSON.parse(v); }catch(e){ return k in MEM ? MEM[k] : def; } }
+function lset(k, v){ MEM[k] = v; try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function ldel(k){ delete MEM[k]; try{ localStorage.removeItem(k); }catch(e){} }
+
+// ── Fechas: SIEMPRE la del celular (no la de Greenwich) ──
+function fechaLocal(d){ d = d || new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function hoy(){ return fechaLocal(); }
+function ayer(){ var d = new Date(); d.setDate(d.getDate() - 1); return fechaLocal(d); }
+function masDias(f, n){ var d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + n); return fechaLocal(d); }
+var MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function fCorta(f){ if(!f) return ''; var p = String(f).slice(0, 10).split('-'); return +p[2] + ' ' + MESES[+p[1] - 1]; }
+function fLarga(f){ var s = fCorta(f); var p = String(f).slice(0, 4); return p !== String(new Date().getFullYear()) ? s + ' ' + p : s; }
+function cuando(f){ return f === hoy() ? 'hoy' : (f === ayer() ? 'ayer' : 'el ' + fCorta(f)); }
+function hace(ts){
+  if(!ts) return '';
+  var m = Math.round((Date.now() - ts) / 60000);
+  if(m < 2) return 'recién'; if(m < 60) return 'hace ' + m + ' min';
+  var h = Math.round(m / 60); if(h < 24) return 'hace ' + h + ' h';
+  var d = Math.round(h / 24); return 'hace ' + d + (d === 1 ? ' día' : ' días');
+}
+function num(v, dec){ if(v == null || isNaN(v)) return '—'; return Number(v).toLocaleString('es-AR', {minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0}); }
+function dec(v, u){ if(v == null || isNaN(v)) return '—'; var a = Math.abs(v); var d = u === 's' ? 2 : (a < 20 ? 2 : (a < 200 ? 1 : 0)); return num(v, d); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function aNum(v){ if(v == null || v === '') return null; var n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return isNaN(n) ? null : n; }
+
+// ════════════════════════════════════════════════════════════════════════
+//  SESIÓN
+// ════════════════════════════════════════════════════════════════════════
+var SES = lget('jug_sesion', null);     // {access_token, refresh_token, expires_at, uid, email}
+var refrescando = null;
+
+function SinRed(msg){ this.message = msg || 'Sin conexión'; this.sinRed = true; }
+function ErrorBase(msg, st){ this.message = msg; this.status = st; }
+
+function pedir(ruta, cuerpo, token){
+  var h = {'apikey': SB_KEY, 'Content-Type': 'application/json'};
+  if(token) h['Authorization'] = 'Bearer ' + token;
+  return fetch(SB_URL + ruta, {method: 'POST', headers: h, body: JSON.stringify(cuerpo || {})})
+    .catch(function(){ throw new SinRed(); })
+    .then(function(r){
+      return r.text().then(function(t){
+        var j = null; try{ j = t ? JSON.parse(t) : null; }catch(e){}
+        if(!r.ok){
+          var m = (j && (j.message || j.msg || j.error_description || j.error)) || ('Error ' + r.status);
+          throw new ErrorBase(m, r.status);
+        }
+        return j;
+      });
+    });
+}
+function guardarSesion(j){
+  SES = {access_token: j.access_token, refresh_token: j.refresh_token,
+         expires_at: j.expires_at || Math.floor(Date.now() / 1000) + (j.expires_in || 3600),
+         uid: j.user ? j.user.id : (SES && SES.uid), email: j.user ? j.user.email : (SES && SES.email)};
+  lset('jug_sesion', SES);
+}
+function ingresar(usuario, clave){
+  var u = String(usuario || '').trim().toLowerCase();
+  var email = u.indexOf('@') >= 0 ? u : u + '@' + DOMINIO;
+  return pedir('/auth/v1/token?grant_type=password', {email: email, password: clave}).then(guardarSesion);
+}
+// Un token vigente. Si venció, se renueva (una sola vez aunque lo pidan varios).
+function token(forzar){
+  if(!SES) return Promise.reject(new ErrorBase('Sin sesión', 401));
+  if(!forzar && SES.expires_at - 90 > Date.now() / 1000) return Promise.resolve(SES.access_token);
+  if(refrescando) return refrescando;
+  refrescando = pedir('/auth/v1/token?grant_type=refresh_token', {refresh_token: SES.refresh_token})
+    .then(function(j){ guardarSesion(j); refrescando = null; return SES.access_token; },
+          function(e){ refrescando = null;
+            if(!e.sinRed && (e.status === 400 || e.status === 401)){
+              sesionVencida();
+              var v = new ErrorBase('Tu sesión venció', 401); v.auth = true; throw v;
+            }
+            throw e; });
+  return refrescando;
+}
+function rpc(fn, args, reintento){
+  return token().then(function(t){ return pedir('/rest/v1/rpc/' + fn, args || {}, t); })
+    .catch(function(e){
+      if(!reintento && e.status === 401 && SES){ return token(true).then(function(){ return rpc(fn, args, true); }); }
+      throw e;
+    });
+}
+function sesionVencida(){
+  // Se pide entrar de nuevo, pero lo guardado en el celular NO se pierde
+  if(SES){ SES.vencida = true; lset('jug_sesion', SES); }
+  render();
+}
+function salir(){
+  ldel('jug_sesion'); SES = null; DATOS = null; render();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  COLA: lo respondido espera acá hasta que se pueda mandar
+// ════════════════════════════════════════════════════════════════════════
+function cola(){ return lget('jug_cola', []); }
+function miCola(){ return cola().filter(function(x){ return SES && x.uid === SES.uid; }); }
+function encolar(tipo, fecha, datos){
+  var c = cola().filter(function(x){ return !(x.uid === SES.uid && x.tipo === tipo && x.fecha === fecha); });   // queda la última
+  c.push({id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), uid: SES.uid, tipo: tipo, fecha: fecha, datos: datos, creado: Date.now()});
+  lset('jug_cola', c);
+  // Se marca como respondido enseguida (para verlo aunque no haya señal)
+  var r = lget('jug_respondido', {}); r[SES.uid + '|' + tipo + '|' + fecha] = {datos: datos, ts: Date.now()}; lset('jug_respondido', r);
+}
+var enviando = null, ultimoError = '';
+function enviarCola(){
+  if(enviando) return enviando;
+  if(!SES || SES.vencida) return Promise.resolve();
+  var pend = miCola();
+  if(!pend.length){ ultimoError = ''; return Promise.resolve(); }
+  enviando = pend.reduce(function(p, it){
+    return p.then(function(){
+      var llamada = it.tipo === 'wellness'
+        ? rpc('jugador_wellness', {p_fecha: it.fecha, p_campos: it.datos.campos, p_dolor: !!it.datos.dolor, p_zona: it.datos.zona || null, p_tiempo: it.datos.tiempo || null})
+        : rpc('jugador_pse', {p_fecha: it.fecha, p_pse: it.datos.pse});
+      return llamada.then(function(){ sacar(it.id); ultimoError = ''; }, function(e){
+        // Sólo se descarta lo que la base rechazó por su contenido (por ejemplo,
+        // más de 7 días atrás). Sin señal, sesión vencida, base sin actualizar
+        // o cualquier otra cosa: queda guardado y se reintenta.
+        if(e.sinRed || e.auth || e.status !== 400) throw e;
+        sacar(it.id);
+        var rr = lget('jug_respondido', {}); delete rr[it.uid + '|' + it.tipo + '|' + it.fecha]; lset('jug_respondido', rr);
+        var rech = lget('jug_rechazados', []); rech.push({tipo: it.tipo, fecha: it.fecha, motivo: e.message, uid: it.uid}); lset('jug_rechazados', rech.slice(-10));
+      });
+    });
+  }, Promise.resolve()).then(function(){
+    enviando = null; actualizarEstado();
+    return cargarDatos(true);
+  }, function(e){
+    enviando = null; ultimoError = e.sinRed ? '' : (e.message || ''); actualizarEstado();
+  });
+  return enviando;
+}
+function sacar(id){ lset('jug_cola', cola().filter(function(x){ return x.id !== id; })); }
+
+// ════════════════════════════════════════════════════════════════════════
+//  DATOS DEL JUGADOR (quedan guardados para verlos sin señal)
+// ════════════════════════════════════════════════════════════════════════
+var DATOS = null, DATOS_TS = 0, cargando = false, errorDatos = '';
+function claveDatos(){ return 'jug_datos_' + (SES ? SES.uid : ''); }
+function leerGuardados(){ var g = lget(claveDatos(), null); if(g){ DATOS = g.d; DATOS_TS = g.ts; } }
+function cargarDatos(silencioso){
+  if(!SES || SES.vencida) return Promise.resolve();
+  cargando = true; if(!silencioso) actualizarEstado();
+  return rpc('jugador_mis_datos', {p_dias: 180}).then(function(d){
+    DATOS = d; DATOS_TS = Date.now(); errorDatos = ''; cargando = false;
+    lset(claveDatos(), {d: d, ts: DATOS_TS});
+    render();
+  }, function(e){
+    cargando = false;
+    if(!e.sinRed) errorDatos = e.message || 'No se pudieron leer tus datos.';
+    render();
+  });
+}
+function enLinea(){ return navigator.onLine !== false; }
+
+// Lo respondido, sumando lo de la nube y lo que está en el celular
+function respondido(tipo, fecha){
+  var enCola = miCola().some(function(x){ return x.tipo === tipo && x.fecha === fecha; });
+  if(enCola) return 'esperando';
+  var lista = DATOS ? (tipo === 'wellness' ? DATOS.wellness : DATOS.pse) || [] : [];
+  if(lista.some(function(x){ return String(x.date).slice(0, 10) === fecha; })) return 'ok';
+  var r = lget('jug_respondido', {})[(SES && SES.uid) + '|' + tipo + '|' + fecha];
+  if(r && Date.now() - r.ts < 36e5 * 48) return 'ok';
+  return '';
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  PANTALLAS
+// ════════════════════════════════════════════════════════════════════════
+var VISTA = 'hoy', FORM = null;
+var app = document.getElementById('app');
+
+var ESCUDO = '<svg viewBox="0 0 40 40" width="26" height="26" aria-hidden="true"><path d="M20 3 L35 8 V19 C35 28 28 34 20 37 C12 34 5 28 5 19 V8 Z" fill="#0B2A5B"/>'
+  + '<path d="M5 15 H35 V21 H5 Z" fill="#C8102E"/><text x="20" y="29.5" text-anchor="middle" font-size="9" font-weight="800" fill="#fff" font-family="Arial">CAT</text></svg>';
+
+function render(){
+  if(!SES || SES.vencida){ app.innerHTML = htmlIngreso(); return; }
+  var yo = DATOS && DATOS.yo;
+  var h = '<header class="cab"><div class="escudo">' + ESCUDO + '</div><div class="quien"><div class="nom">' + esc(yo ? yo.nombre : (SES.email || '')) + '</div>'
+    + '<div class="div">' + esc(yo ? yo.categoria + (yo.pos ? ' · ' + yo.pos : '') : 'Club Atlético Tigre') + '</div></div>'
+    + '<button class="menu" aria-label="Menú" onclick="abrirMenu()">☰</button></header>'
+    + '<div id="estado"></div><main id="vista">';
+  if(FORM) h += FORM.tipo === 'wellness' ? htmlWellness() : htmlPse();
+  else if(VISTA === 'hoy') h += htmlHoy();
+  else if(!DATOS) h += errorDatos ? '<div class="aviso">' + esc(errorDatos) + '</div>' : '<div class="vacio">' + (enLinea() ? 'Cargando tus datos…' : 'Sin conexión. Tus datos aparecen la primera vez que entres con señal.') + '</div>';
+  else if(VISTA === 'bienestar') h += htmlBienestar();
+  else if(VISTA === 'tests') h += htmlTests();
+  else if(VISTA === 'partidos') h += htmlPartidos();
+  else if(VISTA === 'cuerpo') h += htmlCuerpo();
+  h += '</main>';
+  if(!FORM) h += '<nav class="tabs">' + [['hoy','🏠','Hoy'],['bienestar','💚','Bienestar'],['tests','📈','Tests'],['partidos','⚽','Partidos'],['cuerpo','📏','Cuerpo']].map(function(t){
+      return '<button class="' + (VISTA === t[0] ? 'on' : '') + '" onclick="irA(\'' + t[0] + '\')"><span class="i">' + t[1] + '</span>' + t[2] + '</button>'; }).join('') + '</nav>';
+  app.innerHTML = h;
+  actualizarEstado();
+  activarGraficos();
+}
+function irA(v){ VISTA = v; FORM = null; window.scrollTo(0, 0); render(); }
+
+function actualizarEstado(){
+  var el = document.getElementById('estado'); if(!el) return;
+  var n = SES ? miCola().length : 0, cl = 'estado', t;
+  var rech = lget('jug_rechazados', []).filter(function(x){ return SES && x.uid === SES.uid; });
+  if(n){ cl += ' pend' + (enLinea() ? '' : ' sin');
+    t = n === 1 ? '1 respuesta guardada en el celular' : n + ' respuestas guardadas en el celular';
+    t += enLinea() ? (enviando ? ' · enviando…' : (ultimoError ? ' · ' + ultimoError : ' · se manda en un momento')) : ' · se manda sola cuando tengas señal'; }
+  else if(rech.length){ cl += ' err'; t = 'No se pudo guardar tu ' + (rech[rech.length - 1].tipo === 'pse' ? 'PSE' : 'wellness') + ' del ' + fCorta(rech[rech.length - 1].fecha) + ': ' + rech[rech.length - 1].motivo
+    + ' <button onclick="lset(\'jug_rechazados\',[]);actualizarEstado()" style="margin-left:auto;border:0;background:transparent;font-weight:800;cursor:pointer;color:inherit">✕</button>'; }
+  else if(!enLinea()){ cl += ' sin'; t = 'Sin conexión · podés responder igual'; }
+  else if(cargando){ t = 'Actualizando…'; }
+  else { t = DATOS_TS ? 'Todo enviado · datos ' + hace(DATOS_TS) : 'Conectado'; }
+  el.className = cl; el.innerHTML = '<span class="punto"></span><span style="flex:1;display:flex;align-items:center">' + t + '</span>';
+}
+
+// ── Ingreso ──
+function htmlIngreso(){
+  var venc = SES && SES.vencida;
+  var pend = venc ? cola().filter(function(x){ return x.uid === SES.uid; }).length : 0;
+  return '<div class="ingreso"><div class="logo">' + ESCUDO.replace(/width="26" height="26"/, 'width="52" height="52"').replace('fill="#0B2A5B"', 'fill="#fff"').replace('fill="#fff" font-family', 'fill="#0B2A5B" font-family') + '</div>'
+    + '<h1>Club Atlético Tigre</h1><p>Entrá con el usuario y la contraseña que te dio tu preparador físico.</p>'
+    + (venc ? '<div class="aviso">Tu sesión venció: entrá de nuevo.' + (pend ? ' Tenés ' + pend + ' respuesta(s) guardadas que se mandan apenas entres.' : '') + '</div>' : '')
+    + '<div id="ing-err"></div>'
+    + '<form onsubmit="event.preventDefault();hacerIngreso()">'
+    + '<label class="mini" for="ing-u">Mail o usuario</label><input class="campo" id="ing-u" autocomplete="username" autocapitalize="none" spellcheck="false" value="' + esc(venc ? (SES.email || '') : '') + '">'
+    + '<label class="mini" for="ing-c">Contraseña</label><input class="campo" id="ing-c" type="password" autocomplete="current-password">'
+    + '<button class="btn btn-1" id="ing-b" type="submit" style="margin-top:6px">Entrar</button></form>'
+    + '<p class="nota" style="margin-top:18px">¿Te olvidaste la contraseña? Pedile una nueva a tu preparador físico.</p></div>';
+}
+function hacerIngreso(){
+  var u = document.getElementById('ing-u').value, c = document.getElementById('ing-c').value, b = document.getElementById('ing-b'), err = document.getElementById('ing-err');
+  if(!u || !c){ err.innerHTML = '<div class="error">Completá usuario y contraseña.</div>'; return; }
+  b.disabled = true; b.textContent = 'Entrando…'; err.innerHTML = '';
+  var antes = SES && SES.uid;
+  ingresar(u, c).then(function(){
+    if(antes && antes !== SES.uid){ DATOS = null; DATOS_TS = 0; }
+    leerGuardados(); VISTA = 'hoy'; FORM = null; render();
+    enviarCola(); cargarDatos();
+  }, function(e){
+    b.disabled = false; b.textContent = 'Entrar';
+    var m = e.sinRed ? 'Para entrar la primera vez necesitás conexión (wifi o datos). Después funciona sin señal.'
+      : (/invalid login|invalid_grant|credentials/i.test(e.message) ? 'Usuario o contraseña incorrectos.' : e.message);
+    err.innerHTML = '<div class="error">' + esc(m) + '</div>';
+  });
+}
+
+// ── Hoy ──
+function htmlHoy(){
+  var f = hoy(), w = respondido('wellness', f), p = respondido('pse', f), pa = respondido('pse', ayer());
+  var marca = function(s){ return s === 'ok' ? '<span class="marca ok">✓ Respondido</span>' : (s === 'esperando' ? '<span class="marca esp">⏳ Guardado, se manda con señal</span>' : '<span class="marca no">Pendiente</span>'); };
+  var h = '<h2>Hoy, ' + fCorta(f) + '</h2><div class="hoy">'
+    + '<div class="tarj"><div class="ico">😴</div><div class="crece"><div class="tit">Wellness</div><div class="nota">Cómo llegás hoy: sueño, energía…</div>' + marca(w) + '</div>'
+    + '<button class="ir' + (w ? ' ok' : '') + '" onclick="abrirForm(\'wellness\')">' + (w ? 'Cambiar' : 'Responder') + '</button></div>'
+    + '<div class="tarj"><div class="ico">🔥</div><div class="crece"><div class="tit">PSE de hoy</div><div class="nota">Qué tan dura fue la sesión (después de entrenar)</div>' + marca(p) + '</div>'
+    + '<button class="ir' + (p ? ' ok' : '') + '" onclick="abrirForm(\'pse\')">' + (p ? 'Cambiar' : 'Responder') + '</button></div>';
+  if(!pa) h += '<div class="tarj" style="padding:14px 18px"><div class="crece"><div style="font-weight:700">¿Te faltó la PSE de ayer?</div></div>'
+    + '<button class="ir" onclick="abrirForm(\'pse\',\'' + ayer() + '\')">Responder</button></div>';
+  h += '</div>';
+  // Resumen rápido
+  if(DATOS){
+    var r = resumenBienestar();
+    h += '<h3>Tus últimos 7 días</h3><div class="kpis">'
+      + '<div class="kpi"><div class="k">Bienestar medio</div><div class="v">' + (r.w7 == null ? '—' : num(r.w7) + ' %') + '</div><div class="s">' + r.nw7 + ' de 7 días respondidos</div></div>'
+      + '<div class="kpi"><div class="k">PSE media</div><div class="v">' + (r.p7 == null ? '—' : num(r.p7, 1)) + '</div><div class="s">' + r.np7 + ' sesiones</div></div></div>';
+  }
+  h += htmlInstalar();
+  return h;
+}
+
+// ── Formulario de wellness ──
+function layoutW(){
+  var l = DATOS && DATOS.layout_wellness;
+  if(!l || !Array.isArray(l.fields) || !l.fields.length) l = lget('jug_layout_w', null) || WELL_DEF;
+  else lset('jug_layout_w', l);
+  return l;
+}
+function abrirForm(tipo, fecha){
+  FORM = {tipo: tipo, fecha: fecha || hoy(), vals: {}, dolor: false, zona: '', tiempo: '', pse: null, listo: false};
+  window.scrollTo(0, 0); render();
+}
+function cerrarForm(){ FORM = null; render(); }
+function chipsFecha(){
+  return '<div class="fila" style="gap:8px;margin-bottom:16px">' + [[hoy(), 'Hoy'], [ayer(), 'Ayer']].map(function(x){
+    return '<button class="chip' + (FORM.fecha === x[0] ? ' on' : '') + '" onclick="FORM.fecha=\'' + x[0] + '\';render()">' + x[1] + ' · ' + fCorta(x[0]) + '</button>'; }).join('') + '</div>';
+}
+function htmlWellness(){
+  if(FORM.listo) return htmlListo();
+  var l = layoutW();
+  var h = '<div class="fila" style="margin-bottom:8px"><h2 class="crece" style="margin:0">😴 Wellness</h2><button class="chip" onclick="cerrarForm()">Cancelar</button></div>' + chipsFecha()
+    + '<div class="nota" style="margin-bottom:16px">Del 1 (muy mal) al ' + (l.fields[0] && l.fields[0].max || 5) + ' (excelente).</div>';
+  l.fields.forEach(function(f){
+    var max = f.max || 5, v = FORM.vals[f.key];
+    h += '<div class="preg"><div class="lab"><span>' + esc(f.label || f.key) + '</span><span class="val">' + (v || '–') + '</span></div>'
+      + '<div class="escala" style="grid-template-columns:repeat(' + Math.min(max, 5) + ',1fr)">';
+    for(var i = 1; i <= max; i++) h += '<button type="button" class="' + (v === i ? 'on' : '') + '" onclick="FORM.vals[\'' + esc(f.key) + '\']=' + i + ';render()" aria-label="' + esc(f.label) + ' ' + i + '">' + i + '</button>';
+    h += '</div><div class="extremos"><span>Muy mal</span><span>Excelente</span></div></div>';
+  });
+  h += '<div class="preg"><div class="lab"><span>¿Tenés dolor muscular?</span></div><div class="fila" style="gap:8px">'
+    + '<button class="chip' + (!FORM.dolor ? ' on' : '') + '" style="flex:1;padding:13px" onclick="FORM.dolor=false;render()">No</button>'
+    + '<button class="chip' + (FORM.dolor ? ' on' : '') + '" style="flex:1;padding:13px" onclick="FORM.dolor=true;render()">Sí</button></div></div>';
+  if(FORM.dolor){
+    h += '<label class="mini" for="w-zona">¿Dónde?</label><select class="campo" id="w-zona" onchange="FORM.zona=this.value;render()"><option value="">— Elegí la zona —</option>'
+      + DOLOR_ZONAS.map(function(z){ return '<option' + (FORM.zona === z ? ' selected' : '') + '>' + z + '</option>'; }).join('') + '</select>'
+      + '<label class="mini" for="w-tiempo">¿Hace cuánto?</label><select class="campo" id="w-tiempo" onchange="FORM.tiempo=this.value"><option value="">— Elegí —</option>'
+      + DOLOR_TIEMPOS.map(function(z){ return '<option' + (FORM.tiempo === z ? ' selected' : '') + '>' + z + '</option>'; }).join('') + '</select>';
+  }
+  var faltan = l.fields.filter(function(f){ return !FORM.vals[f.key]; }).length;
+  var falta = faltan ? 'Te falta' + (faltan > 1 ? 'n ' + faltan + ' preguntas' : ' 1 pregunta') : (FORM.dolor && !FORM.zona ? 'Elegí la zona del dolor' : '');
+  h += '<button class="btn btn-1" style="margin-top:8px" ' + (falta ? 'disabled' : '') + ' onclick="mandarWellness()">' + (falta || 'Enviar') + '</button>';
+  return h;
+}
+function mandarWellness(){
+  var l = layoutW(), campos = {};
+  l.fields.forEach(function(f){ campos[f.key] = FORM.vals[f.key]; });
+  encolar('wellness', FORM.fecha, {campos: campos, dolor: FORM.dolor, zona: FORM.dolor ? FORM.zona : '', tiempo: FORM.dolor ? FORM.tiempo : ''});
+  FORM.listo = true; render(); enviarCola().then(function(){ if(FORM && FORM.listo) render(); });
+}
+
+// ── Formulario de PSE ──
+function colorBorg(v){ return v <= 3 ? '#13795B' : (v <= 6 ? '#9A5B00' : (v <= 8 ? '#C2410C' : '#B3261E')); }
+function htmlPse(){
+  if(FORM.listo) return htmlListo();
+  var h = '<div class="fila" style="margin-bottom:8px"><h2 class="crece" style="margin:0">🔥 PSE</h2><button class="chip" onclick="cerrarForm()">Cancelar</button></div>' + chipsFecha()
+    + '<div style="font-weight:800;font-size:16px;margin-bottom:4px">¿Qué tan dura sentiste la sesión?</div><div class="nota" style="margin-bottom:14px">Respondé 15-30 minutos después de terminar.</div><div class="borg">';
+  for(var v = 1; v <= 10; v++) h += '<button type="button" class="' + (FORM.pse === v ? 'on' : '') + '" onclick="FORM.pse=' + v + ';render()"><span class="n" style="background:' + colorBorg(v) + '">' + v + '</span><span class="d">' + BORG[v] + '</span></button>';
+  h += '</div><button class="btn btn-1" style="margin-top:12px" ' + (FORM.pse ? '' : 'disabled') + ' onclick="mandarPse()">' + (FORM.pse ? 'Enviar' : 'Elegí un número') + '</button>';
+  return h;
+}
+function mandarPse(){
+  encolar('pse', FORM.fecha, {pse: FORM.pse});
+  FORM.listo = true; render(); enviarCola().then(function(){ if(FORM && FORM.listo) render(); });
+}
+function htmlListo(){
+  var esp = miCola().some(function(x){ return x.tipo === FORM.tipo && x.fecha === FORM.fecha; });
+  return '<div class="listo"><div class="grande">' + (esp ? '📲' : '✅') + '</div><h2>' + (esp ? '¡Guardado en tu celular!' : '¡Listo, gracias!') + '</h2>'
+    + '<p class="nota" style="font-size:14px;margin:0 0 22px">' + (esp ? (enLinea() ? 'Se está mandando…' : 'No hay señal ahora. Se manda sola cuando vuelvas a tener wifi o datos: solamente abrí esta app.')
+      : 'Tu ' + (FORM.tipo === 'pse' ? 'PSE' : 'wellness') + ' de ' + cuando(FORM.fecha) + ' ya le llegó a tu preparador físico.') + '</p>'
+    + '<button class="btn btn-1" onclick="cerrarForm()">Volver</button></div>';
+}
+
+// ── Menú ──
+function abrirMenu(){
+  var n = miCola().length;
+  var d = document.createElement('div'); d.className = 'velo'; d.onclick = function(e){ if(e.target === d) d.remove(); };
+  d.innerHTML = '<div class="hoja"><div style="font-weight:800">' + esc(SES.email || '') + '</div><div class="nota">Versión ' + VERSION + '</div>'
+    + '<button class="btn btn-2" onclick="this.closest(\'.velo\').remove();cargarDatos();enviarCola()">🔄 Actualizar mis datos</button>'
+    + '<button class="btn btn-rojo" onclick="confirmarSalir(' + n + ')">Cerrar sesión</button>'
+    + '<button class="btn btn-2" onclick="this.closest(\'.velo\').remove()">Cerrar</button></div>';
+  document.body.appendChild(d);
+}
+function confirmarSalir(n){
+  if(n && !confirm('Tenés ' + n + ' respuesta(s) sin mandar. Quedan guardadas y se mandan la próxima vez que entres con esta cuenta. ¿Cerrar sesión igual?')) return;
+  var v = document.querySelector('.velo'); if(v) v.remove();
+  salir();
+}
+
+// ── Instalar en la pantalla de inicio ──
+var promptInstalar = null;
+window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); promptInstalar = e; if(VISTA === 'hoy' && !FORM) render(); });
+function instalada(){ return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }
+function htmlInstalar(){
+  if(instalada() || lget('jug_no_instalar', false)) return '';
+  var ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  return '<div class="tarj" style="margin-top:18px"><div class="fila"><div class="crece" style="font-weight:800">📲 Tenela en tu pantalla de inicio</div>'
+    + '<button class="chip" style="padding:4px 10px" onclick="lset(\'jug_no_instalar\',true);render()" aria-label="No mostrar más">✕</button></div>'
+    + '<div class="nota" style="margin:6px 0 10px">Así se abre como una app y funciona sin señal.</div>'
+    + (promptInstalar ? '<button class="btn btn-1" onclick="promptInstalar.prompt();promptInstalar=null">Instalar</button>'
+      : '<div class="nota">' + (ios ? 'En Safari: tocá <b>Compartir</b> (el cuadrado con la flecha) y después <b>Agregar a inicio</b>.'
+        : 'En Chrome: tocá los <b>tres puntos</b> y después <b>Agregar a la pantalla principal</b> (o <b>Instalar app</b>).') + '</div>')
+    + '</div>';
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  MIS DATOS
+// ════════════════════════════════════════════════════════════════════════
+function maxW(){ return layoutW().fields.reduce(function(a, f){ return a + (f.max || 5); }, 0) || 20; }
+function pctW(r){ var v = aNum(r.readiness), m = maxW(); return v == null ? null : Math.max(0, Math.min(100, v / m * 100)); }
+function media(a){ a = a.filter(function(v){ return v != null && !isNaN(v); }); return a.length ? a.reduce(function(x, y){ return x + y; }, 0) / a.length : null; }
+function resumenBienestar(){
+  var d7 = masDias(hoy(), -6), d28 = masDias(hoy(), -27);
+  var w = (DATOS.wellness || []), p = (DATOS.pse || []);
+  var w7 = w.filter(function(r){ return String(r.date) >= d7; }), w28 = w.filter(function(r){ return String(r.date) >= d28; });
+  var p7 = p.filter(function(r){ return String(r.date) >= d7; });
+  return {w7: media(w7.map(pctW)), nw7: w7.length, w28: media(w28.map(pctW)), p7: media(p7.map(function(r){ return aNum(r.pse); })), np7: p7.length};
+}
+
+// Gráfico de una serie: puntos o barras por día, con toque para ver el valor
+var GRAF = [];
+// Posición horizontal: puntos de borde a borde; barras, cada una en su franja
+function posX(barras, n, i){
+  var pl = 30, ancho = 340 - 30 - 8;
+  if(barras) return pl + (i + 0.5) * ancho / n;
+  return pl + (n === 1 ? ancho / 2 : i * ancho / (n - 1));
+}
+function grafico(dias, vals, o){
+  o = o || {}; var id = GRAF.length; GRAF.push({dias: dias, vals: vals, o: o});
+  var W = 340, H = o.alto || 150, pl = 30, pr = 8, pt = 22, pb = 22, n = dias.length;
+  var vs = vals.filter(function(v){ return v != null; });
+  if(!vs.length) return '<div class="vacio" style="padding:18px">Todavía no hay datos en este período.</div>';
+  var mn = o.min != null ? o.min : Math.min.apply(null, vs), mx = o.max != null ? o.max : Math.max.apply(null, vs);
+  if(mx === mn){ mx += 1; mn -= 1; }
+  var X = function(i){ return posX(o.barras, n, i); };
+  var Y = function(v){ return pt + (1 - (v - mn) / (mx - mn)) * (H - pt - pb); };
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(o.titulo || '') + '">';
+  (o.marcas || [mn, (mn + mx) / 2, mx]).forEach(function(v){
+    s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="var(--grilla)" stroke-width="1"/>'
+      + '<text x="' + (pl - 5) + '" y="' + (Y(v) + 3.5) + '" font-size="10" text-anchor="end" fill="var(--tex-3)">' + num(v) + '</text>'; });
+  [0, Math.floor((n - 1) / 2), n - 1].forEach(function(i){
+    s += '<text x="' + X(i) + '" y="' + (H - 6) + '" font-size="10" text-anchor="' + (i === 0 ? 'start' : (i === n - 1 ? 'end' : 'middle')) + '" fill="var(--tex-3)">' + fLarga(dias[i]) + '</text>'; });
+  if(o.barras){
+    var bw = Math.max(3, Math.min(28, (W - pl - pr) / n - 3));
+    vals.forEach(function(v, i){ if(v == null) return; var y = Y(v), y0 = Y(mn);
+      s += '<path d="M' + (X(i) - bw / 2) + ' ' + y0 + ' V' + (y + 3) + ' q0 -3 3 -3 h' + (bw - 6) + ' q3 0 3 3 V' + y0 + 'Z" fill="var(--serie)"/>'; });
+  } else {
+    var d = '', prev = false;
+    vals.forEach(function(v, i){ if(v == null){ prev = false; return; } d += (prev ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1) + ' '; prev = true; });
+    s += '<path d="' + d + '" fill="none" stroke="var(--serie)" stroke-width="2" stroke-linejoin="round"/>';
+    vals.forEach(function(v, i){ if(v == null) return; s += '<circle cx="' + X(i) + '" cy="' + Y(v) + '" r="4" fill="var(--serie)" stroke="var(--sup)" stroke-width="2"/>'; });
+  }
+  s += '<line class="cruz" x1="0" x2="0" y1="' + pt + '" y2="' + (H - pb) + '" stroke="var(--tex-3)" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>';
+  s += '<rect x="' + pl + '" y="0" width="' + (W - pl - pr) + '" height="' + H + '" fill="transparent" data-g="' + id + '"/></svg>';
+  return '<div class="grafico">' + s + '<div class="tip" style="display:none"></div></div>';
+}
+function activarGraficos(){
+  document.querySelectorAll('.grafico rect[data-g]').forEach(function(r){
+    var g = GRAF[+r.getAttribute('data-g')]; if(!g) return;
+    var cont = r.closest('.grafico'), svg = cont.querySelector('svg'), tip = cont.querySelector('.tip'), cruz = svg.querySelector('.cruz');
+    function mostrar(ev){
+      var b = svg.getBoundingClientRect(), x = ((ev.touches ? ev.touches[0].clientX : ev.clientX) - b.left) / b.width * 340;
+      var n = g.dias.length, best = -1, bd = 1e9;
+      for(var i = 0; i < n; i++){ if(g.vals[i] == null) continue; var dd = Math.abs(posX(g.o.barras, n, i) - x); if(dd < bd){ bd = dd; best = i; } }
+      if(best < 0) return;
+      var xi = posX(g.o.barras, n, best);
+      cruz.setAttribute('x1', xi); cruz.setAttribute('x2', xi); cruz.style.display = '';
+      tip.style.display = ''; tip.style.left = Math.max(12, Math.min(88, xi / 340 * 100)) + '%';
+      tip.textContent = fCorta(g.dias[best]) + ': ' + (g.o.fmt ? g.o.fmt(g.vals[best]) : num(g.vals[best]));
+    }
+    r.addEventListener('pointerdown', mostrar); r.addEventListener('pointermove', mostrar);
+    r.addEventListener('pointerleave', function(){ tip.style.display = 'none'; cruz.style.display = 'none'; });
+  });
+}
+function ultimosDias(n){ var a = []; for(var i = n - 1; i >= 0; i--) a.push(masDias(hoy(), -i)); return a; }
+
+function htmlBienestar(){
+  GRAF = [];
+  var r = resumenBienestar(), dias = ultimosDias(28);
+  var porDiaW = {}, porDiaP = {};
+  (DATOS.wellness || []).forEach(function(x){ porDiaW[String(x.date).slice(0, 10)] = pctW(x); });
+  (DATOS.pse || []).forEach(function(x){ var k = String(x.date).slice(0, 10); porDiaP[k] = Math.max(porDiaP[k] || 0, aNum(x.pse) || 0); });
+  var dol = (DATOS.wellness || []).filter(function(x){ return String(x.date) >= masDias(hoy(), -27) && x.dolor && !/^no$/i.test(x.dolor); });
+  var h = '<h2>Bienestar y carga</h2><div class="kpis">'
+    + '<div class="kpi"><div class="k">Bienestar · 7 días</div><div class="v">' + (r.w7 == null ? '—' : num(r.w7) + ' %') + '</div><div class="s">28 días: ' + (r.w28 == null ? '—' : num(r.w28) + ' %') + '</div></div>'
+    + '<div class="kpi"><div class="k">Días con dolor · 28 días</div><div class="v">' + dol.length + '</div><div class="s">' + (dol.length ? esc(dol[dol.length - 1].zona || '') + ' (último)' : 'sin dolor') + '</div></div></div>'
+    + '<div class="tarj"><div style="font-weight:800;margin-bottom:6px">Bienestar por día (%)</div>'
+    + grafico(dias, dias.map(function(d){ return porDiaW[d] != null ? porDiaW[d] : null; }), {min: 0, max: 100, marcas: [0, 50, 100], titulo: 'Bienestar por día', fmt: function(v){ return num(v) + ' %'; }})
+    + '<div class="nota">100 % = todo en el máximo. Tocá el gráfico para ver cada día.</div></div>'
+    + '<div class="tarj"><div style="font-weight:800;margin-bottom:6px">PSE por día</div>'
+    + grafico(dias, dias.map(function(d){ return porDiaP[d] || null; }), {min: 0, max: 10, marcas: [0, 5, 10], barras: true, titulo: 'PSE por día'})
+    + '</div>';
+  // Carga semanal (PSE × minutos) si el PF cargó los minutos
+  var sem = {}, conMin = 0;
+  (DATOS.pse || []).forEach(function(x){ var m = aNum(x.min), p = aNum(x.pse); if(!(m > 0) || p == null) return; conMin++;
+    var d = new Date(String(x.date).slice(0, 10) + 'T12:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); var k = fechaLocal(d); sem[k] = (sem[k] || 0) + p * m; });
+  if(conMin){
+    var lunes = []; var l0 = new Date(hoy() + 'T12:00:00'); l0.setDate(l0.getDate() - ((l0.getDay() + 6) % 7));
+    for(var i = 7; i >= 0; i--){ var x = new Date(l0); x.setDate(x.getDate() - 7 * i); lunes.push(fechaLocal(x)); }
+    h += '<div class="tarj"><div style="font-weight:800;margin-bottom:6px">Carga semanal (UA = PSE × minutos)</div>'
+      + grafico(lunes, lunes.map(function(k){ return sem[k] || null; }), {min: 0, barras: true, titulo: 'Carga semanal', fmt: function(v){ return num(v) + ' UA'; }})
+      + '<div class="nota">Cada barra es una semana (de lunes a domingo).</div></div>';
+  }
+  return h;
+}
+
+function catalogo(){
+  var c = {};
+  TESTS_DEF.forEach(function(t){ c[t.id] = t; });
+  (Array.isArray(DATOS.catalogo) ? DATOS.catalogo : []).forEach(function(t){ if(t && t.id) c[t.id] = Object.assign({}, c[t.id] || {}, t); });
+  return c;
+}
+function cambioHtml(dif, better, u){
+  if(dif == null) return '';
+  var cl = (dif === 0 || better === 'none') ? 'igual' : ((better === 'down' ? dif < 0 : dif > 0) ? 'mejor' : 'peor');
+  var flecha = dif > 0 ? '▲' : (dif < 0 ? '▼' : '=');
+  return '<span class="cambio ' + cl + '">' + flecha + ' ' + (dif > 0 ? '+' : '') + dec(dif, u) + (u ? ' ' + esc(u) : '') + '</span>';
+}
+function htmlTests(){
+  GRAF = [];
+  var cat = catalogo(), por = {};
+  (DATOS.tests || []).forEach(function(x){
+    var v = aNum(x.val), I = aNum(x.valI), D = aNum(x.valD);
+    if(v == null && (I != null || D != null)) v = (I != null && D != null) ? (I + D) / 2 : (I != null ? I : D);
+    if(v == null || !x.testId || !x.date) return;
+    (por[x.testId] = por[x.testId] || []).push({date: String(x.date).slice(0, 10), v: v, I: I, D: D, div: x.div});
+  });
+  (DATOS.resi || []).forEach(function(x){
+    var v = aNum(x.value); if(v == null || !x.date) return;
+    var id = 'resi:' + (x.type || 'otro'), def = RESI_DEF[x.type] || {};
+    if(!cat[id]) cat[id] = {id: id, name: def.short || x.name || 'Resistencia', unit: def.metricUnit || '', better: 'up', group: 'resistencia'};
+    (por[id] = por[id] || []).push({date: String(x.date).slice(0, 10), v: v, div: x.div});
+  });
+  var ids = Object.keys(por);
+  if(!ids.length) return '<h2>Mis tests</h2><div class="vacio">Todavía no tenés tests cargados.</div>';
+  ids.sort(function(a, b){ var la = por[a].reduce(function(m, r){ return r.date > m ? r.date : m; }, ''), lb = por[b].reduce(function(m, r){ return r.date > m ? r.date : m; }, ''); return lb.localeCompare(la); });
+  var h = '<h2>Mis tests</h2>';
+  ids.forEach(function(id){
+    var t = cat[id] || {name: id, unit: '', better: 'up'}, l = por[id].sort(function(a, b){ return a.date.localeCompare(b.date); });
+    var u = l[l.length - 1], prev = l.length > 1 ? l[l.length - 2] : null;
+    h += '<div class="tarj test"><div class="top"><div class="nm">' + esc(t.name) + '</div><div class="ult">' + dec(u.v, t.unit) + '</div><div class="u">' + esc(t.unit || '') + '</div></div>'
+      + '<div class="fila" style="margin-top:4px;flex-wrap:wrap;gap:6px"><span class="nota">' + fLarga(u.date) + (u.div && DATOS.yo && u.div !== DATOS.yo.categoria ? ' · ' + esc(u.div) : '') + '</span>'
+      + (prev ? cambioHtml(u.v - prev.v, t.better, t.unit) + '<span class="nota">vs. ' + fLarga(prev.date) + '</span>' : '') + '</div>';
+    if(u.I != null && u.D != null) h += '<div class="nota" style="margin-top:4px">Izquierda ' + dec(u.I, t.unit) + ' · Derecha ' + dec(u.D, t.unit)
+      + ' · diferencia ' + num(Math.abs(u.I - u.D) / Math.max(u.I, u.D) * 100) + ' %</div>';
+    // Dónde estás en tu plantel (sin nombres)
+    var pl = (DATOS.tests_plantel || {})[id];
+    if(Array.isArray(pl) && pl.length >= 4 && t.better !== 'none' && u.div === (DATOS.yo && DATOS.yo.categoria)){
+      var otros = pl.length - 1, mejor = pl.filter(function(v){ return t.better === 'down' ? v > u.v : v < u.v; }).length;
+      mejor = Math.min(mejor, otros);
+      h += '<div class="barra" role="img" aria-label="Superás a ' + mejor + ' de ' + otros + '"><i style="width:' + Math.max(3, mejor / otros * 100) + '%"></i></div>'
+        + '<div class="nota">Superás a <b>' + mejor + '</b> de tus ' + otros + ' compañeros con este test · promedio del plantel ' + dec(media(pl), t.unit) + '</div>';
+    }
+    if(l.length >= 3) h += '<div style="margin-top:8px">' + grafico(l.map(function(r){ return r.date; }), l.map(function(r){ return r.v; }), {alto: 110, titulo: t.name, fmt: function(v){ return dec(v, t.unit) + ' ' + (t.unit || ''); }}) + '</div>';
+    h += '</div>';
+  });
+  return h;
+}
+
+function htmlPartidos(){
+  var ps = (DATOS.partidos || []).filter(function(p){ return p.yo; }).slice().reverse();
+  if(!ps.length) return '<h2>Mis partidos</h2><div class="vacio">Todavía no hay partidos con tu GPS.</div>';
+  var h = '<h2>Mis partidos</h2><div class="nota" style="margin:-6px 0 12px">Tus números y el promedio del equipo, llevados a 90 minutos (jugadores con 45′ o más).</div>';
+  ps.forEach(function(p){
+    var y = p.yo, e = p.equipo || {}, mi = aNum(y.min), f = mi > 0 ? 90 / mi : null;
+    var fila = function(nom, v, v90, eq, u, d){
+      return '<tr><td>' + nom + '</td><td class="r"><b>' + (v == null ? '—' : num(v, d || 0)) + '</b></td><td class="r">' + (v90 == null ? '—' : num(v90, d || 0)) + '</td><td class="r">' + (eq == null ? '—' : num(eq, d || 0)) + '</td></tr>';
+    };
+    var g = function(k){ return aNum(y[k]); };
+    var ad = (g('acc') != null || g('dcc') != null) ? (g('acc') || 0) + (g('dcc') || 0) : null;
+    var p90 = function(v){ return v != null && f && mi >= 30 ? v * f : null; };
+    h += '<div class="tarj"><div class="fila"><div class="crece"><div style="font-weight:800;font-size:16px">vs ' + esc(p.rival || '—') + '</div>'
+      + '<div class="nota">' + fLarga(p.fecha) + (p.comp ? ' · ' + esc(p.comp) : '') + (p.result ? ' · ' + esc(p.result) : '') + '</div></div>'
+      + '<div style="text-align:right"><div style="font-size:22px;font-weight:800">' + (mi == null ? '—' : num(mi)) + '′</div><div class="nota">jugados</div></div></div>'
+      + '<table class="tabla" style="margin-top:8px"><tr><th></th><th class="r">Vos</th><th class="r">Vos /90′</th><th class="r">Equipo /90′</th></tr>'
+      + fila('Distancia (m)', g('mts'), p90(g('mts')), aNum(e.mts90))
+      + fila('HSR (m)', g('hsr'), p90(g('hsr')), aNum(e.hsr90))
+      + fila('Sprint (m)', g('spr'), p90(g('spr')), aNum(e.spr90))
+      + fila('Acel + desacel', ad, p90(ad), aNum(e.ad90))
+      + '<tr><td>Vel. máxima (km/h)</td><td class="r"><b>' + num(g('vmax'), 1) + '</b></td><td class="r">—</td><td class="r">' + num(aNum(e.vmax), 1) + '</td></tr>'
+      + '</table>' + (mi != null && mi < 30 ? '<div class="nota" style="margin-top:6px">Con menos de 30′ no se lleva a 90 (daría números engañosos).</div>' : '') + '</div>';
+  });
+  return h;
+}
+
+function htmlCuerpo(){
+  GRAF = [];
+  var rs = (Array.isArray(DATOS.antropometria) ? DATOS.antropometria : []).filter(function(r){ return r && r.date; })
+    .sort(function(a, b){ return String(a.date).localeCompare(String(b.date)); });
+  if(!rs.length) return '<h2>Mi cuerpo</h2><div class="vacio">Todavía no tenés mediciones de antropometría.</div>';
+  var u = rs[rs.length - 1], p = rs.length > 1 ? rs[rs.length - 2] : null;
+  var h = '<h2>Mi cuerpo</h2><div class="nota" style="margin:-6px 0 12px">Última medición: ' + fLarga(u.date) + (p ? ' · comparada con ' + fLarga(p.date) : '') + '</div><div class="kpis">';
+  ANT.forEach(function(m){
+    var v = aNum(u[m.id]); if(v == null) return;
+    var pv = p ? aNum(p[m.id]) : null;
+    h += '<div class="kpi"><div class="k">' + m.name + '</div><div class="v">' + dec(v, m.unit) + '<span class="u" style="font-size:13px;color:var(--tex-3)"> ' + m.unit + '</span></div>'
+      + (pv != null ? '<div style="margin-top:3px">' + cambioHtml(v - pv, m.better, m.unit) + '</div>' : '') + '</div>';
+  });
+  h += '</div>';
+  if(rs.length >= 2) ANT.forEach(function(m){
+    var l = rs.filter(function(r){ return aNum(r[m.id]) != null; }); if(l.length < 2) return;
+    h += '<div class="tarj"><div style="font-weight:800;margin-bottom:6px">' + m.name + (m.unit ? ' (' + m.unit + ')' : '') + '</div>'
+      + grafico(l.map(function(r){ return String(r.date).slice(0, 10); }), l.map(function(r){ return aNum(r[m.id]); }), {alto: 110, titulo: m.name, fmt: function(v){ return dec(v, m.unit) + ' ' + m.unit; }}) + '</div>';
+  });
+  return h + '<div class="nota">Las mediciones las carga el área de nutrición. Consultá con ellos cualquier duda.</div>';
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  ARRANQUE
+// ════════════════════════════════════════════════════════════════════════
+window.addEventListener('online', function(){ actualizarEstado(); enviarCola(); });
+window.addEventListener('offline', actualizarEstado);
+document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'visible' && SES){ enviarCola(); if(Date.now() - DATOS_TS > 10 * 60000) cargarDatos(true); } });
+setInterval(function(){ if(SES && miCola().length) enviarCola(); }, 20000);
+
+if(SES && !SES.vencida) leerGuardados();
+render();
+if(SES && !SES.vencida){ enviarCola(); cargarDatos(!!DATOS); }
+
+// Funciona sin señal: el "trabajador" guarda esta página en el celular
+if('serviceWorker' in navigator && location.protocol !== 'file:'){
+  navigator.serviceWorker.register('jugador-sw.js', {scope: './jugador'}).catch(function(){});
+}
+</script>
+</body>
+</html>
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -20730,6 +21508,15 @@ function accesoCargar(){
     MI_ROL = u.data.rol;
     MI_NOMBRE = u.data.nombre;
 
+    // v211 · Un jugador no usa el dashboard: va a su app del celular
+    if(MI_ROL === 'jugador'){
+      accesoBloquear('Esta es una cuenta de jugador',
+        'Tu app es otra: te llevamos a jugador.html. Entrá ahí con el mismo usuario y contraseña.');
+      try{ sbClient.auth.signOut().catch(function(){}); }catch(e){}
+      setTimeout(function(){ location.replace('jugador.html'); }, 1800);
+      return false;
+    }
+
     // v208 · Dueño de esta computadora: sólo quien carga datos de división
     // (coordinación o cuerpo técnico). Un médico, nutricionista o coordinador
     // por área que entra primero en una computadora ajena es INVITADO: abre
@@ -20844,7 +21631,7 @@ var ADMIN_ROLES = {
   medico:         'Lesiones de sus divisiones (vista Club y Área médica)',
   nutricion:      'Sólo antropometría (Perfiles → Nutricional)',
   captacion:      'Sólo Captación, del club entero (no necesita divisiones)',
-  jugador:        'Sólo su propio perfil',
+  jugador:        'Su app en el celular: wellness, PSE y sus datos (pestaña Jugadores)',
   lectura:        'Mira, no carga'
 };
 
@@ -20871,6 +21658,7 @@ function adminAbrir(){
   adminCargar();
 }
 function adminCerrar(){
+  if(ADMIN.jug) ADMIN.jug.claves = {};   // v211: las contraseñas nuevas no quedan en memoria
   var ov = document.getElementById('admin-ov');
   if(ov) ov.remove();
   document.removeEventListener('keydown', adminTecla);
@@ -20954,11 +21742,11 @@ function adminRender(){
     + '<button onclick="adminCerrar()" style="border:none;background:transparent;color:var(--tex-2,#667);'
     + 'font-size:22px;line-height:1;cursor:pointer;padding:2px 6px">×</button></div>'
     + '<div style="display:flex;gap:2px;padding:12px 20px 0;border-bottom:1px solid var(--bor-1,#dfe3ea);margin-bottom:16px">'
-    + pest('usuarios','Cuentas') + pest('divisiones','Divisiones') + '</div>'
+    + pest('usuarios','Cuentas') + pest('jugadores','Jugadores') + pest('divisiones','Divisiones') + '</div>'
     + aviso
     + '<div style="padding:0 20px 22px">'
     + (ADMIN.cargando ? '<div style="padding:30px;text-align:center;color:var(--tex-2,#667);font-size:13px">Leyendo…</div>'
-       : (ADMIN.tab === 'usuarios' ? adminHtmlUsuarios() : adminHtmlDivisiones()))
+       : (ADMIN.tab === 'usuarios' ? adminHtmlUsuarios() : (ADMIN.tab === 'jugadores' ? adminHtmlJugadores() : adminHtmlDivisiones())))
     + '</div>';
 }
 
@@ -20997,7 +21785,7 @@ function adminHtmlUsuarios(){
     + adminCampo('admin-n-pass','Contraseña (mínimo 6)','text','')
     + '<label style="display:block"><span style="display:block;font-size:11px;color:var(--tex-2,#667);'
     + 'margin-bottom:4px">Rol</span><select id="admin-n-rol" onchange="adminRender()" style="' + adminEstInput() + '">'
-    + ADMIN.roles.map(function(r){
+    + ADMIN.roles.filter(function(r){ return r !== 'jugador'; }).map(function(r){
         return '<option value="' + adminEsc(r) + '"' + (r === 'cuerpo_tecnico' ? ' selected' : '') + '>'
              + adminEsc(adminRolTxt(r)) + '</option>'; }).join('')
     + '</select></label>'
@@ -21023,7 +21811,9 @@ function adminHtmlUsuarios(){
   if(!ADMIN.cuentas.length){
     h += '<div style="padding:20px;text-align:center;font-size:12.5px;color:var(--tex-2,#667)">Sin cuentas todavía.</div>';
   }
+  var nJug = ADMIN.cuentas.filter(function(u){ return u.rol === 'jugador'; }).length;
   ADMIN.cuentas.forEach(function(u, i){
+    if(u.rol === 'jugador') return;   // v211: se manejan en la pestaña Jugadores
     var mias = ADMIN.alcance[u.auth_uid] || [];
     var yo = u.auth_uid === (sbCurrentUser && sbCurrentUser.id);
     h += '<div style="display:grid;grid-template-columns:1.5fr 1.1fr 2.2fr 86px;gap:8px;padding:11px 13px;'
@@ -21039,7 +21829,7 @@ function adminHtmlUsuarios(){
       + '<div><select id="admin-rol-' + i + '" onchange="adminGuardarRol(' + i + ')" '
       + (yo ? 'disabled title="No te podés cambiar el rol a vos mismo" ' : '')
       + 'style="' + adminEstInput() + 'width:100%">'
-      + ADMIN.roles.map(function(r){
+      + ADMIN.roles.filter(function(r){ return r !== 'jugador'; }).map(function(r){
           return '<option value="' + adminEsc(r) + '"' + (r === u.rol ? ' selected' : '') + '>'
                + adminEsc(adminRolTxt(r)) + '</option>'; }).join('')
       + '</select>'
@@ -21072,6 +21862,7 @@ function adminHtmlUsuarios(){
   });
   h += '</div>';
   h += '<div style="font-size:11.5px;color:var(--tex-2,#667);margin-top:10px;line-height:1.6">'
+    + (nJug ? 'Además hay <b>' + nJug + '</b> cuenta(s) de jugador: se manejan en la pestaña «Jugadores». ' : '')
     + 'Los cambios de rol, división y estado se guardan solos, en el momento. '
     + 'La persona los ve la próxima vez que abre el dashboard.</div>';
   return h;
@@ -21374,6 +22165,208 @@ window.adminAltaDeSinAsignar = adminAltaDeSinAsignar; window.adminCrearDiv = adm
 window.adminOrden = adminOrden; window.adminRenombrar = adminRenombrar;
 window.adminBorrarDiv = adminBorrarDiv; window.adminVaciar = adminVaciar;
 window.adminVaciarConfirmar = adminVaciarConfirmar; window.ADMIN = ADMIN;
+
+// ══ JUGADORES (v211) ══════════════════════════════════════════════════════
+// Cuentas para la app del celular (jugador.html). Se crean por división,
+// ya confirmadas y sin mandar mails (función de la base del paso 7). La
+// contraseña sólo se ve al crearla o cambiarla: después no se guarda en
+// ningún lado, así que se copia o se descarga en ese momento.
+var JUG_DOMINIO = 'jugadores.tigre';
+ADMIN.jug = {cat: null, lista: null, err: '', claves: {}, ocupado: false, falta: false};
+
+function adminJugLink(){
+  var b = location.href.split('#')[0].split('?')[0];
+  return b.slice(0, b.lastIndexOf('/') + 1) + 'jugador.html';
+}
+function adminJugSlug(nombre){
+  return String(nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '').slice(0, 30) || 'jugador';
+}
+function adminJugClaveNueva(){
+  var a = 'abcdefghjkmnpqrstuvwxyz23456789', s = '', r = new Uint32Array(7);
+  try{ crypto.getRandomValues(r); }catch(e){ for(var j = 0; j < 7; j++) r[j] = Math.floor(Math.random() * 1e9); }
+  for(var i = 0; i < 7; i++) s += a.charAt(r[i] % a.length);
+  return s;
+}
+function adminJugUsuario(email){
+  email = String(email || '');
+  var suf = '@' + JUG_DOMINIO;
+  return email.slice(-suf.length) === suf ? email.slice(0, -suf.length) : email;
+}
+function adminJugCargar(cat){
+  var J = ADMIN.jug;
+  if(cat) J.cat = cat;
+  if(!J.cat){ var c = (ADMIN.cats || []).filter(function(x){ return x.activa !== false; })[0]; J.cat = c ? c.nombre : null; }
+  if(!J.cat) return;
+  J.lista = null; J.err = ''; adminRender();
+  sbClient.rpc('admin_jugadores', {p_categoria: J.cat}).then(function(r){
+    if(r.error){
+      J.falta = /admin_jugadores|function|PGRST202|does not exist/i.test(r.error.message || '');
+      J.err = J.falta ? '' : r.error.message; J.lista = [];
+    } else { J.falta = false; J.lista = r.data || []; }
+    adminRender();
+  });
+}
+function adminHtmlJugadores(){
+  var J = ADMIN.jug;
+  if(J.lista === null && !J.err && !J.falta){ setTimeout(function(){ adminJugCargar(); }, 0); }
+  var h = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+    + '<span style="font-size:12px;font-weight:700;color:var(--tex-2,#667)">División</span>'
+    + '<select onchange="adminJugCargar(this.value)" style="' + adminEstInput() + '">'
+    + (ADMIN.cats || []).map(function(c){ return '<option' + (c.nombre === J.cat ? ' selected' : '') + '>' + adminEsc(c.nombre) + '</option>'; }).join('')
+    + '</select><span style="flex:1"></span>'
+    + '<button onclick="adminJugCopiarLink()" style="' + adminEstInput() + 'cursor:pointer;font-weight:700">🔗 Copiar link de la app</button></div>';
+  if(J.falta){
+    return h + '<div style="padding:12px 14px;border-radius:10px;font-size:12.5px;line-height:1.6;background:color-mix(in srgb,#B06000 10%,transparent);'
+      + 'border:1px solid color-mix(in srgb,#B06000 30%,transparent);color:#8A4B00">Para crear cuentas de jugador falta correr '
+      + '<b>paso7_jugadores.sql</b> en Supabase (SQL Editor → New query → pegar → Run). Después tocá «Actualizar».</div>';
+  }
+  if(J.err) return h + '<div style="color:#B3261E;font-size:12.5px">No se pudo leer: ' + adminEsc(J.err) + '</div>';
+  if(J.lista === null) return h + '<div style="padding:24px;text-align:center;color:var(--tex-2,#667);font-size:13px">Leyendo…</div>';
+  if(!J.lista.length) return h + '<div style="padding:24px;text-align:center;color:var(--tex-2,#667);font-size:13px">'
+    + 'No hay jugadores cargados en Perfiles de ' + adminEsc(J.cat) + '. Las cuentas se crean a partir de los perfiles.</div>';
+
+  var sin = J.lista.filter(function(x){ return !x.uid; }).length, con = J.lista.length - sin;
+  var nuevas = J.lista.filter(function(x){ return J.claves[x.perfil]; }).length;
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+    + '<div style="font-size:12.5px;color:var(--tex-1,#15202e)"><b>' + con + '</b> de ' + J.lista.length + ' con cuenta</div>'
+    + (sin ? '<button ' + (J.ocupado ? 'disabled ' : '') + 'onclick="adminJugCrearTodos()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;border-radius:9px;'
+      + 'padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">' + (J.ocupado ? 'Creando…' : '+ Crear las ' + sin + ' que faltan') + '</button>' : '')
+    + (nuevas ? '<button onclick="adminJugCopiarTodas()" style="' + adminEstInput() + 'cursor:pointer;font-weight:700">📋 Copiar usuarios y contraseñas (' + nuevas + ')</button>'
+      + '<button onclick="adminJugCsv()" style="' + adminEstInput() + 'cursor:pointer;font-weight:700">⬇ CSV</button>' : '')
+    + '</div>';
+  if(nuevas) h += '<div style="padding:9px 12px;border-radius:9px;font-size:12px;line-height:1.5;margin-bottom:12px;'
+    + 'background:color-mix(in srgb,#0F6E56 10%,transparent);border:1px solid color-mix(in srgb,#0F6E56 30%,transparent);color:#0B5C47">'
+    + 'Copiá o descargá ahora las contraseñas nuevas: por seguridad no se guardan, y al cerrar este panel ya no se pueden volver a ver (sí cambiar).</div>';
+
+  h += '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;overflow:hidden">'
+    + '<div style="display:grid;grid-template-columns:1.3fr 1.6fr 1.1fr;gap:8px;padding:9px 13px;background:var(--sup-2,#f6f7f9);'
+    + 'font-size:11px;font-weight:800;color:var(--tex-2,#667);text-transform:uppercase;letter-spacing:.4px">'
+    + '<div>Jugador</div><div>Usuario y contraseña</div><div style="text-align:right">Cuenta</div></div>';
+  J.lista.forEach(function(x, i){
+    var cl = J.claves[x.perfil];
+    h += '<div style="display:grid;grid-template-columns:1.3fr 1.6fr 1.1fr;gap:8px;padding:10px 13px;border-top:1px solid var(--bor-1,#dfe3ea);align-items:center">'
+      + '<div style="font-size:12.5px;font-weight:700;color:var(--tex-1,#15202e)">' + adminEsc(x.nombre || x.perfil)
+      + (x.uid ? '<div style="font-size:10.5px;font-weight:500;color:var(--tex-2,#667)">' + (x.ultimo_ingreso ? 'entró el ' + adminEsc(String(x.ultimo_ingreso).slice(0, 10).split('-').reverse().join('/')) : 'todavía no entró') + '</div>' : '') + '</div>';
+    if(x.uid){
+      h += '<div style="font-size:12.5px;color:var(--tex-1,#15202e)"><b>' + adminEsc(adminJugUsuario(x.email)) + '</b>'
+        + (cl ? ' · contraseña <b style="font-family:monospace;font-size:13px">' + adminEsc(cl.clave) + '</b>' : '') + '</div>'
+        + '<div style="display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap">'
+        + (cl ? adminBtnChico('📋 Mensaje', 'Copiar el mensaje para mandarle por WhatsApp', 'adminJugCopiar(' + i + ')') : '')
+        + adminBtnChico('🔑 Nueva clave', 'Generar una contraseña nueva', 'adminJugClave(' + i + ')', J.ocupado)
+        + adminBtnChico('🗑', 'Borrar la cuenta (sus datos quedan)', 'adminJugBorrar(' + i + ')', J.ocupado) + '</div>';
+    } else {
+      h += '<div><input id="admin-jug-u-' + i + '" value="' + adminEsc(adminJugSlug(x.nombre)) + '" title="Usuario (o un mail real)" style="' + adminEstInput() + 'width:100%"></div>'
+        + '<div style="text-align:right"><button ' + (J.ocupado ? 'disabled ' : '') + 'onclick="adminJugCrear(' + i + ')" style="border:1px solid var(--club-c2,#3B4D88);'
+        + 'background:transparent;color:var(--club-c2,#3B4D88);border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Crear cuenta</button></div>';
+    }
+    h += '</div>';
+  });
+  h += '</div><div style="font-size:11.5px;color:var(--tex-2,#667);margin-top:10px;line-height:1.6">'
+    + 'El jugador entra en <b>' + adminEsc(adminJugLink()) + '</b> con su usuario (sin @) o con un mail, si pusiste uno real. '
+    + 'Sólo ve lo suyo: su wellness, su PSE, sus tests, sus partidos y su antropometría. Lo que responde llega al «Hoy» de su división, igual que el kiosco.</div>';
+  return h;
+}
+function adminJugEmail(u){ u = String(u || '').trim().toLowerCase(); return u.indexOf('@') >= 0 ? u : u + '@' + JUG_DOMINIO; }
+function adminJugCrearUno(x, usuario){
+  var J = ADMIN.jug, clave = adminJugClaveNueva(), intento = 0;
+  function probar(u){
+    return sbClient.rpc('admin_crear_jugador', {p_categoria: J.cat, p_perfil: x.perfil, p_email: adminJugEmail(u), p_clave: clave}).then(function(r){
+      if(r.error){
+        // Usuario repetido (dos "Gómez"): se prueba gomez2, gomez3…
+        if(/ya tiene una cuenta/i.test(r.error.message || '') && usuario.indexOf('@') < 0 && intento < 8){ intento++; return probar(usuario + (intento + 1)); }
+        throw r.error;
+      }
+      J.claves[x.perfil] = {usuario: u.indexOf('@') >= 0 ? u : u, clave: clave, nombre: x.nombre};
+      return r.data;
+    });
+  }
+  return probar(usuario);
+}
+function adminJugCrear(i){
+  var J = ADMIN.jug, x = J.lista[i]; if(!x) return;
+  var el = document.getElementById('admin-jug-u-' + i), u = el ? el.value.trim() : adminJugSlug(x.nombre);
+  if(!u) return adminAviso('Poné un usuario o un mail.', 'mal');
+  J.ocupado = true; adminRender();
+  adminJugCrearUno(x, u).then(function(){
+    J.ocupado = false; adminAviso('Cuenta creada para ' + x.nombre + '. Copiale el mensaje con su usuario y contraseña.', 'ok'); adminJugRefrescar();
+  }, function(e){ J.ocupado = false; adminAviso('No se pudo crear la cuenta de ' + x.nombre + ': ' + (e && e.message || e), 'mal'); });
+}
+function adminJugCrearTodos(){
+  var J = ADMIN.jug, faltan = J.lista.filter(function(x){ return !x.uid; });
+  if(!faltan.length) return;
+  if(!confirm('Se van a crear ' + faltan.length + ' cuentas de jugador en ' + J.cat + ', cada una con una contraseña distinta. ¿Seguimos?')) return;
+  J.ocupado = true; adminRender();
+  var ok = 0, mal = [];
+  faltan.reduce(function(p, x){
+    return p.then(function(){
+      var i = J.lista.indexOf(x), el = document.getElementById('admin-jug-u-' + i);
+      return adminJugCrearUno(x, el && el.value.trim() ? el.value.trim() : adminJugSlug(x.nombre))
+        .then(function(){ ok++; }, function(e){ mal.push(x.nombre + ': ' + (e && e.message || e)); });
+    });
+  }, Promise.resolve()).then(function(){
+    J.ocupado = false;
+    adminAviso(ok + ' cuenta(s) creadas.' + (mal.length ? ' No se pudieron crear ' + mal.length + ': ' + mal.join(' · ') : ' Copiá o descargá ahora los usuarios y contraseñas.'), mal.length ? 'mal' : 'ok');
+    adminJugRefrescar();
+  });
+}
+function adminJugRefrescar(){
+  var J = ADMIN.jug;
+  sbClient.rpc('admin_jugadores', {p_categoria: J.cat}).then(function(r){ if(!r.error){ J.lista = r.data || []; } adminRender(); });
+}
+function adminJugClave(i){
+  var J = ADMIN.jug, x = J.lista[i]; if(!x || !x.uid) return;
+  if(!confirm('¿Generar una contraseña nueva para ' + x.nombre + '? La anterior deja de servir.')) return;
+  var clave = adminJugClaveNueva();
+  J.ocupado = true; adminRender();
+  sbClient.rpc('admin_clave_jugador', {p_uid: x.uid, p_clave: clave}).then(function(r){
+    J.ocupado = false;
+    if(r.error) return adminAviso('No se pudo cambiar: ' + r.error.message, 'mal');
+    J.claves[x.perfil] = {usuario: adminJugUsuario(x.email), clave: clave, nombre: x.nombre};
+    adminAviso('Contraseña nueva para ' + x.nombre + ': ' + clave, 'ok');
+  });
+}
+function adminJugBorrar(i){
+  var J = ADMIN.jug, x = J.lista[i]; if(!x || !x.uid) return;
+  if(!confirm('¿Borrar la cuenta de ' + x.nombre + '? Ya no va a poder entrar a la app. Su wellness, su PSE y su perfil quedan como están.')) return;
+  J.ocupado = true; adminRender();
+  sbClient.rpc('admin_borrar_jugador', {p_uid: x.uid}).then(function(r){
+    J.ocupado = false;
+    if(r.error) return adminAviso('No se pudo borrar: ' + r.error.message, 'mal');
+    delete J.claves[x.perfil];
+    adminAviso('Cuenta de ' + x.nombre + ' borrada.', 'ok'); adminJugRefrescar();
+  });
+}
+function adminJugMensaje(c){
+  return 'Hola ' + String(c.nombre || '').split(' ')[0] + '! Esta es tu cuenta para la app del club (wellness, PSE y tus datos):\n'
+    + adminJugLink() + '\nUsuario: ' + c.usuario + '\nContraseña: ' + c.clave
+    + '\nAbrila en el celular y agregala a la pantalla de inicio. Funciona aunque no tengas datos.';
+}
+function adminJugCopiarTexto(t, ok){
+  var hecho = function(){ adminAviso(ok, 'ok'); };
+  try{ navigator.clipboard.writeText(t).then(hecho, function(){ prompt('Copiá este texto:', t); }); }
+  catch(e){ prompt('Copiá este texto:', t); }
+}
+function adminJugCopiar(i){
+  var J = ADMIN.jug, x = J.lista[i], c = x && J.claves[x.perfil]; if(!c) return;
+  adminJugCopiarTexto(adminJugMensaje(c), 'Mensaje para ' + x.nombre + ' copiado: pegalo en WhatsApp.');
+}
+function adminJugCopiarTodas(){
+  var J = ADMIN.jug, cs = J.lista.filter(function(x){ return J.claves[x.perfil]; }).map(function(x){ return J.claves[x.perfil]; });
+  adminJugCopiarTexto('App del club: ' + adminJugLink() + '\n\n' + cs.map(function(c){ return c.nombre + ' · usuario: ' + c.usuario + ' · contraseña: ' + c.clave; }).join('\n'),
+    cs.length + ' usuarios y contraseñas copiados.');
+}
+function adminJugCopiarLink(){ adminJugCopiarTexto(adminJugLink(), 'Link de la app copiado.'); }
+function adminJugCsv(){
+  var J = ADMIN.jug, cs = J.lista.filter(function(x){ return J.claves[x.perfil]; }).map(function(x){ return J.claves[x.perfil]; });
+  var q = function(s){ return '"' + String(s).replace(/"/g, '""') + '"'; };
+  var t = '﻿Jugador;Usuario;Contraseña;Link\n' + cs.map(function(c){ return [q(c.nombre), q(c.usuario), q(c.clave), q(adminJugLink())].join(';'); }).join('\n');
+  var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], {type: 'text/csv;charset=utf-8'}));
+  a.download = 'cuentas_jugadores_' + adminJugSlug(J.cat) + '.csv'; document.body.appendChild(a); a.click(); a.remove();
+}
+window.adminJugCargar = adminJugCargar; window.adminJugCrear = adminJugCrear; window.adminJugCrearTodos = adminJugCrearTodos;
+window.adminJugClave = adminJugClave; window.adminJugBorrar = adminJugBorrar; window.adminJugCopiar = adminJugCopiar;
+window.adminJugCopiarTodas = adminJugCopiarTodas; window.adminJugCopiarLink = adminJugCopiarLink; window.adminJugCsv = adminJugCsv;
 </script>
 
 <script id="roles-js">
@@ -56457,3 +57450,52 @@ window.railMarca=railMarca;
 </script>
 </body>
 </html>
+{
+  "name": "Tigre · Jugador",
+  "short_name": "Tigre",
+  "description": "Wellness, PSE y tus datos de rendimiento",
+  "start_url": "jugador.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B2A5B",
+  "theme_color": "#0B2A5B",
+  "lang": "es",
+  "icons": [
+    {"src": "jugador-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "jugador-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
+
+// Tigre · Jugador — guarda la página en el celular para que abra sin señal.
+// Sólo se ocupa de sus propios archivos: no toca el dashboard ni Supabase.
+var CACHE = 'tigre-jugador-j1';
+var ARCHIVOS = ['jugador.html', 'jugador.webmanifest', 'jugador-192.png', 'jugador-512.png'];
+
+self.addEventListener('install', function(e){
+  e.waitUntil(caches.open(CACHE).then(function(c){ return c.addAll(ARCHIVOS); }).then(function(){ return self.skipWaiting(); }));
+});
+self.addEventListener('activate', function(e){
+  e.waitUntil(caches.keys().then(function(ks){
+    return Promise.all(ks.filter(function(k){ return k.indexOf('tigre-jugador-') === 0 && k !== CACHE; }).map(function(k){ return caches.delete(k); }));
+  }).then(function(){ return self.clients.claim(); }));
+});
+self.addEventListener('fetch', function(e){
+  var r = e.request;
+  if(r.method !== 'GET') return;
+  var u = new URL(r.url);
+  if(u.origin !== location.origin) return;
+  var nombre = u.pathname.split('/').pop() || '';
+  if(ARCHIVOS.indexOf(nombre) < 0) return;
+  // Primero la red (para recibir versiones nuevas); si no hay señal en 4 s, lo guardado
+  e.respondWith(new Promise(function(ok){
+    var listo = false;
+    var t = setTimeout(function(){ caches.match(nombre, {ignoreSearch: true}).then(function(c){ if(c && !listo){ listo = true; ok(c); } }); }, 4000);
+    fetch(r).then(function(res){
+      if(res && res.ok){ var copia = res.clone(); caches.open(CACHE).then(function(c){ c.put(nombre, copia); }); }
+      if(!listo){ listo = true; clearTimeout(t); ok(res); }
+    }).catch(function(){
+      caches.match(nombre, {ignoreSearch: true}).then(function(c){ if(!listo){ listo = true; clearTimeout(t); ok(c || Response.error()); } });
+    });
+  }));
+});
