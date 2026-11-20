@@ -15985,6 +15985,34 @@ function sbCacheBorrar(){
 }
 window.sbCacheBorrar=sbCacheBorrar;
 
+// v210: Supabase entrega como máximo 1000 filas por pedido. Pasado ese número
+// el resto NO llegaba (y en wellness y PSE una división lo pasa en semanas).
+// sbTodas pide de a 1000 hasta que no quede nada, ordenando por la clave única
+// de cada tabla para que las páginas no se pisen ni salteen filas. Devuelve lo
+// mismo que una consulta común: {data, error}.
+var SB_ORDEN = {
+  wellness_data:['name','date'], pse_data:['name','date','week','day'], player_profiles:['id'],
+  microciclo:['week','day'], plan_weeks:['name','created'], gym_sessions:['id'], nutrition_data:['player_key'],
+  mobility_data:['player_key'], gym_exercises:['id'], gym_cats:['name'], gym_evals:['player_key'],
+  eval_aliases:['alias_key'], drills_exercises:['id'], matches:['id'], app_settings:['key']
+};
+function sbTodas(armar, tabla){
+  var ord = SB_ORDEN[tabla] || [], PAG = 1000, todo = [];
+  function pagina(desde){
+    var q = armar();
+    ord.forEach(function(c){ q = q.order(c, {ascending: true}); });
+    return q.range(desde, desde + PAG - 1).then(function(r){
+      if(!r || r.error) return r;
+      var d = Array.isArray(r.data) ? r.data : [];
+      for(var i = 0; i < d.length; i++) todo.push(d[i]);
+      if(d.length < PAG || todo.length >= 300000) return {data: todo, error: null, status: r.status};
+      return pagina(desde + PAG);
+    });
+  }
+  return pagina(0);
+}
+window.sbTodas = sbTodas;
+
 function _sbDeltaKey(row,cols){
   return cols.map(function(c){ return String(row[c]==null?'':row[c]); }).join('\u0001');
 }
@@ -16014,7 +16042,7 @@ function sbDeltaSelect(table, keyCols, extra, opts){
     return {data:arr, error:null};
   }
   function full(){
-    return base('*').then(function(r){
+    return sbTodas(function(){ return base('*'); }, table).then(function(r){
       if(r&&!r.error&&Array.isArray(r.data)){
         c.rows={}; c.stamp={};
         r.data.forEach(function(row){
@@ -16032,7 +16060,7 @@ function sbDeltaSelect(table, keyCols, extra, opts){
     c.inflight=full().then(done, function(e){ c.inflight=null; throw e; });
     return c.inflight;
   }
-  c.inflight=base(keyCols.join(',')+',updated_at').then(function(r){
+  c.inflight=sbTodas(function(){ return base(keyCols.join(',')+',updated_at'); }, table).then(function(r){
     if(!r||r.error||!Array.isArray(r.data)) return r;
     var present={}, firstVals={}, nChanged=0;
     r.data.forEach(function(lr){
@@ -16165,13 +16193,12 @@ function wellPsePollOnce(){
   // v189: incremental. Sólo filas modificadas desde la última vista (con 15 min
   // de margen por relojes desfasados). Cada 10 min, lectura completa de control.
   var wpFull=!window._wpWm || (Date.now()-(window._wpLastFull||0))>60*60*1000;   // v190
-  var qW=sbClient.from('wellness_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO);
-  var qP=sbClient.from('pse_data').select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO);
-  if(!wpFull){
-    var wmISO=new Date(window._wpWm-15*60*1000).toISOString();
-    qW=qW.gte('updated_at',wmISO); qP=qP.gte('updated_at',wmISO);
-  }
-  var tasks=[qW,qP];
+  var wmISO=wpFull?null:new Date(window._wpWm-15*60*1000).toISOString();
+  // v210: de a 1000 filas (una división grande pasa las 1000 en 21 días)
+  function armar(t){ return function(){
+    var q=sbClient.from(t).select('*').eq('categoria',SB_CATEGORIA).gte('date',sinceISO);
+    return wmISO?q.gte('updated_at',wmISO):q; }; }
+  var tasks=[sbTodas(armar('wellness_data'),'wellness_data'),sbTodas(armar('pse_data'),'pse_data')];
   return Promise.all(tasks).then(function(res){
     _wpPollBusy=false;
     try{
@@ -42983,9 +43010,7 @@ window.sbScheduleProfileSync = sbScheduleProfileSync;
 
 function sbMicrociclosFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('microciclo')
-    .select('*')
-    .eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('microciclo').select('*').eq('categoria', SB_CATEGORIA); }, 'microciclo')
     .then(function(res){
       if(res.error) throw res.error;
       return res.data || [];
@@ -43271,7 +43296,7 @@ function _sbValidDate(d){
 // ── WELLNESS ──
 function sbWellnessFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('wellness_data').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('wellness_data').select('*').eq('categoria', SB_CATEGORIA); }, 'wellness_data')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbWellnessToPayload(r){
@@ -43309,7 +43334,7 @@ function _sbWellnessFromRow(row){
 // ── PSE ──
 function sbPseFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('pse_data').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('pse_data').select('*').eq('categoria', SB_CATEGORIA); }, 'pse_data')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbPseToPayload(r){
@@ -43460,7 +43485,7 @@ function sbScheduleWellPseSync(){
       // cargar. Ahora sólo sube lo que es más nuevo que lo que ya está.
       // v191: sólo nombre, fecha y sello. Antes bajaba TODO el historial de
       // wellness en cada guardado.
-      sbClient.from('wellness_data').select('name,date,upd:fields->_upd').eq('categoria', SB_CATEGORIA).then(function(cw){
+      sbTodas(function(){ return sbClient.from('wellness_data').select('name,date,upd:fields->_upd').eq('categoria', SB_CATEGORIA); }, 'wellness_data').then(function(cw){
         var enNube={};
         if(cw && cw.data) cw.data.forEach(function(row){
           enNube[(row.name||'')+'|'+(row.date||'')]=Number(row.upd||0);
@@ -43484,7 +43509,7 @@ function sbScheduleWellPseSync(){
     // PSE
     if(typeof PSE_DATA!=='undefined' && Array.isArray(PSE_DATA) && PSE_DATA.length){
       // v191: sólo las claves y el sello (antes, todo el historial de PSE)
-      sbClient.from('pse_data').select('name,date,week,day,upd:fields->_upd').eq('categoria', SB_CATEGORIA).then(function(cp){
+      sbTodas(function(){ return sbClient.from('pse_data').select('name,date,week,day,upd:fields->_upd').eq('categoria', SB_CATEGORIA); }, 'pse_data').then(function(cp){
         var enNubeP={};
         if(cp && cp.data) cp.data.forEach(function(row){
           var k=(row.name||'')+'|'+(row.date||'')+'|'+(row.week||'')+'|'+(row.day||'');
@@ -43666,7 +43691,7 @@ function _sbPlanWeekFromRow(row){
 // Supabase: tabla gym_sessions con id TEXT PK
 function sbGymSessionsFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('gym_sessions').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('gym_sessions').select('*').eq('categoria', SB_CATEGORIA); }, 'gym_sessions')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbGymSessionToPayload(s){
@@ -43698,7 +43723,7 @@ function _sbGymSessionFromRow(row){
 // Supabase: tabla nutrition_data con player_key PK, records JSONB
 function sbNutritionFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('nutrition_data').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('nutrition_data').select('*').eq('categoria', SB_CATEGORIA); }, 'nutrition_data')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbNutritionToPayloads(obj){
@@ -43716,7 +43741,7 @@ function _sbNutritionToPayloads(obj){
 // ── MOBILITY_DATA ──
 function sbMobilityFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('mobility_data').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('mobility_data').select('*').eq('categoria', SB_CATEGORIA); }, 'mobility_data')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbMobilityToPayloads(obj){
@@ -43998,7 +44023,7 @@ window.sbMigrateTanda1LocalToCloud = sbMigrateTanda1LocalToCloud;
 // Supabase: tabla gym_exercises con id TEXT PK
 function sbGymExercisesFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('gym_exercises').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('gym_exercises').select('*').eq('categoria', SB_CATEGORIA); }, 'gym_exercises')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbGymExerciseToPayload(e){
@@ -44036,7 +44061,7 @@ function _sbGymExerciseFromRow(row){
 // Supabase: tabla gym_cats con PK (name, categoria)
 function sbGymCatsFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('gym_cats').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('gym_cats').select('*').eq('categoria', SB_CATEGORIA); }, 'gym_cats')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbGymCatToPayload(c, idx){
@@ -44069,7 +44094,7 @@ function _sbGymCatFromRow(row){
 // Supabase: tabla gym_evals con PK (player_key, categoria), evals JSONB array
 function sbGymEvalsFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('gym_evals').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('gym_evals').select('*').eq('categoria', SB_CATEGORIA); }, 'gym_evals')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbGymEvalsToPayloads(obj){
@@ -44089,7 +44114,7 @@ function _sbGymEvalsToPayloads(obj){
 // Supabase: tabla eval_aliases con PK (alias_key, categoria)
 function sbEvalAliasesFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('eval_aliases').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('eval_aliases').select('*').eq('categoria', SB_CATEGORIA); }, 'eval_aliases')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbEvalAliasesToPayloads(obj){
@@ -44121,7 +44146,7 @@ function sbScheduleTanda2aSync(){
       if(ePayload.length){
         // v172: comparar contra la nube antes de subir
         // v191: sólo id y sello (antes bajaba los ejercicios con sus imágenes)
-        sbClient.from('gym_exercises').select('id,upd:data->_upd').eq('categoria', SB_CATEGORIA).then(function(ce){
+        sbTodas(function(){ return sbClient.from('gym_exercises').select('id,upd:data->_upd').eq('categoria', SB_CATEGORIA); }, 'gym_exercises').then(function(ce){
           if(ce && ce.data) ce.data.forEach(function(row){
             _gymCloudUpd[String(row.id)] = Number(row.upd||0);
           });
@@ -44143,7 +44168,7 @@ function sbScheduleTanda2aSync(){
     if(typeof GYM_CATS!=='undefined' && Array.isArray(GYM_CATS) && GYM_CATS.length){
       // v165: leer el orden que ya está en la nube. Si el de allá es MÁS
       // NUEVO que el mío, no lo piso: subo sólo el resto de los campos.
-      sbClient.from('gym_cats').select('*').eq('categoria', SB_CATEGORIA).then(function(cg){
+      sbTodas(function(){ return sbClient.from('gym_cats').select('*').eq('categoria', SB_CATEGORIA); }, 'gym_cats').then(function(cg){
         var tsNube=0, enNube={};
         if(cg && cg.data) cg.data.forEach(function(row){
           var d=row.data||{};
@@ -44921,7 +44946,7 @@ function _sbDrillFromRow(row){
 // Supabase: tabla matches con id TEXT PK
 function sbMatchesFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
-  return sbClient.from('matches').select('*').eq('categoria', SB_CATEGORIA)
+  return sbTodas(function(){ return sbClient.from('matches').select('*').eq('categoria', SB_CATEGORIA); }, 'matches')
     .then(function(res){ if(res.error) throw res.error; return res.data || []; });
 }
 function _sbMatchToPayload(m){
@@ -44994,7 +45019,7 @@ function sbScheduleTanda2bSync(){
         var localIds = {};
         dPayload.forEach(function(p){ localIds[Number(p.id)] = true; });
         // 1) Traer los ids que hay en la nube para esta categoría
-        sbClient.from('drills_exercises').select('id').eq('categoria', SB_CATEGORIA).then(function(res){
+        sbTodas(function(){ return sbClient.from('drills_exercises').select('id').eq('categoria', SB_CATEGORIA); }, 'drills_exercises').then(function(res){
           var cloudIds = (res && res.data) ? res.data.map(function(r){return Number(r.id);}) : [];
           // 2) v151: BORRAR SÓLO lo que tiene un tombstone explícito.
           // ANTES esto borraba de la nube todo id que no estuviera en MI copia
@@ -45331,7 +45356,7 @@ function sbSettingsFetchAll(){
   if(!sbClient || !sbCurrentUser) return Promise.resolve([]);
   // v206: la configuración de la división, SIN Captación (filas viejas que
   // pudieron quedar con la división), más la Captación del club.
-  var division = sbClient.from('app_settings').select('*').eq('categoria', SB_CATEGORIA)
+  var division = sbTodas(function(){ return sbClient.from('app_settings').select('*').eq('categoria', SB_CATEGORIA); }, 'app_settings')
     .then(function(res){ if(res.error) throw res.error;
       return (res.data || []).filter(function(r){ return String(r.key).indexOf('CAPT_') !== 0; }); });
   var club = sbClient.from('app_settings').select('*').eq('categoria', 'Club')
