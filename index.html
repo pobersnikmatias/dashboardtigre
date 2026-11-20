@@ -226,7 +226,7 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
   ('gps_cat_activa tema_v1 railFijo_v1 libView_v1 ckioPin_v1 clubSettings_v1 '
   + 'gps_csv_mapping_v1 sb_egreso_v1 gym_eval_pdf_cfg_v1 capt_club_v1 '
   + 'pdf_match_layout pdf_match_layout_mode mc_pdf_layout mc_pdf_layout_mode '
-  + '_escala_mudanza_v204').split(/\s+/).forEach(function(k){ if(k) GLOBALES[k]=1; });
+  + '_escala_mudanza_v204 escala_dueno escala_invitados').split(/\s+/).forEach(function(k){ if(k) GLOBALES[k]=1; });
 
   window.ESCALA_PORCAT = PORCAT;
   window.ESCALA_GLOBALES = GLOBALES;
@@ -244,9 +244,18 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
     return k.indexOf('sb-') === 0 || k.indexOf('supabase') === 0 || k.indexOf('__probe_') === 0;
   }
 
+  // v208 · Un cajón por USUARIO en cada computadora, además de por división.
+  // El primero que abre esta versión en el equipo es el «dueño» y conserva
+  // las claves de siempre (sin mudanzas). Cualquier otra cuenta que entre en
+  // la misma computadora (un médico de prueba, un coordinador) usa claves con
+  // su identificador y no ve ni toca el cajón del dueño. El usuario se lee de
+  // la sesión guardada de Supabase; si cambia al iniciar sesión, accesoCargar
+  // recarga una vez para que esto se recalcule.
+  window.ESCALA_SUFIJO = '';
   function nombreReal(k){
     if(typeof k !== 'string') k = String(k);
-    if(PORCAT[k]) return k + '::' + window.CAT_ACTIVA;
+    if(PORCAT[k]) return k + '::' + window.CAT_ACTIVA + window.ESCALA_SUFIJO;
+    if(k === 'capt_club_v1') return k + window.ESCALA_SUFIJO;
     if(!GLOBALES[k] && !esDeLibreria(k)) anotar(k);
     return k;
   }
@@ -261,6 +270,23 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
     LS = window.localStorage;
     P  = Object.getPrototypeOf(LS);
     og = P.getItem; os = P.setItem; or = P.removeItem;
+
+    // Usuario de la sesión guardada (supabase-js la deja en sb-…-auth-token)
+    try{
+      var dueno = og.call(LS, 'escala_dueno'), uid = null;
+      for(var ui = 0; ui < LS.length && !uid; ui++){
+        var uk = LS.key(ui);
+        if(!uk || !/^sb-.*-auth-token$/.test(uk)) continue;
+        var uv = og.call(LS, uk); if(!uv) continue;
+        if(uv.indexOf('base64-') === 0) uv = atob(uv.slice(7));
+        var uo = JSON.parse(uv);
+        uid = (uo && uo.user && uo.user.id) || (uo && uo.currentSession && uo.currentSession.user && uo.currentSession.user.id) || null;
+      }
+      window.ESCALA_UID = uid;
+      var invitados = [];
+      try{ invitados = JSON.parse(og.call(LS, 'escala_invitados') || '[]'); }catch(e){}
+      if(uid && ((dueno && uid !== dueno) || invitados.indexOf(uid) >= 0)) window.ESCALA_SUFIJO = '::u:' + uid;
+    }catch(e){}
 
     P.getItem    = function(k){ return og.call(this, this === LS ? nombreReal(k) : k); };
     P.setItem    = function(k, v){ return os.call(this, this === LS ? nombreReal(k) : k, v); };
@@ -347,12 +373,17 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
     for(var i = 0; i < LS3.length; i++){
       var k = LS3.key(i);
       if(k && k.indexOf(pref) === 0){
-        var div = k.slice(pref.length);
-        if(div && div !== LEGADO) divs.push(div);
+        var resto = k.slice(pref.length);
+        // v208: el cajón de otro usuario lleva «::u:id» después de la división.
+        // Lo que decide si es la 5ta es SÓLO el nombre de la división: si no,
+        // el cajón de la 5ta de un segundo usuario (que tiene los 71 ejercicios
+        // legítimos) se tomaba como contaminado y se vaciaba en cada arranque.
+        var div = resto.split('::u:')[0];
+        if(div && div !== LEGADO) divs.push(resto);
       }
     }
-    divs.forEach(function(div){
-      if(contaminado(og.call(LS3, pref + div))) purgar(div);
+    divs.forEach(function(resto){
+      if(contaminado(og.call(LS3, pref + resto))) purgar(resto);
     });
   }catch(e){ console.warn('[escala] revisión de cajones:', e); }
 
@@ -5749,8 +5780,10 @@ window._dstoreCrudo = { get: dstoreGet, set: dstoreSet, del: dstoreDel };
 (function(){
   var g=dstoreGet, s_=dstoreSet, d=dstoreDel;
   function real(k){
-    return (typeof k==='string' && window.ESCALA_PORCAT && window.ESCALA_PORCAT[k])
-      ? k + '::' + window.CAT_ACTIVA : k;
+    if(typeof k==='string' && window.ESCALA_PORCAT && window.ESCALA_PORCAT[k])
+      return k + '::' + window.CAT_ACTIVA + (window.ESCALA_SUFIJO || '');
+    if(k === 'capt_club_v1') return k + (window.ESCALA_SUFIJO || '');   // v208
+    return k;
   }
   dstoreGet=function(k){
     return g(real(k)).then(function(v){
@@ -15906,7 +15939,7 @@ function _sbCacheBe(){ return window._sbCacheBackendTest || _sbCacheBackend; }
 function _sbCacheKey(ck){
   var proy='';
   try{ proy=(typeof SUPABASE_URL!=='undefined'&&SUPABASE_URL)?String(SUPABASE_URL).slice(-28):''; }catch(e){}
-  return ck+'::'+(typeof SB_CATEGORIA!=='undefined'?SB_CATEGORIA:'')+'::'+proy;
+  return ck+'::'+(typeof SB_CATEGORIA!=='undefined'?SB_CATEGORIA:'')+'::'+proy+(window.ESCALA_SUFIJO||'');   // v208: por usuario
 }
 // Leer del disco a memoria. Una sola vez por tabla y sesión.
 function _sbCacheHidratar(ck, c){
@@ -16406,7 +16439,14 @@ function planGuardarYa(){
     planSave();
     // Verificar que realmente quedó guardado (localStorage puede fallar por
     // cuota llena y saveData no siempre lo informa).
-    planAutoSaveFlash(planAutoSaveVerify(uid));
+    // v208: localStorage es sólo el espejo rápido. Si no está ahí, se mira la
+    // copia real en IndexedDB antes de avisar que no se guardó.
+    var _ok = planAutoSaveVerify(uid);
+    if(_ok || typeof dstoreGet !== 'function') planAutoSaveFlash(_ok);
+    else setTimeout(function(){
+      dstoreGet(STORAGE_KEY).then(function(raw){ planAutoSaveFlash(planAutoSaveVerify(uid, raw)); })
+        .catch(function(){ planAutoSaveFlash(false); });
+    }, 250);
   }catch(e){
     console.warn('planGuardarYa:',e);
     planAutoSaveFlash(false);
@@ -16422,10 +16462,10 @@ document.addEventListener('blur', function(e){
 }, true);
 
 // Relee lo persistido y confirma que la semana está ahí con sus ejercicios.
-function planAutoSaveVerify(uid){
+function planAutoSaveVerify(uid, desdeIdb){
   try{
     if(typeof STORAGE_KEY==='undefined')return true; // no podemos verificar
-    var raw=localStorage.getItem(STORAGE_KEY);
+    var raw=(desdeIdb!=null)?desdeIdb:localStorage.getItem(STORAGE_KEY);
     if(!raw)return false;
     var p=JSON.parse(raw);
     var weeks=p&&p.PLAN_WEEKS;
@@ -20618,6 +20658,25 @@ function accesoCargar(){
   if(typeof sbClient === 'undefined' || !sbClient || !sbCurrentUser){
     return Promise.resolve(true);
   }
+  // v208 · ¿El cajón local abierto es el de este usuario?
+  try{
+    var dueno = localStorage.getItem('escala_dueno');
+    // Sin dueño todavía, se decide más abajo, cuando se sabe el rol.
+    var debe = !dueno ? (window.ESCALA_SUFIJO || '') : ((sbCurrentUser.id !== dueno) ? '::u:' + sbCurrentUser.id : '');
+    if(debe !== (window.ESCALA_SUFIJO || '')){
+      if(!sessionStorage.getItem('escala_recarga')){
+        sessionStorage.setItem('escala_recarga', '1');
+        console.log('[escala] Otra cuenta en esta computadora: se abre su propio cajón.');
+        // Un momento antes de recargar: el navegador escribe localStorage al
+        // disco en diferido, y una recarga inmediata puede perder lo último.
+        setTimeout(function(){ location.reload(); }, 300);
+        return Promise.resolve(false);
+      }
+      console.warn('[escala] No se pudo cambiar al cajón de esta cuenta.');
+    } else {
+      sessionStorage.removeItem('escala_recarga');
+    }
+  }catch(e){}
   return Promise.all([
     sbClient.from('usuarios').select('rol,nombre,activo').eq('auth_uid', sbCurrentUser.id).maybeSingle(),
     sbClient.from('usuario_alcance').select('categoria').eq('auth_uid', sbCurrentUser.id),
@@ -20643,6 +20702,29 @@ function accesoCargar(){
 
     MI_ROL = u.data.rol;
     MI_NOMBRE = u.data.nombre;
+
+    // v208 · Dueño de esta computadora: sólo quien carga datos de división
+    // (coordinación o cuerpo técnico). Un médico, nutricionista o coordinador
+    // por área que entra primero en una computadora ajena es INVITADO: abre
+    // su propio cajón y el del dueño queda esperando a su dueño.
+    try{
+      if(!localStorage.getItem('escala_dueno')){
+        if(MI_ROL === 'coordinacion' || MI_ROL === 'cuerpo_tecnico'){
+          localStorage.setItem('escala_dueno', sbCurrentUser.id);
+        } else if(!window.ESCALA_SUFIJO){
+          var inv = [];
+          try{ inv = JSON.parse(localStorage.getItem('escala_invitados') || '[]'); }catch(e){}
+          if(inv.indexOf(sbCurrentUser.id) < 0) inv.push(sbCurrentUser.id);
+          localStorage.setItem('escala_invitados', JSON.stringify(inv));
+          if(!sessionStorage.getItem('escala_recarga')){
+            sessionStorage.setItem('escala_recarga', '1');
+            console.log('[escala] Cuenta invitada en esta computadora: se abre su propio cajón.');
+            setTimeout(function(){ location.reload(); }, 300);
+            return false;
+          }
+        }
+      }
+    }catch(e){}
 
     var orden = {};
     (c.data || []).forEach(function(x){ orden[x.nombre] = (x.orden == null ? 99 : x.orden); });
@@ -20674,7 +20756,7 @@ function accesoCargar(){
       try{ sessionStorage.setItem('acceso_recarga', '1'); }catch(e){}
       try{ localStorage.setItem('gps_cat_activa', MIS_CATEGORIAS[0]); }catch(e){}
       console.log('[acceso] Cambiando a «' + MIS_CATEGORIAS[0] + '» y recargando.');
-      location.reload();
+      setTimeout(function(){ location.reload(); }, 300);   // v208: idem
       return false;
     }
     try{ sessionStorage.removeItem('acceso_recarga'); }catch(e){}
@@ -22404,15 +22486,22 @@ function captRegionDeProvincia(prov){
 // (rápido, pero chico: con muchas fotos se llena) e IndexedDB (grande). Al
 // abrir gana la copia más nueva (__ts).
 function captClubGuardarLocal(){
-  var json;
+  var json, liviano, ts = Date.now();
   try{
     json = JSON.stringify({
-      __ts: Date.now(),
+      __ts: ts,
       CAPT_CONFIG: CAPT_CONFIG, CAPT_EVENTOS: CAPT_EVENTOS,
       CAPT_JUGADORES: CAPT_JUGADORES, CAPT_FOTOS: CAPT_FOTOS
     });
+    // v208: las fotos NO van a localStorage (es chico y lo comparte con el
+    // espejo de la división). Viajan sólo a IndexedDB; al abrir se completan.
+    liviano = JSON.stringify({
+      __ts: ts, _sinFotos: true,
+      CAPT_CONFIG: CAPT_CONFIG, CAPT_EVENTOS: CAPT_EVENTOS,
+      CAPT_JUGADORES: CAPT_JUGADORES, CAPT_FOTOS: {}
+    });
   }catch(e){ console.warn('[Captación] no se pudo preparar el guardado:', e); return; }
-  try{ localStorage.setItem('capt_club_v1', json); }
+  try{ localStorage.setItem('capt_club_v1', liviano); }
   catch(e){
     // Sin lugar: se saca la copia rápida (vieja) para que no gane al abrir,
     // y queda la de IndexedDB.
@@ -22494,9 +22583,10 @@ function captGuardar(){
         if(!v) return;
         var idb; try{ idb = (typeof v === 'string') ? JSON.parse(v) : v; }catch(e){ return; }
         var ts = (club && club.__ts) || 0;
-        if(!idb || (idb.__ts || 0) <= ts) return;
+        // v208: la copia rápida no tiene fotos; si la de IndexedDB es igual de
+        // nueva, se toma de ahí (con fotos). Si es más vieja, no se toca.
+        if(!idb || (idb.__ts || 0) < ts || ((idb.__ts || 0) === ts && !(club && club._sinFotos))) return;
         captClubAplicar(idb);
-        try{ localStorage.setItem('capt_club_v1', (typeof v === 'string') ? v : JSON.stringify(v)); }catch(e){}
         try{ if(typeof captRefrescar === 'function') captRefrescar(); }catch(e){}
         console.log('[Captación] Se recuperó la copia de IndexedDB (más nueva).');
       }).catch(function(){});
