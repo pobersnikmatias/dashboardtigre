@@ -1,0 +1,16 @@
+{
+  "name": "Tigre · Jugador",
+  "short_name": "Tigre",
+  "description": "Wellness, PSE y tus datos de rendimiento",
+  "start_url": "jugador.html",
+  "scope": "./jugador",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B2A5B",
+  "theme_color": "#0B2A5B",
+  "lang": "es",
+  "icons": [
+    {"src": "jugador-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "jugador-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
