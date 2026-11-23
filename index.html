@@ -176,6 +176,63 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 #pdf-print-area{display:none}
 </style>
 <!-- Supabase JS SDK v2 (CDN) -->
+<script id="pegado-js">
+// ══ PROTECCIÓN: ARCHIVOS PEGADOS DENTRO DE index.html (v211f) ══════════════
+// La app de los jugadores son otros archivos (jugador.html, jugador-sw.js,
+// jugador.webmanifest, íconos). Si por error su contenido queda PEGADO dentro
+// de este index.html en GitHub, el navegador lo muestra como texto, agrega
+// una segunda pantalla de ingreso y sus estilos le sacan al dashboard el
+// margen de la barra lateral. Acá se detecta, se quita de la pantalla y se
+// avisa cómo dejarlo bien. Esto no toca datos ni la sesión.
+(function(){
+  function limpiar(){
+    var quitados = 0, peligro = false;
+    var body = document.body; if(!body) return;
+    // 1. La app del jugador (contenedor, código, estilos)
+    ['jg-codigo'].forEach(function(id){ var e = document.getElementById(id); if(e){ e.remove(); quitados++; } });
+    document.querySelectorAll('body > #app').forEach(function(e){ e.remove(); quitados++; });
+    document.querySelectorAll('style').forEach(function(st){
+      var t = st.textContent || '';
+      if(/\.ingreso \.logo|body\.jg|--azul-2:|\.hoy \.ir\{/.test(t)){ st.remove(); quitados++; }
+    });
+    document.querySelectorAll('link[rel="manifest"][href*="jugador"], link[rel="apple-touch-icon"][href*="jugador"], link[rel~="icon"][href*="jugador"],'
+      + ' meta[name="theme-color"][content="#0B2A5B"], meta[name^="apple-mobile-web-app"], meta[name="mobile-web-app-capable"],'
+      + ' meta[name="viewport"][content*="viewport-fit"]').forEach(function(e){ e.remove(); quitados++; });
+    document.querySelectorAll('title').forEach(function(t){ if(/Tigre · Jugador/.test(t.textContent)){ t.remove(); quitados++; } });
+    if(document.title === 'Tigre · Jugador' || !document.title){ var tt = document.querySelector('title'); document.title = tt ? tt.textContent : document.title; }
+    document.documentElement.classList.remove('jg'); body.classList.remove('jg');
+    // 2. Texto suelto del manifest o del service worker
+    var it = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, null), n, tx = [];
+    while((n = it.nextNode())){
+      var v = n.nodeValue || '';
+      if(v.length > 40 && /"short_name"\s*:|self\.addEventListener\(\s*'(install|fetch|activate)'|tigre-jugador-j\d/.test(v)
+         && !(n.parentElement && /^(SCRIPT|STYLE|TEXTAREA)$/.test(n.parentElement.tagName))) tx.push(n);
+    }
+    tx.forEach(function(x){ x.remove(); quitados++; });
+    // 3. Versión vieja de la app del jugador, sin protección: su código ya corrió
+    if(typeof window.htmlWellness === 'function' && typeof window.abrirForm === 'function') peligro = true;
+    if(quitados || peligro) avisar(peligro);
+  }
+  function avisar(peligro){
+    if(document.getElementById('aviso-pegado')) return;
+    var d = document.createElement('div');
+    d.id = 'aviso-pegado';
+    d.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:10px;z-index:100000;max-width:720px;width:calc(100% - 24px);'
+      + 'background:#B3261E;color:#fff;border-radius:12px;padding:13px 16px;box-shadow:0 8px 30px rgba(0,0,0,.25);'
+      + 'font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+    d.innerHTML = '<b>⚠ El index.html que está en GitHub tiene pegados adentro otros archivos (la app de los jugadores).</b><br>'
+      + (peligro ? '<b>No cargues ni modifiques datos hasta arreglarlo:</b> ese código pegado puede cambiar cómo funciona el dashboard.<br>'
+                 : 'Ya lo saqué de la pantalla y el dashboard funciona normal, pero conviene arreglarlo.<br>')
+      + 'Cómo: en GitHub, <b>Add file → Upload files</b> y arrastrá los 6 archivos <b>como archivos</b> (no abras ninguno ni pegues su contenido). '
+      + 'El index.html nuevo reemplaza al mezclado. '
+      + '<button style="margin-left:6px;background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:7px;padding:3px 10px;cursor:pointer;font:inherit;font-weight:700" '
+      + 'onclick="this.parentNode.remove()">Entendido</button>';
+    document.body.appendChild(d);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', limpiar); else limpiar();
+  window.addEventListener('load', limpiar);
+})();
+</script>
 <script id="escala-js">
 /* ══ v204 · UNA DIVISIÓN POR VEZ ══════════════════════════════════════════
    El dashboard guarda sus datos en el navegador con nombres fijos
@@ -16006,7 +16063,11 @@ function sbTodas(armar, tabla){
       // v211b: si una página falla (corte de red, demora de la base), se
       // reintenta dos veces antes de dar error: con muchas páginas, un tropiezo
       // en una no puede tirar abajo toda la carga.
-      if((!r || r.error) && intento < 2){
+      // Sólo errores pasajeros: una tabla o columna que no existe, o un permiso
+      // que falta, no se arreglan reintentando (y demorarían el arranque).
+      var cod = r && r.error && r.error.code;
+      var permanente = /^(42P01|42703|42501|PGRST20[0-9]|PGRST301)$/.test(cod || '');
+      if((!r || r.error) && !permanente && intento < 2){
         return new Promise(function(ok){ setTimeout(ok, 700 * (intento + 1)); }).then(function(){ return pagina(desde, intento + 1); });
       }
       if(!r || r.error) return r;
@@ -20571,6 +20632,19 @@ function accesoBloquear(titulo, detalle){
   document.body.appendChild(d);
 }
 // v211d · Entregarle la sesión a la app del jugador (jugador.html) e ir ahí
+// v211f · ¿Está subida la app de los jugadores al lado de este archivo?
+function accesoHayAppJugador(){
+  if(location.protocol === 'file:') return Promise.resolve(true);
+  return fetch('jugador.html', {method: 'HEAD', cache: 'no-store'}).then(function(r){ return r.ok; }, function(){ return true; });
+}
+function accesoFaltaAppJugador(){
+  try{ var o = document.getElementById('acceso-a-jugador'); if(o) o.remove(); }catch(e){}
+  accesoBloquear('Falta subir la app de los jugadores',
+    'Esta es una cuenta de jugador, pero en GitHub no está el archivo jugador.html al lado del dashboard (index.html). '
+    + 'Hay que subir juntos, en la misma carpeta, los 6 archivos: index.html, jugador.html, jugador-sw.js, '
+    + 'jugador.webmanifest, jugador-192.png y jugador-512.png.');
+}
+window.accesoHayAppJugador = accesoHayAppJugador;
 var _accesoPasando = false;
 function accesoPasarAJugador(){
   // Puede llamarse dos veces (inicio de sesión + aviso de Supabase): una sola vez basta
@@ -20591,17 +20665,8 @@ function accesoPasarAJugador(){
   // v211e · Antes de entregar la sesión, confirmar que jugador.html está
   // subido JUNTO a este archivo. Si falta, GitHub muestra un 404 y el jugador
   // queda afuera: mejor decirlo claro y no tocar nada.
-  var faltaApp = function(){
-    try{ var o = document.getElementById('acceso-a-jugador'); if(o) o.remove(); }catch(e){}
-    accesoBloquear('Falta subir la app de los jugadores',
-      'Esta es una cuenta de jugador, pero en GitHub no está el archivo jugador.html al lado del dashboard (index.html). '
-      + 'Hay que subir juntos, en la misma carpeta, los 6 archivos: index.html, jugador.html, jugador-sw.js, '
-      + 'jugador.webmanifest, jugador-192.png y jugador-512.png.');
-  };
-  var verificar = (location.protocol === 'file:') ? Promise.resolve(true)
-    : fetch('jugador.html', {method: 'HEAD', cache: 'no-store'}).then(function(r){ return r.ok; }, function(){ return true; });
-  verificar.then(function(hay){
-    if(!hay){ faltaApp(); return; }
+  accesoHayAppJugador().then(function(hay){
+    if(!hay){ accesoFaltaAppJugador(); return; }
     entregar();
   });
   function entregar(){
@@ -42792,7 +42857,7 @@ if(document.readyState==='loading'){
     </div>
     <div id="sb-login-jugador"></div>
     <div style="font-size:11px;color:#666;margin-bottom:6px;font-weight:600">Email o usuario</div>
-    <input id="sb-login-email" type="text" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username" placeholder="tu@email.com o tu usuario" style="width:100%;padding:9px 12px;border:1px solid #ccc;border-radius:6px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+    <input id="sb-login-email" type="text" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="email" placeholder="tu@email.com o tu usuario" style="width:100%;padding:9px 12px;border:1px solid #ccc;border-radius:6px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
     <div style="font-size:11px;color:#666;margin-bottom:6px;font-weight:600">Contraseña</div>
     <input id="sb-login-password" type="password" autocomplete="current-password" placeholder="••••••••" style="width:100%;padding:9px 12px;border:1px solid #ccc;border-radius:6px;font-size:13px;margin-bottom:14px;box-sizing:border-box">
     <button id="sb-login-btn" onclick="sbDoLogin()" style="width:100%;background:#1D9E75;color:#fff;border:none;border-radius:6px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">Ingresar</button>
@@ -42913,7 +42978,8 @@ function sbShowLogin(){
           + 'font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
         b.textContent = 'Seguir como ' + quien + ' (app del jugador) →';
         b.onclick = function(){ location.href = 'jugador.html'; };
-        caja.appendChild(b);
+        // Sólo se muestra si jugador.html está subido (si no, llevaría a un 404)
+        accesoHayAppJugador().then(function(hay){ if(hay && !caja.children.length) caja.appendChild(b); });
       }
     }
   }catch(e){}
@@ -56858,23 +56924,6 @@ window.railMarca=railMarca;
 </script>
 </body>
 </html>
-{
-  "name": "Tigre · Jugador",
-  "short_name": "Tigre",
-  "description": "Wellness, PSE y tus datos de rendimiento",
-  "start_url": "jugador.html",
-  "scope": "./jugador",
-  "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#0B2A5B",
-  "theme_color": "#0B2A5B",
-  "lang": "es",
-  "icons": [
-    {"src": "jugador-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-    {"src": "jugador-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
-  ]
-}
-
 // Tigre · Jugador — guarda la página en el celular para que abra sin señal.
 // Sólo se ocupa de sus propios archivos: no toca el dashboard ni Supabase.
 var CACHE = 'tigre-jugador-j2';
@@ -56909,7 +56958,7 @@ self.addEventListener('fetch', function(e){
 });
 
 <!doctype html>
-<html lang="es">
+<html lang="es" class="jg">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -56923,7 +56972,7 @@ self.addEventListener('fetch', function(e){
 <link rel="apple-touch-icon" href="jugador-192.png">
 <link rel="icon" href="jugador-192.png">
 <style>
-:root{
+html.jg{
   --azul:#0B2A5B; --azul-2:#163C7A; --rojo:#C8102E;
   --fondo:#F2F4F8; --sup:#FFFFFF; --sup-2:#E9EDF3; --borde:#D7DDE7;
   --tex:#111A2B; --tex-2:#46516A; --tex-3:#5E6880;
@@ -56932,7 +56981,7 @@ self.addEventListener('fetch', function(e){
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){
-  :root{
+  html.jg{
     --fondo:#0C111C; --sup:#151C2B; --sup-2:#1F2839; --borde:#2C374D;
     --tex:#EEF1F7; --tex-2:#B9C2D3; --tex-3:#97A1B6;
     --bien:#4CC59A; --bien-f:#123A2E; --ojo:#F0B54A; --ojo-f:#3A2C10; --mal:#FF8A80; --mal-f:#3D1715;
@@ -56940,130 +56989,130 @@ self.addEventListener('fetch', function(e){
     color-scheme:dark;
   }
 }
-*{box-sizing:border-box}
-html,body{margin:0;padding:0}
-body{background:var(--fondo);color:var(--tex);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+body.jg *{box-sizing:border-box}
+html.jg, body.jg{margin:0;padding:0}
+body.jg{background:var(--fondo);color:var(--tex);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;min-height:100vh}
-button{font-family:inherit;font-size:inherit;color:inherit}
-input,select{font-family:inherit;font-size:16px;color:var(--tex)}
-.oculto{display:none!important}
+body.jg button{font-family:inherit;font-size:inherit;color:inherit}
+body.jg input, body.jg select{font-family:inherit;font-size:16px;color:var(--tex)}
+body.jg .oculto{display:none!important}
 
 /* ── cabecera ── */
-.cab{position:sticky;top:0;z-index:20;background:var(--azul);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+body.jg .cab{position:sticky;top:0;z-index:20;background:var(--azul);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
   display:flex;align-items:center;gap:10px}
-.cab .escudo{width:34px;height:34px;border-radius:9px;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
-.cab .quien{flex:1;min-width:0}
-.cab .nom{font-weight:800;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cab .div{font-size:12px;opacity:.85}
-.cab .menu{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:9px;width:38px;height:38px;font-size:18px;cursor:pointer}
-.estado{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:8px 16px;background:var(--sup-2);color:var(--tex-2)}
-.estado .punto{width:9px;height:9px;border-radius:50%;background:var(--bien);flex-shrink:0}
-.estado.sin .punto{background:var(--ojo)}
-.estado.pend{background:var(--ojo-f);color:var(--tex)}
-.estado.err{background:var(--mal-f);color:var(--tex)}
-.estado.err .punto{background:var(--mal)}
+body.jg .cab .escudo{width:34px;height:34px;border-radius:9px;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
+body.jg .cab .quien{flex:1;min-width:0}
+body.jg .cab .nom{font-weight:800;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.jg .cab .div{font-size:12px;opacity:.85}
+body.jg .cab .menu{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:9px;width:38px;height:38px;font-size:18px;cursor:pointer}
+body.jg .estado{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:8px 16px;background:var(--sup-2);color:var(--tex-2)}
+body.jg .estado .punto{width:9px;height:9px;border-radius:50%;background:var(--bien);flex-shrink:0}
+body.jg .estado.sin .punto{background:var(--ojo)}
+body.jg .estado.pend{background:var(--ojo-f);color:var(--tex)}
+body.jg .estado.err{background:var(--mal-f);color:var(--tex)}
+body.jg .estado.err .punto{background:var(--mal)}
 
-main{padding:16px 16px calc(96px + env(safe-area-inset-bottom));max-width:560px;margin:0 auto}
-h2{font-size:19px;margin:4px 0 12px}
-h3{font-size:15px;margin:22px 0 8px}
-.tarj{background:var(--sup);border:1px solid var(--borde);border-radius:16px;padding:16px;margin-bottom:12px}
-.nota{font-size:12.5px;color:var(--tex-3)}
-.fila{display:flex;align-items:center;gap:10px}
-.crece{flex:1;min-width:0}
+body.jg main{padding:16px 16px calc(96px + env(safe-area-inset-bottom));max-width:560px;margin:0 auto}
+body.jg h2{font-size:19px;margin:4px 0 12px}
+body.jg h3{font-size:15px;margin:22px 0 8px}
+body.jg .tarj{background:var(--sup);border:1px solid var(--borde);border-radius:16px;padding:16px;margin-bottom:12px}
+body.jg .nota{font-size:12.5px;color:var(--tex-3)}
+body.jg .fila{display:flex;align-items:center;gap:10px}
+body.jg .crece{flex:1;min-width:0}
 
 /* ── botones ── */
-.btn{display:block;width:100%;padding:15px;border:0;border-radius:13px;font-size:16.5px;font-weight:800;cursor:pointer;text-align:center}
-.btn-1{background:var(--azul);color:#fff}
-.btn-2{background:var(--sup-2);color:var(--tex)}
-.btn-rojo{background:var(--rojo);color:#fff}
-.btn:disabled{opacity:.45;cursor:default}
-.chip{border:1.5px solid var(--borde);background:var(--sup);border-radius:999px;padding:8px 15px;font-weight:700;font-size:14px;cursor:pointer;color:var(--tex-2)}
-.chip.on{background:var(--azul);border-color:var(--azul);color:#fff}
-@media (prefers-color-scheme:dark){ .btn-1,.chip.on{background:#2F5DB8;border-color:#2F5DB8} }
+body.jg .btn{display:block;width:100%;padding:15px;border:0;border-radius:13px;font-size:16.5px;font-weight:800;cursor:pointer;text-align:center}
+body.jg .btn-1{background:var(--azul);color:#fff}
+body.jg .btn-2{background:var(--sup-2);color:var(--tex)}
+body.jg .btn-rojo{background:var(--rojo);color:#fff}
+body.jg .btn:disabled{opacity:.45;cursor:default}
+body.jg .chip{border:1.5px solid var(--borde);background:var(--sup);border-radius:999px;padding:8px 15px;font-weight:700;font-size:14px;cursor:pointer;color:var(--tex-2)}
+body.jg .chip.on{background:var(--azul);border-color:var(--azul);color:#fff}
+@media (prefers-color-scheme:dark){ body.jg .btn-1, body.jg .chip.on{background:#2F5DB8;border-color:#2F5DB8} }
 
 /* ── Hoy ── */
-.hoy{display:grid;gap:12px}
-.hoy .tarj{display:flex;align-items:center;gap:14px;padding:18px;margin:0}
-.hoy .ico{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;background:var(--sup-2)}
-.hoy .tit{font-weight:800;font-size:16.5px}
-.marca{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;margin-top:3px}
-.marca.ok{color:var(--bien)} .marca.esp{color:var(--ojo)} .marca.no{color:var(--tex-3)}
-.hoy .ir{padding:11px 16px;border-radius:11px;border:0;background:var(--azul);color:#fff;font-weight:800;cursor:pointer;flex-shrink:0}
-.hoy .ir.ok{background:var(--sup-2);color:var(--tex)}
-@media (prefers-color-scheme:dark){ .hoy .ir{background:#2F5DB8} .hoy .ir.ok{background:var(--sup-2)} }
+body.jg .hoy{display:grid;gap:12px}
+body.jg .hoy .tarj{display:flex;align-items:center;gap:14px;padding:18px;margin:0}
+body.jg .hoy .ico{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;background:var(--sup-2)}
+body.jg .hoy .tit{font-weight:800;font-size:16.5px}
+body.jg .marca{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;margin-top:3px}
+body.jg .marca.ok{color:var(--bien)} body.jg .marca.esp{color:var(--ojo)} body.jg .marca.no{color:var(--tex-3)}
+body.jg .hoy .ir{padding:11px 16px;border-radius:11px;border:0;background:var(--azul);color:#fff;font-weight:800;cursor:pointer;flex-shrink:0}
+body.jg .hoy .ir.ok{background:var(--sup-2);color:var(--tex)}
+@media (prefers-color-scheme:dark){ body.jg .hoy .ir{background:#2F5DB8} body.jg .hoy .ir.ok{background:var(--sup-2)} }
 
 /* ── formularios ── */
-.preg{margin-bottom:20px}
-.preg .lab{display:flex;justify-content:space-between;align-items:baseline;font-weight:800;font-size:16px;margin-bottom:8px}
-.preg .val{font-size:15px;color:var(--tex-3);font-weight:700}
-.escala{display:grid;gap:6px}
-.escala button{padding:14px 0;border-radius:11px;border:2px solid var(--borde);background:var(--sup);font-weight:800;font-size:17px;cursor:pointer;color:var(--tex-2)}
-.escala button.on{background:var(--azul);border-color:var(--azul);color:#fff}
-@media (prefers-color-scheme:dark){ .escala button.on{background:#2F5DB8;border-color:#2F5DB8} }
-.extremos{display:flex;justify-content:space-between;font-size:11.5px;color:var(--tex-3);margin-top:4px}
-.borg button{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;margin-bottom:7px;border-radius:12px;border:2px solid var(--borde);
+body.jg .preg{margin-bottom:20px}
+body.jg .preg .lab{display:flex;justify-content:space-between;align-items:baseline;font-weight:800;font-size:16px;margin-bottom:8px}
+body.jg .preg .val{font-size:15px;color:var(--tex-3);font-weight:700}
+body.jg .escala{display:grid;gap:6px}
+body.jg .escala button{padding:14px 0;border-radius:11px;border:2px solid var(--borde);background:var(--sup);font-weight:800;font-size:17px;cursor:pointer;color:var(--tex-2)}
+body.jg .escala button.on{background:var(--azul);border-color:var(--azul);color:#fff}
+@media (prefers-color-scheme:dark){ body.jg .escala button.on{background:#2F5DB8;border-color:#2F5DB8} }
+body.jg .extremos{display:flex;justify-content:space-between;font-size:11.5px;color:var(--tex-3);margin-top:4px}
+body.jg .borg button{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;margin-bottom:7px;border-radius:12px;border:2px solid var(--borde);
   background:var(--sup);cursor:pointer;text-align:left}
-.borg .n{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;color:#fff;flex-shrink:0}
-.borg .d{font-weight:700;color:var(--tex-2);font-size:14.5px}
-.borg button.on{border-color:var(--tex);background:var(--sup-2)}
-.borg button.on .d{color:var(--tex)}
-select.campo,input.campo{width:100%;padding:13px 12px;border:2px solid var(--borde);border-radius:11px;background:var(--sup);margin-bottom:12px}
-label.mini{display:block;font-weight:700;font-size:13.5px;margin:4px 0 6px;color:var(--tex-2)}
-.listo{text-align:center;padding:30px 10px}
-.listo .grande{font-size:54px}
-.listo h2{margin:10px 0 6px}
+body.jg .borg .n{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;color:#fff;flex-shrink:0}
+body.jg .borg .d{font-weight:700;color:var(--tex-2);font-size:14.5px}
+body.jg .borg button.on{border-color:var(--tex);background:var(--sup-2)}
+body.jg .borg button.on .d{color:var(--tex)}
+body.jg select.campo, body.jg input.campo{width:100%;padding:13px 12px;border:2px solid var(--borde);border-radius:11px;background:var(--sup);margin-bottom:12px}
+body.jg label.mini{display:block;font-weight:700;font-size:13.5px;margin:4px 0 6px;color:var(--tex-2)}
+body.jg .listo{text-align:center;padding:30px 10px}
+body.jg .listo .grande{font-size:54px}
+body.jg .listo h2{margin:10px 0 6px}
 
 /* ── pestañas de abajo ── */
-.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--sup);border-top:1px solid var(--borde);display:flex;
+body.jg .tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--sup);border-top:1px solid var(--borde);display:flex;
   padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
-.tabs button{flex:1;border:0;background:transparent;padding:6px 2px;border-radius:10px;cursor:pointer;color:var(--tex-3);font-size:11.5px;font-weight:700;
+body.jg .tabs button{flex:1;border:0;background:transparent;padding:6px 2px;border-radius:10px;cursor:pointer;color:var(--tex-3);font-size:11.5px;font-weight:700;
   display:flex;flex-direction:column;align-items:center;gap:2px}
-.tabs button .i{font-size:20px;line-height:1}
-.tabs button.on{color:var(--azul);background:var(--sup-2)}
-@media (prefers-color-scheme:dark){ .tabs button.on{color:#9DBBFF} }
+body.jg .tabs button .i{font-size:20px;line-height:1}
+body.jg .tabs button.on{color:var(--azul);background:var(--sup-2)}
+@media (prefers-color-scheme:dark){ body.jg .tabs button.on{color:#9DBBFF} }
 
 /* ── datos ── */
-.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
-.kpi{background:var(--sup);border:1px solid var(--borde);border-radius:14px;padding:12px 14px}
-.kpi .k{font-size:12px;color:var(--tex-3);font-weight:700}
-.kpi .v{font-size:24px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
-.kpi .s{font-size:12px;color:var(--tex-3)}
-.grafico{position:relative}
-.grafico svg{display:block;width:100%;height:auto;touch-action:pan-y}
-.tip{position:absolute;top:0;transform:translateX(-50%);background:var(--tex);color:var(--fondo);font-size:12px;font-weight:700;padding:4px 8px;
+body.jg .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+body.jg .kpi{background:var(--sup);border:1px solid var(--borde);border-radius:14px;padding:12px 14px}
+body.jg .kpi .k{font-size:12px;color:var(--tex-3);font-weight:700}
+body.jg .kpi .v{font-size:24px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
+body.jg .kpi .s{font-size:12px;color:var(--tex-3)}
+body.jg .grafico{position:relative}
+body.jg .grafico svg{display:block;width:100%;height:auto;touch-action:pan-y}
+body.jg .tip{position:absolute;top:0;transform:translateX(-50%);background:var(--tex);color:var(--fondo);font-size:12px;font-weight:700;padding:4px 8px;
   border-radius:7px;white-space:nowrap;pointer-events:none}
-.test{padding:14px 16px}
-.test .top{display:flex;align-items:baseline;gap:8px}
-.test .nm{font-weight:800;flex:1;min-width:0}
-.test .ult{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
-.test .u{font-size:12px;color:var(--tex-3);font-weight:700}
-.cambio{font-size:12.5px;font-weight:800;padding:2px 8px;border-radius:999px;display:inline-block}
-.cambio.mejor{background:var(--bien-f);color:var(--bien)} .cambio.peor{background:var(--mal-f);color:var(--mal)} .cambio.igual{background:var(--sup-2);color:var(--tex-2)}
-.barra{height:8px;border-radius:4px;background:var(--sup-2);position:relative;margin:10px 0 4px}
-.barra i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--serie)}
-.tabla{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
-.tabla th{text-align:left;font-size:11.5px;color:var(--tex-3);font-weight:700;padding:6px 4px;border-bottom:1px solid var(--borde)}
-.tabla td{padding:7px 4px;border-bottom:1px solid var(--grilla)}
-.tabla td.r,.tabla th.r{text-align:right}
-.vacio{text-align:center;color:var(--tex-3);padding:30px 16px;font-size:14px}
+body.jg .test{padding:14px 16px}
+body.jg .test .top{display:flex;align-items:baseline;gap:8px}
+body.jg .test .nm{font-weight:800;flex:1;min-width:0}
+body.jg .test .ult{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+body.jg .test .u{font-size:12px;color:var(--tex-3);font-weight:700}
+body.jg .cambio{font-size:12.5px;font-weight:800;padding:2px 8px;border-radius:999px;display:inline-block}
+body.jg .cambio.mejor{background:var(--bien-f);color:var(--bien)} body.jg .cambio.peor{background:var(--mal-f);color:var(--mal)} body.jg .cambio.igual{background:var(--sup-2);color:var(--tex-2)}
+body.jg .barra{height:8px;border-radius:4px;background:var(--sup-2);position:relative;margin:10px 0 4px}
+body.jg .barra i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--serie)}
+body.jg .tabla{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
+body.jg .tabla th{text-align:left;font-size:11.5px;color:var(--tex-3);font-weight:700;padding:6px 4px;border-bottom:1px solid var(--borde)}
+body.jg .tabla td{padding:7px 4px;border-bottom:1px solid var(--grilla)}
+body.jg .tabla td.r, body.jg .tabla th.r{text-align:right}
+body.jg .vacio{text-align:center;color:var(--tex-3);padding:30px 16px;font-size:14px}
 
 /* ── ingreso ── */
-.ingreso{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:24px;max-width:420px;margin:0 auto}
-.ingreso .logo{width:84px;height:84px;border-radius:22px;background:#fff;border:1px solid var(--borde);margin:0 auto 14px;display:flex;align-items:center;justify-content:center}
-.ingreso h1{text-align:center;font-size:23px;margin:0 0 4px}
-.ingreso p{text-align:center;color:var(--tex-3);margin:0 0 22px;font-size:14px}
-.error{background:var(--mal-f);color:var(--mal);font-weight:700;font-size:13.5px;padding:10px 12px;border-radius:10px;margin-bottom:12px}
-.aviso{background:var(--ojo-f);color:var(--tex);font-size:13.5px;padding:12px 14px;border-radius:12px;margin-bottom:12px}
+body.jg .ingreso{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:24px;max-width:420px;margin:0 auto}
+body.jg .ingreso .logo{width:84px;height:84px;border-radius:22px;background:#fff;border:1px solid var(--borde);margin:0 auto 14px;display:flex;align-items:center;justify-content:center}
+body.jg .ingreso h1{text-align:center;font-size:23px;margin:0 0 4px}
+body.jg .ingreso p{text-align:center;color:var(--tex-3);margin:0 0 22px;font-size:14px}
+body.jg .error{background:var(--mal-f);color:var(--mal);font-weight:700;font-size:13.5px;padding:10px 12px;border-radius:10px;margin-bottom:12px}
+body.jg .aviso{background:var(--ojo-f);color:var(--tex);font-size:13.5px;padding:12px 14px;border-radius:12px;margin-bottom:12px}
 
 /* ── menú ── */
-.velo{position:fixed;inset:0;background:rgba(5,10,20,.55);z-index:40;display:flex;align-items:flex-end;justify-content:center}
-.hoja{background:var(--sup);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
-.hoja .btn{margin-top:10px}
+body.jg .velo{position:fixed;inset:0;background:rgba(5,10,20,.55);z-index:40;display:flex;align-items:flex-end;justify-content:center}
+body.jg .hoja{background:var(--sup);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+body.jg .hoja .btn{margin-top:10px}
 </style>
 </head>
-<body>
+<body class="jg">
 <div id="app"></div>
-<script>
+<script type="text/plain" id="jg-codigo">
 'use strict';
 // ════════════════════════════════════════════════════════════════════════
 //  TIGRE · JUGADOR
@@ -57764,5 +57813,33 @@ if('serviceWorker' in navigator && location.protocol !== 'file:'){
   navigator.serviceWorker.register('jugador-sw.js', {scope: './jugador'}).catch(function(){});
 }
 </script>
+<script>
+// Cargador: el código de la app del jugador SÓLO corre en jugador.html. Si por
+// error este archivo queda pegado dentro de otro (por ejemplo, del dashboard),
+// no hace nada: no define funciones ni cambia estilos de la otra página.
+(function(){
+  if(!/(^|\/)jugador(\.html)?$/.test(location.pathname)) return;
+  var c = document.getElementById('jg-codigo'); if(!c) return;
+  document.documentElement.classList.add('jg'); document.body.classList.add('jg');
+  var s = document.createElement('script'); s.text = c.textContent; document.body.appendChild(s);
+})();
+</script>
 </body>
 </html>
+
+{
+  "name": "Tigre · Jugador",
+  "short_name": "Tigre",
+  "description": "Wellness, PSE y tus datos de rendimiento",
+  "start_url": "jugador.html",
+  "scope": "./jugador",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B2A5B",
+  "theme_color": "#0B2A5B",
+  "lang": "es",
+  "icons": [
+    {"src": "jugador-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "jugador-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
