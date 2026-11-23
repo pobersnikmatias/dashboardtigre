@@ -20571,7 +20571,11 @@ function accesoBloquear(titulo, detalle){
   document.body.appendChild(d);
 }
 // v211d · Entregarle la sesión a la app del jugador (jugador.html) e ir ahí
+var _accesoPasando = false;
 function accesoPasarAJugador(){
+  // Puede llamarse dos veces (inicio de sesión + aviso de Supabase): una sola vez basta
+  if(_accesoPasando) return;
+  _accesoPasando = true;
   try{ var l = document.getElementById('sb-loading-overlay'); if(l) l.style.display = 'none'; }catch(e){}
   try{
     var d = document.createElement('div');
@@ -20582,7 +20586,25 @@ function accesoPasarAJugador(){
     document.body.appendChild(d); document.body.classList.add('sb-show');
   }catch(e){}
   try{ var sp = document.getElementById('boot-splash'); if(sp) sp.style.display = 'none'; }catch(e){}
-  var ir = function(){ location.replace('jugador.html'); };
+  var yendo = false;
+  var ir = function(){ if(yendo) return; yendo = true; location.replace('jugador.html'); };
+  // v211e · Antes de entregar la sesión, confirmar que jugador.html está
+  // subido JUNTO a este archivo. Si falta, GitHub muestra un 404 y el jugador
+  // queda afuera: mejor decirlo claro y no tocar nada.
+  var faltaApp = function(){
+    try{ var o = document.getElementById('acceso-a-jugador'); if(o) o.remove(); }catch(e){}
+    accesoBloquear('Falta subir la app de los jugadores',
+      'Esta es una cuenta de jugador, pero en GitHub no está el archivo jugador.html al lado del dashboard (index.html). '
+      + 'Hay que subir juntos, en la misma carpeta, los 6 archivos: index.html, jugador.html, jugador-sw.js, '
+      + 'jugador.webmanifest, jugador-192.png y jugador-512.png.');
+  };
+  var verificar = (location.protocol === 'file:') ? Promise.resolve(true)
+    : fetch('jugador.html', {method: 'HEAD', cache: 'no-store'}).then(function(r){ return r.ok; }, function(){ return true; });
+  verificar.then(function(hay){
+    if(!hay){ faltaApp(); return; }
+    entregar();
+  });
+  function entregar(){
   try{
     try{ sbClient.auth.stopAutoRefresh(); }catch(e){}
     sbClient.auth.getSession().then(function(r){
@@ -20603,6 +20625,7 @@ function accesoPasarAJugador(){
   }catch(e){ ir(); }
   // Por si algo tarda, igual se va
   setTimeout(ir, 2500);
+  }
 }
 window.accesoPasarAJugador = accesoPasarAJugador;
 
@@ -21517,6 +21540,17 @@ function adminHtmlJugadores(){
       + 'background:color-mix(in srgb,var(--club-c2,#3B4D88) 10%,transparent);border:1px solid color-mix(in srgb,var(--club-c2,#3B4D88) 35%,transparent);color:var(--tex-1,#15202e)">'
       + '<div style="flex:1">Elegí qué jugador es <b>' + adminEsc(J.vincular.email) + '</b>: tocá «Es este» en su fila (cambiá de división arriba si hace falta).</div>'
       + '<button onclick="ADMIN.jug.vincular=null;adminRender()" style="' + adminEstInput() + 'cursor:pointer">Cancelar</button></div>';
+  }
+  // v211e · ¿Está subida la app de los jugadores al lado de este archivo?
+  if(J.appOk === undefined && location.protocol !== 'file:'){
+    J.appOk = null;
+    fetch('jugador.html', {method: 'HEAD', cache: 'no-store'}).then(function(r){ J.appOk = r.ok; if(!r.ok) adminRender(); }, function(){ J.appOk = true; });
+  }
+  if(J.appOk === false){
+    h += '<div style="padding:12px 14px;border-radius:10px;font-size:12.5px;line-height:1.6;margin-bottom:12px;background:color-mix(in srgb,#B3261E 10%,transparent);'
+      + 'border:1px solid color-mix(in srgb,#B3261E 35%,transparent);color:var(--tex-1,#15202e)"><b>Falta subir la app de los jugadores.</b> En GitHub no está '
+      + '<b>jugador.html</b> al lado de este dashboard, así que los jugadores verían un error 404. Subí juntos, en la misma carpeta que index.html: '
+      + 'jugador.html, jugador-sw.js, jugador.webmanifest, jugador-192.png y jugador-512.png.</div>';
   }
   if(J.falta){
     return h + '<div style="padding:12px 14px;border-radius:10px;font-size:12.5px;line-height:1.6;background:color-mix(in srgb,#B06000 10%,transparent);'
