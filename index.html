@@ -21007,6 +21007,8 @@ function adminAbrir(){
   document.body.appendChild(ov);
   document.addEventListener('keydown', adminTecla);
   ADMIN.msg = ''; ADMIN.tab = 'usuarios';
+  if(ADMIN.push){ ADMIN.push.d = null; ADMIN.push.pedida = false; ADMIN.push.leyendo = false; ADMIN.push.err = ''; ADMIN.push.falta = false;
+                  ADMIN.push.editando = null; ADMIN.push.ocupado = false; ADMIN.push.preparando++; ADMIN.push.ficha++; }
   if(ADMIN.jug){ ADMIN.jug.lista = null; ADMIN.jug.pedida = false; ADMIN.jug.leyendo = false; ADMIN.jug.vincular = null;
                  ADMIN.jug.err = ''; ADMIN.jug.falta = false; ADMIN.jug.ficha = (ADMIN.jug.ficha || 0) + 1; }
   adminRender();
@@ -21080,7 +21082,7 @@ function adminRender(){
       + 'background:' + (on ? 'var(--sup-1,#fff)' : 'transparent') + ';font-family:inherit;'
       + 'padding:11px 18px;font-size:13px;font-weight:' + (on ? '800' : '600') + ';'
       + 'color:' + (on ? 'var(--club-c2,#3B4D88)' : 'var(--tex-2,#667)') + ';'
-      + 'border-bottom:2.5px solid ' + (on ? 'var(--club-c2,#3B4D88)' : 'transparent') + '">' + txt + '</button>';
+      + 'border-bottom:2.5px solid ' + (on ? 'var(--club-c2,#3B4D88)' : 'transparent') + ';flex-shrink:0">' + txt + '</button>';
   };
   var aviso = '';
   if(ADMIN.msg){
@@ -21096,18 +21098,25 @@ function adminRender(){
     + '<div style="font-size:17px;font-weight:800;color:var(--tex-1,#15202e)">Administración</div>'
     + '<div style="font-size:11.5px;color:var(--tex-2,#667);margin-top:2px">'
     + 'Club Atlético Tigre · ' + adminEsc(MI_NOMBRE || (sbCurrentUser && sbCurrentUser.email) || '') + '</div></div>'
-    + '<button onclick="adminCargar();if(ADMIN.tab===\'jugadores\')adminJugRecargar()" title="Volver a leer de la base" style="border:1px solid var(--bor-1,#dfe3ea);'
+    + '<button onclick="adminCargar();if(ADMIN.tab===\'jugadores\')adminJugRecargar();if(ADMIN.tab===\'recordatorios\')adminPushRecargar()" title="Volver a leer de la base" style="border:1px solid var(--bor-1,#dfe3ea);'
     + 'background:transparent;color:var(--tex-2,#667);border-radius:8px;padding:7px 11px;font-size:12px;'
     + 'cursor:pointer;font-family:inherit">Actualizar</button>'
     + '<button onclick="adminCerrar()" style="border:none;background:transparent;color:var(--tex-2,#667);'
     + 'font-size:22px;line-height:1;cursor:pointer;padding:2px 6px">×</button></div>'
-    + '<div style="display:flex;gap:2px;padding:12px 20px 0;border-bottom:1px solid var(--bor-1,#dfe3ea);margin-bottom:16px">'
-    + pest('usuarios','Cuentas') + pest('jugadores','Jugadores') + pest('divisiones','Divisiones') + '</div>'
+    + '<div id="admin-pestanas" style="display:flex;gap:2px;padding:12px 20px 0;border-bottom:1px solid var(--bor-1,#dfe3ea);margin-bottom:16px;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:thin">'
+    + pest('usuarios','Cuentas') + pest('jugadores','Jugadores') + pest('divisiones','Divisiones') + pest('recordatorios','🔔 Recordatorios') + '</div>'
     + aviso
     + '<div style="padding:0 20px 22px">'
     + (ADMIN.cargando ? '<div style="padding:30px;text-align:center;color:var(--tex-2,#667);font-size:13px">Leyendo…</div>'
-       : (ADMIN.tab === 'usuarios' ? adminHtmlUsuarios() : (ADMIN.tab === 'jugadores' ? adminHtmlJugadores() : adminHtmlDivisiones())))
+       : (ADMIN.tab === 'usuarios' ? adminHtmlUsuarios() : (ADMIN.tab === 'jugadores' ? adminHtmlJugadores()
+          : (ADMIN.tab === 'recordatorios' ? adminHtmlRecordatorios() : adminHtmlDivisiones()))))
     + '</div>';
+  // En pantallas angostas, que la pestaña elegida quede a la vista
+  var tiras = document.getElementById('admin-pestanas');
+  if(tiras && tiras.scrollWidth > tiras.clientWidth){
+    var activa = tiras.children[['usuarios','jugadores','divisiones','recordatorios'].indexOf(ADMIN.tab)];
+    if(activa) tiras.scrollLeft = Math.max(0, activa.offsetLeft + activa.offsetWidth - tiras.clientWidth + 20);
+  }
 }
 
 function adminHtmlUsuarios(){
@@ -21536,6 +21545,231 @@ window.adminVaciarConfirmar = adminVaciarConfirmar; window.ADMIN = ADMIN;
 // ningún lado, así que se copia o se descarga en ese momento.
 var JUG_DOMINIO = 'jugadores.tigre';
 ADMIN.jug = {cat: null, lista: null, err: '', claves: {}, ocupado: false, falta: false, leyendo: false, vincular: null};
+
+// ── Recordatorios (notificaciones a los celulares de los jugadores) ───────
+// v212: lee y guarda los horarios por división. Si el paso 8 todavía no se
+// corrió en Supabase, la pestaña lo avisa y el resto del panel sigue igual.
+ADMIN.push = {d: null, err: '', falta: false, leyendo: false, pedida: false, ficha: 0, editando: null, ocupado: false, preparando: 0};
+var PUSH_DIAS = ['L','M','X','J','V','S','D'];
+function adminPushCargar(){
+  var P = ADMIN.push;
+  if(P.leyendo) return;
+  var ficha = P.ficha = (P.ficha || 0) + 1;
+  P.leyendo = true; P.err = ''; adminRender();
+  var fin = function(r, e){
+    if(ficha !== P.ficha) return;
+    P.leyendo = false;
+    if(e || (r && r.error)){
+      var m = e ? ((e && e.message) || String(e)) : (r.error.message || '');
+      P.falta = !e && /PGRST202|does not exist|Could not find the function/i.test(m);
+      P.err = P.falta ? '' : m; P.d = null;
+    } else { P.d = r.data || null; P.falta = false; }
+    adminRender();
+  };
+  try{ sbClient.rpc('admin_push_leer').then(function(r){ fin(r); }, function(e){ fin(null, e); }); }
+  catch(e){ fin(null, e); }
+}
+function adminPushRecargar(){ var P = ADMIN.push; P.leyendo = false; P.pedida = true; adminPushCargar(); }
+window.adminPushRecargar = adminPushRecargar;
+function adminPushHora(t){ return t ? String(t).slice(0, 5) : ''; }
+function adminPushHace(ts){
+  if(!ts) return 'nunca';
+  var m = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
+  if(m < 1) return 'recién'; if(m < 60) return 'hace ' + m + ' min';
+  var h = Math.round(m / 60); if(h < 48) return 'hace ' + h + ' h';
+  return 'hace ' + Math.round(h / 24) + ' días';
+}
+function adminPushHorario(cat){
+  var hs = (ADMIN.push.d && ADMIN.push.d.horarios) || [];
+  return hs.filter(function(h){ return h.categoria === cat; })[0] || null;
+}
+function adminPushResumen(h){
+  if(!h) return '—';
+  if(!h.activo) return 'Apagados';
+  var p = [];
+  if(h.wellness || h.wellness_2) p.push('wellness ' + [h.wellness, h.wellness_2].filter(Boolean).map(adminPushHora).join(' y '));
+  if(h.pse || h.pse_2) p.push('PSE ' + [h.pse, h.pse_2].filter(Boolean).map(adminPushHora).join(' y '));
+  var d = (h.dias || []).slice().sort();
+  var dias = d.join(',') === '1,2,3,4,5,6' ? 'lun a sáb' : (d.join(',') === '1,2,3,4,5,6,7' ? 'todos los días'
+           : (d.join(',') === '1,2,3,4,5' ? 'lun a vie' : d.map(function(x){ return PUSH_DIAS[x - 1]; }).join(' ')));
+  return (p.length ? p.join(' · ') : 'sin horarios') + ' · ' + dias;
+}
+function adminPushEditor(cat, h, idx){
+  var pre = 'admin-push-' + idx + '-';
+  var hor = function(campo, lab, val){
+    return '<label style="display:block"><span style="display:block;font-size:11px;color:var(--tex-2,#667);margin-bottom:4px">' + lab + '</span>'
+      + '<input id="' + pre + campo + '" type="time" value="' + adminPushHora(val) + '" style="' + adminEstInput() + 'width:118px"></label>';
+  };
+  var dias = h.dias || [1,2,3,4,5];
+  return '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">'
+    + '<label style="display:flex;gap:7px;align-items:center;font-size:12.5px;font-weight:700;color:var(--tex-1,#15202e);padding-bottom:8px">'
+    + '<input id="' + pre + 'activo" type="checkbox"' + (h.activo !== false ? ' checked' : '') + '> Mandar recordatorios</label>'
+    + hor('w', '☀️ Wellness', h.wellness) + hor('w2', '⏰ 2º aviso wellness', h.wellness_2)
+    + hor('pse', '🔥 PSE', h.pse) + hor('pse2', '⏰ 2º aviso PSE', h.pse_2)
+    + '<div><span style="display:block;font-size:11px;color:var(--tex-2,#667);margin-bottom:4px">Días</span><div style="display:flex;gap:3px">'
+    + PUSH_DIAS.map(function(l, i){
+        var on = dias.indexOf(i + 1) >= 0;
+        return '<label title="' + ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][i] + '" style="display:flex;flex-direction:column;align-items:center;'
+          + 'font-size:11px;font-weight:700;color:var(--tex-2,#667);gap:2px;cursor:pointer">' + l
+          + '<input id="' + pre + 'd' + (i + 1) + '" type="checkbox"' + (on ? ' checked' : '') + '></label>';
+      }).join('') + '</div></div>'
+    + '<button ' + (ADMIN.push.ocupado ? 'disabled ' : '') + 'onclick="adminPushGuardar(' + idx + ')" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;'
+    + 'border-radius:9px;padding:9px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">Guardar</button>'
+    + (cat !== '*' ? '<button onclick="ADMIN.push.editando=null;adminRender()" style="' + adminEstInput() + 'cursor:pointer">Cancelar</button>' : '')
+    + '</div>';
+}
+function adminPushCatDe(idx){ return idx === -1 ? '*' : ((ADMIN.cats || [])[idx] || {}).nombre; }
+function adminPushGuardar(idx){
+  var P = ADMIN.push, cat = adminPushCatDe(idx), pre = 'admin-push-' + idx + '-';
+  if(!cat || P.ocupado) return;
+  var v = function(c){ var e = document.getElementById(pre + c); return e ? e.value : ''; };
+  var dias = []; for(var i = 1; i <= 7; i++){ var e = document.getElementById(pre + 'd' + i); if(e && e.checked) dias.push(i); }
+  var act = document.getElementById(pre + 'activo');
+  var w = v('w'), w2 = v('w2'), pse = v('pse'), pse2 = v('pse2');
+  if(act && act.checked && !dias.length){ adminAviso('Elegí al menos un día.', 'mal'); return; }
+  var mins = function(t){ var p = String(t).split(':'); return (+p[0]) * 60 + (+p[1] || 0); };
+  if(w && w2 && mins(w2) < mins(w) + 15){ adminAviso('El 2º aviso del wellness tiene que ser al menos 15 minutos más tarde que el primero (' + w + ').', 'mal'); return; }
+  if(pse && pse2 && mins(pse2) < mins(pse) + 15){ adminAviso('El 2º aviso de la PSE tiene que ser al menos 15 minutos más tarde que el primero (' + pse + ').', 'mal'); return; }
+  if((w && mins(w) > 23 * 60) || (w2 && mins(w2) > 23 * 60) || (pse && mins(pse) > 23 * 60)){ adminAviso('Los avisos tienen que ser antes de las 23:00 (el 2º de la PSE puede ser hasta las 23:59).', 'mal'); return; }
+  P.ocupado = true; adminRender();
+  sbClient.rpc('admin_push_guardar', {p_categoria: cat, p_activo: !!(act && act.checked), p_wellness: w || null,
+                                      p_wellness_2: w2 || null, p_pse: pse || null, p_dias: dias, p_pse_2: pse2 || null})
+    .then(function(r){
+      P.ocupado = false;
+      if(r.error) throw r.error;
+      P.editando = null;
+      ADMIN.msg = 'Horario guardado' + (cat === '*' ? ' para todo el club.' : ' para ' + cat + '.'); ADMIN.msgTipo = 'ok';
+      adminPushRecargar();
+    }).catch(function(e){ P.ocupado = false; adminAviso('No se pudo guardar: ' + ((e && e.message) || e), 'mal'); });
+}
+function adminPushUsarClub(idx){
+  var P = ADMIN.push, cat = adminPushCatDe(idx);
+  if(!cat || P.ocupado) return;
+  P.ocupado = true; adminRender();
+  sbClient.rpc('admin_push_usar_general', {p_categoria: cat}).then(function(r){
+    P.ocupado = false; if(r.error) throw r.error;
+    P.editando = null; ADMIN.msg = cat + ' vuelve a usar el horario del club.'; ADMIN.msgTipo = 'ok'; adminPushRecargar();
+  }).catch(function(e){ P.ocupado = false; adminAviso('No se pudo: ' + ((e && e.message) || e), 'mal'); });
+}
+function adminPushPreparar(){
+  var P = ADMIN.push;
+  if(P.ocupado) return;
+  P.ocupado = true; ADMIN.msg = ''; adminRender();
+  sbClient.rpc('admin_push_iniciar').then(function(r){
+    if(r.error) throw r.error;
+    // La función tarda unos segundos en crear las claves: se vuelve a mirar
+    var vuelta = 0, ficha = ++P.preparando;
+    var mirar = function(){
+      if(ficha !== P.preparando || !document.getElementById('admin-ov')) return;
+      vuelta++;
+      sbClient.rpc('admin_push_leer').then(function(x){
+        if(ficha !== P.preparando) return;
+        if(x && !x.error && x.data){ P.d = x.data; }
+        // Mientras espera no se redibuja nada (para no borrar lo que estés escribiendo en otra pestaña)
+        var avisar = function(t, tipo){
+          ADMIN.msg = t; ADMIN.msgTipo = tipo;
+          if(ADMIN.tab === 'recordatorios') adminRender();
+        };
+        if(P.d && P.d.listo){ P.ocupado = false; avisar('✅ Servicio de recordatorios listo. Los jugadores ya pueden activarlos en la app.', 'ok'); return; }
+        if(vuelta < 8){ setTimeout(mirar, 3000); return; }
+        P.ocupado = false;
+        avisar('La función «recordatorios» no respondió. Revisá en Supabase → Edge Functions que exista con ese nombre exacto y volvé a tocar «Preparar servicio».', 'mal');
+      }, function(){ if(vuelta < 8) setTimeout(mirar, 3000); else { P.ocupado = false; if(ADMIN.tab === 'recordatorios') adminRender(); } });
+    };
+    setTimeout(mirar, 2500);
+  }).catch(function(e){ P.ocupado = false; adminAviso('No se pudo: ' + ((e && e.message) || e), 'mal'); });
+}
+var PUSH_TIPOS = {wellness: '☀️ Wellness', wellness_2: '⏰ 2º aviso wellness', pse: '🔥 PSE', pse_2: '⏰ 2º aviso PSE', prueba: '🔔 Prueba', iniciar: '⚙️ Preparar servicio'};
+function adminHtmlRecordatorios(){
+  var P = ADMIN.push, d = P.d;
+  if(!d && !P.err && !P.falta && !P.leyendo && !P.pedida){ P.pedida = true; setTimeout(function(){ adminPushCargar(); }, 0); }
+  var caja = function(cont, col){
+    return '<div style="border:1px solid ' + (col ? 'color-mix(in srgb,' + col + ' 35%,transparent)' : 'var(--bor-1,#dfe3ea)') + ';border-radius:11px;padding:13px 15px;margin-bottom:14px;'
+      + (col ? 'background:color-mix(in srgb,' + col + ' 8%,transparent);' : '') + 'font-size:12.5px;line-height:1.6;color:var(--tex-1,#15202e)">' + cont + '</div>';
+  };
+  if(P.falta) return caja('<b>Todavía no está instalado.</b> Para usar los recordatorios hay que correr el <b>paso 8</b> en Supabase (SQL Editor) '
+    + 'y publicar la función <b>recordatorios</b>. Está explicado paso a paso en la guía.', '#B26A00');
+  if(P.err) return caja('No se pudo leer: ' + adminEsc(P.err) + ' <button onclick="adminPushRecargar()" style="' + adminEstInput() + 'cursor:pointer;margin-left:6px">Reintentar</button>', '#B3261E');
+  if(!d) return '<div style="padding:30px;text-align:center;color:var(--tex-2,#667);font-size:13px">Leyendo…</div>';
+
+  // Estado del servicio
+  var tickViejo = !d.ultimo_tick || (Date.now() - new Date(d.ultimo_tick).getTime()) > 20 * 60000;
+  var h = '';
+  if(!d.listo){
+    h += caja('<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:240px">'
+      + '<b>Falta preparar el servicio.</b> Una sola vez: crea las claves con las que el club firma las notificaciones. '
+      + 'Antes tiene que estar publicada la función <b>recordatorios</b> en Supabase.</div>'
+      + '<button ' + (P.ocupado ? 'disabled ' : '') + 'onclick="adminPushPreparar()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;border-radius:9px;'
+      + 'padding:9px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">' + (P.ocupado ? 'Preparando…' : '⚙️ Preparar servicio') + '</button></div>', '#B26A00');
+  } else {
+    h += caja('✅ <b>Servicio listo.</b> '
+      + (d.cron ? 'La base revisa cada 5 minutos si toca mandar algo (última revisión: ' + adminPushHace(d.ultimo_tick) + ').'
+                : '<span style="color:#B3261E">Falta la revisión automática: volvé a correr el paso 8.</span>')
+      + (d.cron && tickViejo ? ' <span style="color:#B3261E">Hace rato que no revisa: fijate en Supabase → Integrations → Cron que «tigre-recordatorios» esté activo.</span>' : ''),
+      d.cron && !tickViejo ? '#0F6E56' : '#B26A00');
+  }
+
+  // Horario del club
+  var club = adminPushHorario('*') || {activo: true, wellness: '07:00', wellness_2: '07:50', pse: '11:30', pse_2: '11:59', dias: [1,2,3,4,5]};
+  h += '<div style="font-size:13px;font-weight:800;color:var(--tex-1,#15202e);margin:4px 0 8px">Horario del club <span style="font-weight:600;color:var(--tex-2,#667);font-size:11.5px">· hora de Argentina · lo usan todas las divisiones que no tengan uno propio</span></div>'
+    + '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;padding:13px 15px;margin-bottom:16px">' + adminPushEditor('*', club, -1) + '</div>';
+
+  // Por división
+  h += '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;overflow-x:auto;overflow-y:hidden;margin-bottom:16px"><div style="min-width:680px">'
+    + '<div style="display:grid;grid-template-columns:1.1fr 2fr 1fr 170px;gap:8px;padding:9px 13px;background:var(--sup-2,#f6f7f9);'
+    + 'font-size:11px;font-weight:800;color:var(--tex-2,#667);text-transform:uppercase;letter-spacing:.4px">'
+    + '<div>División</div><div>Horario</div><div title="Jugadores que activaron los recordatorios / cuentas de jugador">Con avisos</div><div></div></div>';
+  (ADMIN.cats || []).forEach(function(c, i){
+    if(c.activa === false) return;
+    var propio = adminPushHorario(c.nombre), sus = (d.suscriptos || {})[c.nombre] || 0, cue = (d.cuentas || {})[c.nombre] || 0;
+    var editando = P.editando === c.nombre;
+    h += '<div style="border-top:1px solid var(--bor-1,#dfe3ea);padding:10px 13px">'
+      + '<div style="display:grid;grid-template-columns:1.1fr 2fr 1fr 170px;gap:8px;align-items:center">'
+      + '<div style="font-size:12.5px;font-weight:700;color:var(--tex-1,#15202e)">' + adminEsc(c.nombre) + '</div>'
+      + '<div style="font-size:12px;color:var(--tex-2,#667)">' + (propio ? '<b style="color:var(--club-c2,#3B4D88)">Propio:</b> ' + adminEsc(adminPushResumen(propio))
+           : 'Del club <span style="color:var(--tex-3,#929DB1)">(' + adminEsc(adminPushResumen(club)) + ')</span>') + '</div>'
+      + '<div style="font-size:12px;color:var(--tex-2,#667)">' + (cue ? '<b style="color:var(--tex-1,#15202e)">' + sus + '</b> de ' + cue + (cue === 1 ? ' jugador' : ' jugadores') : '<span style="color:var(--tex-3,#929DB1)">sin cuentas</span>') + '</div>'
+      + '<div style="display:flex;gap:4px;justify-content:flex-end">'
+      + (editando ? '' : adminBtnChico(propio ? 'Cambiar' : 'Horario propio', 'Un horario distinto para esta división', 'ADMIN.push.editando=ADMIN.cats[' + i + '].nombre;adminRender()', P.ocupado))
+      + (propio && !editando ? adminBtnChico('Usar el del club', 'Vuelve al horario de todo el club', 'adminPushUsarClub(' + i + ')', P.ocupado) : '')
+      + '</div></div>'
+      + (editando ? '<div style="margin-top:10px;padding:12px;border-radius:9px;background:var(--sup-2,#f6f7f9)">' + adminPushEditor(c.nombre, propio || club, i) + '</div>' : '')
+      + '</div>';
+  });
+  h += '</div></div>';
+
+  // Últimos envíos
+  var env = (d.envios || []).filter(function(e){ return e.tipo !== 'iniciar' || !e.terminado || (Date.now() - new Date(e.pedido).getTime()) < 864e5; }).slice(0, 12);
+  h += '<div style="font-size:13px;font-weight:800;color:var(--tex-1,#15202e);margin:4px 0 8px">Últimos avisos</div>';
+  if(!env.length) h += '<div style="font-size:12px;color:var(--tex-3,#929DB1);margin-bottom:14px">Todavía no se mandó ninguno.</div>';
+  else {
+    h += '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;overflow-x:auto;overflow-y:hidden;margin-bottom:14px"><div style="min-width:560px">';
+    env.forEach(function(e, k){
+      var cuando = new Date(e.pedido), res;
+      if(!e.terminado){
+        res = (Date.now() - cuando.getTime()) > 120000
+          ? '<span style="color:#B3261E">sin respuesta de la función</span>' : '<span style="color:var(--tex-3,#929DB1)">mandando…</span>';
+      } else if(e.tipo === 'iniciar'){ res = '<span style="color:#0F6E56">listo</span>'; }
+      else if(e.detalle === 'nadie pendiente con recordatorios activos'){ res = '<span style="color:var(--tex-3,#929DB1)">nadie pendiente</span>'; }
+      else {
+        res = '<b>' + (e.enviados || 0) + '</b> enviado' + (e.enviados === 1 ? '' : 's')
+          + (e.vencidos ? ' · ' + e.vencidos + ' celular' + (e.vencidos === 1 ? '' : 'es') + ' dado' + (e.vencidos === 1 ? '' : 's') + ' de baja' : '')
+          + (e.fallidos ? ' · <span style="color:#B3261E" title="' + adminEsc(e.detalle || '') + '">' + e.fallidos + ' con error</span>' : '');
+      }
+      h += '<div style="display:grid;grid-template-columns:120px 150px 1fr 1.4fr;gap:8px;padding:8px 13px;font-size:12px;color:var(--tex-2,#667);'
+        + (k ? 'border-top:1px solid var(--bor-1,#dfe3ea);' : '') + '">'
+        + '<div>' + cuando.toLocaleDateString('es-AR', {day: '2-digit', month: '2-digit'}) + ' ' + cuando.toLocaleTimeString('es-AR', {hour: '2-digit', minute: '2-digit'}) + '</div>'
+        + '<div style="color:var(--tex-1,#15202e);font-weight:700">' + (Object.prototype.hasOwnProperty.call(PUSH_TIPOS, e.tipo) ? PUSH_TIPOS[e.tipo] : adminEsc(e.tipo)) + '</div>'
+        + '<div>' + adminEsc(e.categoria || (e.tipo === 'iniciar' ? '—' : '')) + '</div><div>' + res + '</div></div>';
+    });
+    h += '</div></div>';
+  }
+  h += '<div style="font-size:11.5px;color:var(--tex-2,#667);line-height:1.65">'
+    + 'Cada jugador los activa una vez desde su app (en iPhone, primero tiene que agregarla a la pantalla de inicio). '
+    + 'El aviso <b>sólo le llega a quien todavía no respondió</b> ese día: si ya cargó el wellness o la PSE, no le llega nada. '
+    + 'Los 2º avisos le llegan sólo a quien sigue sin responder. Dejá vacío un horario para no mandar ese aviso.</div>';
+  return h;
+}
 
 function adminJugLink(){
   var b = location.href.split('#')[0].split('?')[0];
