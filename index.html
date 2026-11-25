@@ -267,7 +267,7 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
   + 'tstData_v1 tstCatalog_v1 tstCond_v1 tstDeleted_v1 tstExMap_v1 tstGroups_v1 tstNameMap_v1 '
   + 'vbtSessions_v1 vbtZones_v1 vbtV1rm_v1 vbtExMap_v1 vbtNameMap_v1 vbtDeleted_v1 '
   + 'hoyTodos_v1 hoyTodosDel_v1 hoyFlags_v1 hoyFlagsD_v1 hoyFlagsDTs_v1 '
-  + 'hoyAsist_v1 hoyAsistTs_v1 hoyCond_v1 hoyCondTs_v1 hoyCfg_v1 '
+  + 'hoyAsist_v1 hoyAsistTs_v1 hoyCond_v1 hoyCondTs_v1 hoyCfg_v1 hoyCumpl_v1 '
   + 'planCmpRoles_v1 planDeleted_v1 planGroupDefaults_v1 plan_cmp_state plan_hist_cmp_state '
   + 'profDeleted_v1 profDirty_v1 '
   + 'drills_pending drills_deleted drills_deleted_migrated_at drills_id_hwm '
@@ -23184,6 +23184,8 @@ function clubCargaPartes(){
   var p = [];
   if(accesoPuede('carga_gps', 'ver')) p.push({id: 'partidos', txt: '⚽ Partidos'});
   if(accesoPuede('hoy', 'ver')){ p.push({id: 'pse', txt: '🔥 Carga interna'}); p.push({id: 'wellness', txt: '😴 Wellness'}); }
+  // v213: quién responde y alertas contra el propio promedio (script cumpl-js)
+  if(accesoPuede('hoy', 'ver') && typeof clubCarCumpl === 'function') p.push({id: 'cumpl', txt: '✅ Respuestas'});
   return p;
 }
 function clubLunes(f){
@@ -23246,9 +23248,13 @@ function clubHtmlCarga(){
   var h = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     + partes.map(function(p){ return clubBoton(p.txt, "clubCarVista('" + p.id + "')", C.vista === p.id); }).join('')
     + '<span style="flex:1"></span><span style="font-size:10.5px;color:var(--tex-3,#929DB1);font-weight:700">Período</span>'
-    + [[4, '4 sem'], [8, '8 sem'], [12, '12 sem'], [26, '6 meses'], [52, '1 año']].map(function(p){
-        return clubBoton(p[1], 'clubCarSemanas(' + p[0] + ')', C.semanas === p[0]); }).join('') + '</div>';
-  if(C.vista === 'partidos') h += clubCarPartidos();
+    + (C.vista === 'cumpl'
+      ? [[7, '7 días'], [14, '14 días'], [28, '28 días']].map(function(p){
+          return clubBoton(p[1], 'clubCumplDias(' + p[0] + ')', (CLUB.cumplDias || 14) === p[0]); }).join('')
+      : [[4, '4 sem'], [8, '8 sem'], [12, '12 sem'], [26, '6 meses'], [52, '1 año']].map(function(p){
+          return clubBoton(p[1], 'clubCarSemanas(' + p[0] + ')', C.semanas === p[0]); }).join('')) + '</div>';
+  if(C.vista === 'cumpl') h += clubCarCumpl();
+  else if(C.vista === 'partidos') h += clubCarPartidos();
   else if(C.vista === 'pse') h += clubCarPse();
   else h += clubCarWellness();
   return h;
@@ -57153,6 +57159,637 @@ window.railMarca=railMarca;
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',arranque);
   else arranque();
+})();
+
+</script>
+<script id="cumpl-js">
+/* ══ RESPUESTAS Y ALERTAS (v213) ═══════════════════════════════════════════
+   Quién respondió el wellness y la PSE, el cumplimiento de cada jugador en el
+   período, y alertas contra el PROPIO promedio de cada jugador:
+     · bienestar claramente por debajo de su promedio (z ≤ −1 por defecto)
+     · dolor en respuestas seguidas
+     · sueño bajo en respuestas seguidas
+     · varios días seguidos sin responder
+   Todo configurable por división (clave HOY_CUMPL en app_settings).
+   No cambia el semáforo de Hoy: agrega una tarjeta en Hoy, un panel con el
+   detalle y una parte «Respuestas» en Club → Carga y wellness.
+   No baja datos nuevos en la división (usa lo que ya está cargado). */
+
+var CUMPL_DEF = {base: 28, minResp: 7, z: -1, dolorDias: 2, suenoMax: 2, suenoDias: 2, racha: 3, meta: 80};
+var CUMPL = {conf: {}, pedida: {}, dias: 7, abierto: false, cfgAbierta: false};
+
+function cumplEsc(s){
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function cumplNum(v, d){ return (v == null || isNaN(v)) ? '—' : Number(v).toFixed(d || 0).replace('.', ',').replace(/^-/, '−'); }
+function cumplZ(z){ return z < -3 ? 'z < −3' : 'z ' + cumplNum(z, 1); }
+function cumplISO(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function cumplMas(iso, n){ var d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return cumplISO(d); }
+function cumplDifDias(a, b){ return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5); }
+function cumplCorto(n){
+  var p = String(n || '').trim().split(/\s+/);
+  return p.length <= 1 ? (n || '') : p[0].charAt(0) + '. ' + p.slice(1).join(' ');
+}
+function cumplHayDolor(v){
+  if(v === true) return true;
+  if(v == null || v === false) return false;
+  return !/^(no|false|0|)$/i.test(String(v).trim());
+}
+// Campo de sueño del cuestionario (si existe)
+function cumplCampoSueno(layout){
+  var fs = (layout && Array.isArray(layout.fields)) ? layout.fields : [];
+  var cand = fs.filter(function(f){ return /sue[nñ]o|sleep|dorm|descanso/i.test(String(f.key || '') + ' ' + String(f.label || '')); });
+  // Si hay «horas de sueño» y «calidad de sueño», se usa la calidad (escala corta)
+  var cal = cand.filter(function(f){ return !/hora|hrs|horas/i.test(String(f.key || '') + ' ' + String(f.label || '')) && (f.max || 5) <= 10; });
+  return cal[0] || null;
+}
+// ¿Una lesión del perfil cubre ese día?
+function cumplLesionado(prof, d){
+  var inj = (prof && Array.isArray(prof.injuries)) ? prof.injuries : [];
+  for(var i = 0; i < inj.length; i++){
+    var x = inj[i]; if(!x || !x.dateStart) continue;
+    var ini = String(x.dateStart).slice(0, 10), fin = x.dateEnd ? String(x.dateEnd).slice(0, 10) : null;
+    if(d >= ini && (!fin || d <= fin)) return true;
+  }
+  return false;
+}
+// Copia local: «hoyCumpl_v1» es una clave por división (escala-js le agrega la
+// división activa), así que sólo sirve para la división que está abierta.
+function cumplCatActiva(){ return (typeof SB_CATEGORIA !== 'undefined' && SB_CATEGORIA) ? SB_CATEGORIA : (window.CAT_ACTIVA || ''); }
+function cumplConfDe(cat){
+  var c = CUMPL.conf[cat];
+  if(!c && cat === cumplCatActiva()){ try{ c = JSON.parse(localStorage.getItem('hoyCumpl_v1') || 'null'); }catch(e){} }
+  return Object.assign({}, CUMPL_DEF, c || {});
+}
+
+// ── Cálculo (el mismo para la división y para el club) ────────────────────
+// o = {plantel:[{nombre, clave, fuera:fn(iso)->bool}], well:[{clave, fecha, pct, dolor, zona, sueno}],
+//      pse:[{clave, fecha}], ref:'YYYY-MM-DD', dias:N, conf:{...}}
+function cumplCalcular(o){
+  var conf = Object.assign({}, CUMPL_DEF, o.conf || {});
+  var ref = o.ref, N = o.plantel.length;
+  var enPlantel = {}; o.plantel.forEach(function(p){ enPlantel[p.clave] = p; });
+  // Índices por jugador y por fecha
+  var W = {}, P = {}, wPorDia = {}, pPorDia = {};
+  o.well.forEach(function(r){
+    if(!enPlantel[r.clave] || !r.fecha || r.fecha > ref) return;
+    (W[r.clave] = W[r.clave] || {})[r.fecha] = r;           // si hay dos el mismo día, queda el último
+    (wPorDia[r.fecha] = wPorDia[r.fecha] || {})[r.clave] = 1;
+  });
+  o.pse.forEach(function(r){
+    if(!enPlantel[r.clave] || !r.fecha || r.fecha > ref) return;
+    (P[r.clave] = P[r.clave] || {})[r.fecha] = 1;
+    (pPorDia[r.fecha] = pPorDia[r.fecha] || {})[r.clave] = 1;
+  });
+  // Un día «cuenta» si hubo entrenamiento registrado (sesión del microciclo o
+  // asistencia tomada) o, si no hay registro, si respondió al menos el 30 % del
+  // plantel. Así los francos no bajan el cumplimiento, y un día de
+  // entrenamiento en que casi nadie respondió SÍ cuenta.
+  var umbral = Math.max(3, Math.ceil(N * 0.3));
+  var activ = o.actividad || {};
+  var ventana = Math.max(o.dias, conf.base);
+  var diasW = [], diasP = [], porCal = 0, porResp = 0;
+  for(var i = ventana; i >= 1; i--){
+    var d = cumplMas(ref, -i);
+    var cal = !!activ[d];
+    var w30 = Object.keys(wPorDia[d] || {}).length >= umbral, p30 = Object.keys(pPorDia[d] || {}).length >= umbral;
+    if(cal || w30){ diasW.push(d); if(i <= o.dias){ if(cal) porCal++; else porResp++; } }
+    if(cal || p30) diasP.push(d);
+  }
+  var desde = cumplMas(ref, -o.dias);
+  var diasWp = diasW.filter(function(d){ return d >= desde; }), diasPp = diasP.filter(function(d){ return d >= desde; });
+
+  var jug = [], alertas = [], tot = {wOk: 0, wEsp: 0, pOk: 0, pEsp: 0};
+  var hoy = {wResp: [], wFalta: [], pResp: [], pFalta: [], fuera: 0};
+  o.plantel.forEach(function(p){
+    var w = W[p.clave] || {}, ps = P[p.clave] || {};
+    var fueraHoy = p.fuera(ref);
+    if(fueraHoy) hoy.fuera++;
+    else {
+      (w[ref] ? hoy.wResp : hoy.wFalta).push(p.nombre);
+      (ps[ref] ? hoy.pResp : hoy.pFalta).push(p.nombre);
+    }
+    var j = {nombre: p.nombre, clave: p.clave, fuera: fueraHoy, wOk: 0, wEsp: 0, pOk: 0, pEsp: 0, racha: 0, ultima: null, alertas: [], hoyW: !!w[ref], hoyP: !!ps[ref]};
+    diasWp.forEach(function(d){ if(p.fuera(d)) return; j.wEsp++; if(w[d]) j.wOk++; });
+    diasPp.forEach(function(d){ if(p.fuera(d)) return; j.pEsp++; if(ps[d]) j.pOk++; });
+    j.wPct = j.wEsp ? j.wOk / j.wEsp * 100 : null;
+    j.pPct = j.pEsp ? j.pOk / j.pEsp * 100 : null;
+    tot.wOk += j.wOk; tot.wEsp += j.wEsp; tot.pOk += j.pOk; tot.pEsp += j.pEsp;
+    // Respuestas del jugador, de la más nueva a la más vieja
+    var fechas = Object.keys(w).sort().reverse();
+    j.ultima = fechas[0] || null;
+    // Días seguidos sin responder: días que contaron, posteriores a su última
+    // respuesta (aunque haya respondido un día que no contó) y sin estar fuera
+    var ultAntes = fechas.filter(function(f){ return f < ref; })[0] || '';
+    for(var k = diasW.length - 1; k >= 0; k--){
+      var dd = diasW[k];
+      if(dd <= ultAntes) break;
+      if(p.fuera(dd)) continue;
+      j.racha++;
+    }
+    if(!fueraHoy){
+      var hoyR = w[ref];
+      // 1) Bienestar contra su propio promedio
+      if(hoyR && hoyR.pct != null){
+        var bIni = cumplMas(ref, -conf.base), vs = [];
+        fechas.forEach(function(f){ if(f < ref && f >= bIni && w[f].pct != null) vs.push(w[f].pct); });
+        if(vs.length >= conf.minResp){
+          var m = vs.reduce(function(a, b){ return a + b; }, 0) / vs.length;
+          var sd = Math.sqrt(vs.reduce(function(a, b){ return a + (b - m) * (b - m); }, 0) / (vs.length - 1));
+          // Piso del desvío: 1,5 pasos del cuestionario (en un total de 25 puntos,
+          // 6 %), para que un jugador «parejo» no alarme por un punto de diferencia.
+          // Y además tiene que haber bajado al menos 2 puntos del cuestionario.
+          var paso = hoyR.paso || 4;
+          var z = (hoyR.pct - m) / Math.max(sd, 2.5, 1.5 * paso);
+          j.z = z; j.media = m;
+          if(z <= conf.z && (m - hoyR.pct) >= 2 * paso - 0.01){
+            j.alertas.push({tipo: 'bienestar', nivel: z <= conf.z - 0.5 ? 'rojo' : 'amarillo',
+              txt: 'Bienestar ' + cumplNum(hoyR.pct) + ' % — su promedio ' + cumplNum(m) + ' % (' + cumplZ(z) + ')'});
+          }
+        }
+      }
+      // Respuestas seguidas hacia atrás desde hoy (un hueco de hasta 3 días,
+      // como un fin de semana, no corta la seguidilla)
+      var seguidas = function(cond){
+        var n = 0, prev = ref, extra = [];
+        for(var x = 0; x < fechas.length; x++){
+          var f = fechas[x];
+          if(x === 0 && f !== ref) break;
+          if(x > 0 && cumplDifDias(f, prev) > 3) break;
+          if(!cond(w[f])) break;
+          n++; extra.push(w[f]); prev = f;
+        }
+        return {n: n, r: extra};
+      };
+      // 2) Dolor repetido
+      var sd2 = seguidas(function(r){ return r.dolor; });
+      if(sd2.n >= conf.dolorDias){
+        var zonas = {}; sd2.r.forEach(function(r){ if(r.zona) zonas[r.zona] = 1; });
+        j.alertas.push({tipo: 'dolor', nivel: sd2.n >= conf.dolorDias + 1 ? 'rojo' : 'amarillo',
+          txt: 'Dolor ' + sd2.n + ' respuestas seguidas' + (Object.keys(zonas).length ? ' (' + Object.keys(zonas).join(', ') + ')' : '')});
+      }
+      // 3) Sueño bajo repetido
+      var ss = seguidas(function(r){ return r.sueno != null && r.sueno > 0 && r.sueno <= conf.suenoMax; });
+      if(ss.n >= conf.suenoDias){
+        j.alertas.push({tipo: 'sueno', nivel: 'amarillo',
+          txt: 'Sueño bajo ' + ss.n + ' respuestas seguidas (' + ss.r.map(function(r){ return r.sueno; }).join(', ') + ')'});
+      }
+      // 4) No responde
+      if(!hoyR && j.racha >= conf.racha){
+        j.alertas.push({tipo: 'silencio', nivel: 'amarillo', txt: 'No responde el wellness hace ' + j.racha + ' días'});
+      }
+    }
+    j.alertas.forEach(function(a){ alertas.push({nombre: p.nombre, clave: p.clave, tipo: a.tipo, nivel: a.nivel, txt: a.txt}); });
+    jug.push(j);
+  });
+  alertas.sort(function(a, b){ return (a.nivel === 'rojo' ? 0 : 1) - (b.nivel === 'rojo' ? 0 : 1) || a.nombre.localeCompare(b.nombre, 'es'); });
+  // Una fila por jugador (con todos sus motivos), los rojos primero
+  var porJug = [], idx = {};
+  jug.forEach(function(j){
+    if(!j.alertas.length) return;
+    var rojo = j.alertas.some(function(a){ return a.nivel === 'rojo'; });
+    porJug.push({nombre: j.nombre, clave: j.clave, nivel: rojo ? 'rojo' : 'amarillo',
+      motivos: j.alertas.slice().sort(function(a, b){ return (a.nivel === 'rojo' ? 0 : 1) - (b.nivel === 'rojo' ? 0 : 1); })});
+  });
+  porJug.sort(function(a, b){ return (a.nivel === 'rojo' ? 0 : 1) - (b.nivel === 'rojo' ? 0 : 1) || b.motivos.length - a.motivos.length || a.nombre.localeCompare(b.nombre, 'es'); });
+  return {conf: conf, ref: ref, dias: o.dias, jug: jug, alertas: alertas, porJug: porJug, hoy: hoy, diasW: diasWp.length, diasP: diasPp.length,
+    wPct: tot.wEsp ? tot.wOk / tot.wEsp * 100 : null, pPct: tot.pEsp ? tot.pOk / tot.pEsp * 100 : null, plantel: N,
+    porCal: porCal, porResp: porResp};
+}
+
+// ── Datos de la división (lo que ya está cargado) ─────────────────────────
+function cumplLayout(){
+  return (typeof WELLNESS_LAYOUT !== 'undefined' && WELLNESS_LAYOUT && Array.isArray(WELLNESS_LAYOUT.fields)) ? WELLNESS_LAYOUT
+    : (typeof cargaDefaultWellnessLayout === 'function' ? cargaDefaultWellnessLayout() : {fields: []});
+}
+function cumplDivision(ref, dias){
+  var cat = (typeof SB_CATEGORIA !== 'undefined' && SB_CATEGORIA) ? SB_CATEGORIA : '';
+  var conf = cumplConfDe(cat);
+  var lay = cumplLayout(), sueno = cumplCampoSueno(lay);
+  var maxL = (lay.fields || []).reduce(function(a, f){ return a + (f.max || 5); }, 0);
+  var profMap = (typeof hoyProfileByNorm === 'function') ? hoyProfileByNorm() : {};
+  // Plantel = los jugadores con perfil en la división (nombres viejos, invitados
+  // de un partido o filas sueltas no cuentan). Sin perfiles, el plantel de Hoy.
+  var roster = Object.keys(profMap).map(function(k){ return profMap[k].name; });
+  if(!roster.length && typeof hoyRoster === 'function') roster = hoyRoster();
+  var ESTF = (typeof HOY_ESTADOS !== 'undefined') ? HOY_ESTADOS : {};
+  var plantel = roster.map(function(n){
+    var k = hoyNorm(n), prof = profMap[k] || null;
+    var lesSinFechas = prof && prof.estado === 'lesion' && !(Array.isArray(prof.injuries) && prof.injuries.some(function(x){ return x && x.dateStart; }));
+    return {nombre: n, clave: k, fuera: function(d){
+      // El día que se mira: la condición de ese día (o la del perfil). Días
+      // anteriores: sólo lo anotado para ese día, las lesiones con fechas y
+      // la asistencia (el estado de hoy no dice nada de hace dos semanas).
+      var est = (typeof hoyCondOf === 'function') ? hoyCondOf(d, k, profMap, d !== ref) : 'disponible';
+      if(ESTF[est]) return true;
+      if(cumplLesionado(prof, d) || lesSinFechas) return true;
+      var a = (typeof hoyAsistGet === 'function') ? hoyAsistGet(d, k) : null;
+      return !!(a && typeof hoyEsAusencia === 'function' && hoyEsAusencia(a));
+    }};
+  });
+  // Calendario: sesiones del microciclo y días con asistencia tomada
+  var actividad = {};
+  (typeof MICROCICLO !== 'undefined' ? MICROCICLO : []).forEach(function(s){ var f = hoyPDate(s.fecha || s.date); if(f) actividad[f] = 1; });
+  if(typeof HOY_ASIST !== 'undefined' && HOY_ASIST){
+    Object.keys(HOY_ASIST).forEach(function(f){ var x = HOY_ASIST[f]; if(x && typeof x === 'object' && Object.keys(x).length) actividad[f] = 1; });
+  }
+  var well = (typeof WELLNESS_DATA !== 'undefined' ? WELLNESS_DATA : []).map(function(r){
+    var mx = r.maxReadiness || maxL || 0, rd = Number(r.readiness);
+    var sv = (sueno && r.fields) ? Number(r.fields[sueno.key]) : null;
+    return {clave: hoyNorm(r.name), fecha: hoyPDate(r.date), pct: (mx > 0 && !isNaN(rd) && rd > 0) ? Math.min(100, rd / mx * 100) : null,
+      paso: mx > 0 ? 100 / mx : null,
+      dolor: cumplHayDolor(r.dolor), zona: r.dolorZona || r.dolor_zona || '', sueno: (sv != null && !isNaN(sv)) ? sv : null};
+  });
+  var pse = (typeof PSE_DATA !== 'undefined' ? PSE_DATA : []).map(function(r){ return {clave: hoyNorm(r.name), fecha: hoyPDate(r.date)}; });
+  var R = cumplCalcular({plantel: plantel, well: well, pse: pse, ref: ref, dias: dias, conf: conf, actividad: actividad});
+  R.cat = cat; R.sueno = sueno;
+  return R;
+}
+
+// ── Configuración (por división, en la nube) ──────────────────────────────
+function cumplConfCargar(cat){
+  if(!cat || CUMPL.pedida[cat]) return;
+  if(typeof MI_ROL !== 'undefined' && !MI_ROL) return;          // todavía no se sabe quién es
+  if(typeof accesoPuede === 'function' && !accesoPuede('hoy', 'ver')) return;
+  CUMPL.pedida[cat] = true;
+  if(typeof sbClient === 'undefined' || !sbClient || typeof sbCurrentUser === 'undefined' || !sbCurrentUser) return;
+  try{
+    Promise.resolve(sbClient.from('app_settings').select('value').eq('key', 'HOY_CUMPL').eq('categoria', cat).maybeSingle())
+      .then(function(r){
+        if(!r || r.error || !r.data || !r.data.value || typeof r.data.value !== 'object') return;
+        var antes = JSON.stringify(cumplConfDe(cat));
+        CUMPL.conf[cat] = r.data.value;
+        if(cat === cumplCatActiva()){ try{ localStorage.setItem('hoyCumpl_v1', JSON.stringify(r.data.value)); }catch(e){} }
+        if(JSON.stringify(cumplConfDe(cat)) !== antes) cumplRefrescar();
+      }, function(){});
+  }catch(e){}
+}
+function cumplPuedeConfigurar(){ return typeof accesoPuede !== 'function' || accesoPuede('hoy', 'cargar'); }
+function cumplRefrescar(){
+  try{ if(typeof mainView !== 'undefined' && mainView === 'hoy') cumplInyectarHoy(); }catch(e){}
+  try{ if(CUMPL.abierto && !CUMPL.cfgAbierta) cumplPanelPintar(); }catch(e){}
+}
+
+// ── Tarjeta en Hoy ────────────────────────────────────────────────────────
+function cumplColPct(v, meta){
+  if(v == null) return 'var(--tex-3,#929DB1)';
+  return v >= meta ? '#15805F' : (v >= meta - 20 ? '#B06000' : '#B3261E');
+}
+// Una fila por jugador: nombre y sus motivos (cada uno con su color)
+function cumplHtmlAlerta(a){
+  var motivos = (a.motivos || [a]).map(function(m){
+    return '<span style="color:' + (m.nivel === 'rojo' ? '#B3261E' : '#B06000') + ';font-weight:600">' + cumplEsc(m.txt) + '</span>';
+  }).join('<span style="color:var(--tex-3,#929DB1)"> · </span>');
+  return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--bor-1,#eef0f4)">'
+    + '<span style="font-size:12px;line-height:1.35">' + (a.nivel === 'rojo' ? '🔴' : '🟡') + '</span>'
+    + '<div style="font-size:11.5px;line-height:1.4;color:var(--tex-1,#15202e)"><b>' + cumplEsc(a.nombre) + '</b> · ' + motivos + '</div></div>';
+}
+function cumplInyectarHoy(){
+  var root = document.getElementById('view-hoy'); if(!root) return;
+  var viejo = document.getElementById('cumpl-card'); if(viejo) viejo.remove();
+  if(typeof accesoPuede === 'function' && !accesoPuede('hoy', 'ver')) return;
+  var col = root.querySelector('.hoy-grid > div:nth-child(2)'); if(!col) return;
+  var ref = (typeof hoyFechaSel === 'function') ? hoyFechaSel() : cumplISO(new Date());
+  var cat = (typeof SB_CATEGORIA !== 'undefined') ? SB_CATEGORIA : '';
+  cumplConfCargar(cat);
+  var R = cumplDivision(ref, 7), C = R.conf;
+  var esHoy = (typeof hoyEsHoy === 'function') ? hoyEsHoy() : true;
+  var activos = R.hoy.wResp.length + R.hoy.wFalta.length;
+  var caja = function(t, v, sub, color){
+    return '<div style="flex:1;min-width:84px;background:var(--sup-2,#f7f9fc);border-radius:9px;padding:8px 10px">'
+      + '<div style="font-size:9.5px;font-weight:800;color:var(--tex-3,#646D82);text-transform:uppercase;letter-spacing:.04em">' + t + '</div>'
+      + '<div style="font-size:19px;font-weight:800;color:' + color + ';line-height:1.25">' + v + '</div>'
+      + '<div style="font-size:9.5px;color:var(--tex-3,#646D82)">' + sub + '</div></div>';
+  };
+  if(!R.plantel){
+    var v = document.createElement('div'); v.className = 'hoy-card'; v.id = 'cumpl-card';
+    v.innerHTML = '<h3>✅ Respuestas y alertas</h3><div style="font-size:11px;color:var(--tex-3,#646D82)">Todavía no hay jugadores con perfil en esta división.</div>';
+    var a0 = col.children[1] || null;
+    if(a0 && a0.nextSibling) col.insertBefore(v, a0.nextSibling); else col.appendChild(v);
+    return;
+  }
+  var h = '<h3>✅ Respuestas y alertas</h3>'
+    + '<div style="display:flex;gap:7px;flex-wrap:wrap">'
+    + caja('Wellness ' + (esHoy ? 'hoy' : 'del día'), R.hoy.wResp.length + '<span style="font-size:11px;color:var(--tex-3,#646D82)">/' + activos + '</span>',
+        R.hoy.wFalta.length ? R.hoy.wFalta.length + ' sin responder' : 'todos', R.hoy.wFalta.length ? '#B06000' : '#15805F')
+    + caja('PSE ' + (esHoy ? 'hoy' : 'del día'), R.hoy.pResp.length + '<span style="font-size:11px;color:var(--tex-3,#646D82)">/' + activos + '</span>',
+        'después de entrenar', 'var(--tex-1,#15202e)')
+    + caja('Últimos 7 días', R.wPct == null ? '—' : cumplNum(R.wPct) + ' %', 'wellness respondido', cumplColPct(R.wPct, C.meta))
+    + '</div>';
+  if(R.porJug.length){
+    h += '<div style="margin-top:9px">' + R.porJug.slice(0, 4).map(function(a){ return cumplHtmlAlerta(a); }).join('')
+      + (R.porJug.length > 4 ? '<div style="font-size:10.5px;color:var(--tex-3,#646D82);padding-top:4px">y ' + (R.porJug.length - 4) + ' jugador(es) más con alertas</div>' : '') + '</div>';
+  } else {
+    h += '<div style="font-size:11px;color:var(--tex-3,#646D82);margin-top:9px">Sin alertas: nadie está claramente por debajo de lo suyo.</div>';
+  }
+  h += '<button class="hoy-btn" style="background:var(--club-c2,#3B4D88);width:100%;margin-top:10px" onclick="cumplAbrir()">Ver detalle y cumplimiento</button>';
+  var card = document.createElement('div');
+  card.className = 'hoy-card'; card.id = 'cumpl-card'; card.innerHTML = h;
+  var ancla = col.children[1] || null;      // después de «Check-in»
+  if(ancla && ancla.nextSibling) col.insertBefore(card, ancla.nextSibling); else col.appendChild(card);
+}
+window.cumplInyectarHoy = cumplInyectarHoy;
+
+// ── Panel con el detalle ──────────────────────────────────────────────────
+function cumplAbrir(){ CUMPL.abierto = true; CUMPL.cfgAbierta = false; CUMPL.borrador = null; cumplPanelPintar(); }
+function cumplCerrar(){
+  CUMPL.abierto = false;
+  var m = document.getElementById('cumpl-modal'); if(m) m.remove();
+  document.removeEventListener('keydown', cumplTecla);
+}
+function cumplTecla(e){ if(e.key === 'Escape') cumplCerrar(); }
+function cumplDias(n){ CUMPL.dias = n; cumplPanelPintar(); }
+function cumplTablaJug(R, C){
+  var js = R.jug.filter(function(j){ return j.wEsp || j.pEsp || !j.fuera; }).slice().sort(function(a, b){
+    var x = a.wPct == null ? 999 : a.wPct, y = b.wPct == null ? 999 : b.wPct;
+    return x - y || a.nombre.localeCompare(b.nombre, 'es');
+  });
+  if(!js.length) return '<div style="padding:14px;color:var(--tex-3,#646D82);font-size:12px">Sin jugadores.</div>';
+  var th = function(t, al){ return '<th style="text-align:' + (al || 'right') + ';padding:7px 9px;font-size:10px;font-weight:800;color:var(--tex-3,#646D82);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--bor-1,#dfe3ea);white-space:nowrap">' + t + '</th>'; };
+  var td = function(t, al, extra){ return '<td style="text-align:' + (al || 'right') + ';padding:7px 9px;font-size:12px;border-bottom:1px solid var(--bor-1,#eef0f4);color:var(--tex-1,#15202e);white-space:nowrap;' + (extra || '') + '">' + t + '</td>'; };
+  var pct = function(v, ok, esp){
+    if(!esp) return '<span style="color:var(--tex-3,#929DB1)">—</span>';
+    return '<b style="color:' + cumplColPct(v, C.meta) + '">' + cumplNum(v) + ' %</b> <span style="color:var(--tex-3,#929DB1);font-size:10.5px">' + ok + '/' + esp + '</span>';
+  };
+  return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:560px"><thead><tr>'
+    + th('Jugador', 'left') + th('Wellness') + th('PSE') + th('Días sin responder') + th('Última respuesta') + th('Hoy', 'center') + '</tr></thead><tbody>'
+    + js.map(function(j){
+        return '<tr>' + td(cumplEsc(j.nombre) + (j.fuera ? ' <span style="font-size:10px;color:var(--tex-3,#929DB1)">(fuera)</span>' : '')
+            + (j.alertas.length ? ' ' + j.alertas.map(function(a){ return a.nivel === 'rojo' ? '🔴' : '🟡'; }).join('') : ''), 'left', 'font-weight:600')
+          + td(pct(j.wPct, j.wOk, j.wEsp)) + td(pct(j.pPct, j.pOk, j.pEsp))
+          + td(j.racha ? '<b style="color:' + (j.racha >= C.racha ? '#B3261E' : 'var(--tex-1,#15202e)') + '">' + j.racha + '</b>' : '0')
+          + td(j.ultima ? j.ultima.slice(8, 10) + '/' + j.ultima.slice(5, 7) : '—')
+          + td(j.fuera ? '—' : ((j.hoyW ? '<span title="Wellness">☀️</span>' : '<span style="opacity:.3" title="Sin wellness">☀️</span>')
+              + (j.hoyP ? '<span title="PSE">🔥</span>' : '<span style="opacity:.3" title="Sin PSE">🔥</span>')), 'center') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+}
+function cumplPanelPintar(){
+  if(!CUMPL.abierto) return;
+  if(CUMPL.cfgAbierta && document.getElementById('cumpl-cfg-racha')){ try{ CUMPL.borrador = cumplCfgLeer(); }catch(e){} }
+  var ref = (typeof hoyFechaSel === 'function') ? hoyFechaSel() : cumplISO(new Date());
+  var R = cumplDivision(ref, CUMPL.dias), C = R.conf;
+  var m = document.getElementById('cumpl-modal');
+  var scroll = 0;
+  if(!m){
+    m = document.createElement('div'); m.id = 'cumpl-modal';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(13,27,42,.7);z-index:10500;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow-y:auto';
+    m.onclick = function(e){ if(e.target === m) cumplCerrar(); };
+    document.body.appendChild(m);
+    document.addEventListener('keydown', cumplTecla);
+  } else { scroll = m.scrollTop; }
+  var bot = function(t, fn, on){
+    return '<button onclick="' + fn + '" style="padding:5px 11px;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;'
+      + 'border:1px solid ' + (on ? 'var(--club-c2,#3B4D88)' : 'var(--bor-1,#dde2ea)') + ';background:' + (on ? 'var(--club-c2,#3B4D88)' : 'transparent') + ';'
+      + 'color:' + (on ? '#fff' : 'var(--tex-2,#556)') + '">' + t + '</button>';
+  };
+  var chips = function(lista, col){
+    if(!lista.length) return '<span style="font-size:11.5px;color:#15805F;font-weight:700">Todos respondieron ✓</span>';
+    return lista.slice().sort(function(a, b){ return a.localeCompare(b, 'es'); }).map(function(n){
+      return '<span style="display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:12px;margin:0 4px 4px 0;'
+        + 'background:' + col + '14;color:' + col + ';border:1px solid ' + col + '44">' + cumplEsc(cumplCorto(n)) + '</span>';
+    }).join('');
+  };
+  var fechaTxt = ref.slice(8, 10) + '/' + ref.slice(5, 7);
+  var h = '<div style="background:var(--sup-1,#fff);border-radius:14px;max-width:880px;width:100%;padding:18px 20px;box-sizing:border-box">'
+    + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div style="font-size:16px;font-weight:800;color:var(--tex-1,#0D1B2A)">✅ Respuestas y alertas <span style="font-size:12px;font-weight:600;color:var(--tex-3,#646D82)">· ' + cumplEsc(R.cat) + ' · ' + fechaTxt + '</span></div>'
+    + '<span style="flex:1"></span>'
+    + (cumplPuedeConfigurar() ? bot('⚙ Configurar alertas', 'cumplCfgToggle()', CUMPL.cfgAbierta) : '')
+    + '<button onclick="cumplCerrar()" aria-label="Cerrar" style="background:var(--sup-2,#f0f0f0);color:var(--tex-1,#15202e);border:none;border-radius:6px;padding:5px 12px;font-size:14px;cursor:pointer;font-weight:700">✕</button></div>';
+  if(CUMPL.cfgAbierta) h += cumplHtmlCfg(Object.assign({}, C, CUMPL.borrador || {}), R);
+  // Hoy
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:14px">'
+    + '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:10px;padding:10px 12px"><div style="font-size:12px;font-weight:800;color:var(--tex-1,#15202e);margin-bottom:6px">☀️ Wellness del ' + fechaTxt + ' · '
+      + R.hoy.wResp.length + ' de ' + (R.hoy.wResp.length + R.hoy.wFalta.length) + '</div>'
+      + '<div style="font-size:10.5px;color:var(--tex-3,#646D82);margin-bottom:5px">Faltan:</div>' + chips(R.hoy.wFalta, '#B06000') + '</div>'
+    + '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:10px;padding:10px 12px"><div style="font-size:12px;font-weight:800;color:var(--tex-1,#15202e);margin-bottom:6px">🔥 PSE del ' + fechaTxt + ' · '
+      + R.hoy.pResp.length + ' de ' + (R.hoy.pResp.length + R.hoy.pFalta.length) + '</div>'
+      + '<div style="font-size:10.5px;color:var(--tex-3,#646D82);margin-bottom:5px">Faltan (se carga después de entrenar):</div>' + chips(R.hoy.pFalta, '#8a5a00') + '</div>'
+    + '</div>';
+  // Alertas
+  h += '<div style="font-size:13px;font-weight:800;color:var(--tex-1,#15202e);margin:4px 0 4px">Alertas · ' + R.porJug.length + ' jugador(es)</div>'
+    + '<div style="font-size:10.5px;color:var(--tex-3,#646D82);margin-bottom:4px">Cada jugador contra su propio promedio de los últimos ' + C.base + ' días'
+    + ' (con al menos ' + C.minResp + ' respuestas). Distinto del semáforo de Hoy, que usa umbrales fijos.</div>'
+    + (R.porJug.length ? R.porJug.map(function(a){ return cumplHtmlAlerta(a); }).join('')
+       : '<div style="font-size:12px;color:#15805F;padding:6px 0">Sin alertas.</div>');
+  // Cumplimiento
+  h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:18px 0 8px">'
+    + '<div style="font-size:13px;font-weight:800;color:var(--tex-1,#15202e)">Cumplimiento</div>'
+    + '<span style="font-size:11.5px;color:var(--tex-2,#556)">wellness <b style="color:' + cumplColPct(R.wPct, C.meta) + '">' + cumplNum(R.wPct) + ' %</b>'
+    + ' · PSE <b style="color:' + cumplColPct(R.pPct, C.meta) + '">' + cumplNum(R.pPct) + ' %</b> · meta ' + C.meta + ' %</span>'
+    + '<span style="flex:1"></span>' + bot('7 días', 'cumplDias(7)', CUMPL.dias === 7) + bot('14 días', 'cumplDias(14)', CUMPL.dias === 14) + bot('28 días', 'cumplDias(28)', CUMPL.dias === 28) + '</div>'
+    + cumplTablaJug(R, C)
+    + '<div style="font-size:10.5px;color:var(--tex-3,#646D82);margin-top:8px;line-height:1.5">Cuentan los días con entrenamiento registrado (sesión del microciclo o asistencia tomada) '
+    + 'y, si ese día no hay registro, los días en que respondió al menos el 30 % del plantel. En el período: ' + R.diasW + ' día(s) de wellness '
+    + '(' + R.porCal + ' por entrenamiento registrado, ' + R.porResp + ' por respuestas) y ' + R.diasP + ' de PSE. Así los francos no bajan el porcentaje. '
+    + (R.porResp && !R.porCal ? '<b>Consejo:</b> si el microciclo o la asistencia están cargados, un día de entrenamiento en que casi nadie respondió también cuenta. ' : '')
+    + 'Tampoco cuentan los días en que el jugador estaba fuera (lesión, Primera, Reserva, ausente). El día que se está mirando no entra en el porcentaje porque todavía no terminó.</div>'
+    + '</div>';
+  m.innerHTML = h;
+  m.scrollTop = scroll;
+}
+window.cumplAbrir = cumplAbrir; window.cumplCerrar = cumplCerrar; window.cumplDias = cumplDias;
+
+// ── Editor de la configuración ────────────────────────────────────────────
+function cumplCfgToggle(){ CUMPL.cfgAbierta = !CUMPL.cfgAbierta; CUMPL.borrador = null; cumplPanelPintar(); }
+function cumplHtmlCfg(C, R){
+  var num = function(id, lab, val, min, max, paso, ayuda){
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--tex-1,#15202e);padding:5px 0;flex-wrap:wrap">'
+      + '<span style="flex:1;min-width:220px">' + lab + (ayuda ? '<br><span style="font-size:10.5px;color:var(--tex-3,#646D82)">' + ayuda + '</span>' : '') + '</span>'
+      + '<input id="cumpl-cfg-' + id + '" type="number" min="' + min + '" max="' + max + '" step="' + paso + '" value="' + val + '" '
+      + 'style="width:78px;padding:6px 8px;border:1px solid var(--bor-1,#ccd3de);border-radius:7px;font-size:13px;background:var(--sup-1,#fff);color:var(--tex-1,#15202e)"></label>';
+  };
+  var sel = function(id, lab, val, ops){
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--tex-1,#15202e);padding:5px 0;flex-wrap:wrap"><span style="flex:1;min-width:220px">' + lab + '</span>'
+      + '<select id="cumpl-cfg-' + id + '" style="padding:6px 8px;border:1px solid var(--bor-1,#ccd3de);border-radius:7px;font-size:13px;background:var(--sup-1,#fff);color:var(--tex-1,#15202e)">'
+      + ops.map(function(o){ return '<option value="' + o + '"' + (o === val ? ' selected' : '') + '>' + o + ' días</option>'; }).join('') + '</select></label>';
+  };
+  var esc = R.sueno ? ' (escala 1–' + (R.sueno.max || 5) + ')' : '';
+  return '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:10px;padding:10px 14px;margin-bottom:14px;background:var(--sup-2,#f7f9fc)">'
+    + '<div style="font-size:12.5px;font-weight:800;color:var(--tex-1,#15202e);margin-bottom:4px">Configuración de alertas · ' + cumplEsc(R.cat) + '</div>'
+    + sel('base', 'Comparar con su promedio de los últimos', C.base, [14, 21, 28])
+    + num('min', 'Respuestas mínimas para tener promedio', C.minResp, 3, 20, 1, 'Con menos, ese jugador no tiene alerta de bienestar.')
+    + num('z', 'Alertar si está este número de desvíos por debajo de su promedio', Math.abs(C.z), 0.5, 3, 0.1, '1 = alerta moderada · 1,5 = sólo caídas marcadas. Rojo desde medio desvío más.')
+    + num('dolor', 'Dolor: alertar desde estas respuestas seguidas con dolor', C.dolorDias, 1, 7, 1, '')
+    + (R.sueno ? num('smax', 'Sueño: valor que se considera bajo (igual o menos)' + esc, C.suenoMax, 1, (R.sueno.max || 5), 1, '')
+         + num('sdias', 'Sueño: alertar desde estas respuestas seguidas con sueño bajo', C.suenoDias, 1, 7, 1, '')
+       : '<div style="font-size:11px;color:var(--tex-3,#646D82);padding:5px 0">El cuestionario de esta división no tiene una pregunta de sueño.</div>')
+    + num('racha', 'Sin responder: alertar desde estos días seguidos', C.racha, 1, 14, 1, 'Cuentan sólo los días con actividad.')
+    + num('meta', 'Meta de cumplimiento (%)', C.meta, 50, 100, 5, 'Verde desde la meta, amarillo hasta 20 puntos menos, rojo debajo.')
+    + '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+    + '<button onclick="cumplCfgGuardar()" style="background:var(--club-c2,#3B4D88);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">Guardar</button>'
+    + '<button onclick="cumplCfgDefecto()" style="background:transparent;color:var(--tex-2,#556);border:1px solid var(--bor-1,#dde2ea);border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Volver a los valores recomendados</button>'
+    + '<span id="cumpl-cfg-msg" style="font-size:11.5px;font-weight:700;align-self:center"></span></div></div>';
+}
+function cumplCfgLeer(){
+  var v = function(id){ var e = document.getElementById('cumpl-cfg-' + id); return e ? Number(e.value) : NaN; };
+  var lim = function(x, a, b, def){ return isNaN(x) ? def : Math.min(b, Math.max(a, x)); };
+  var c = {
+    base: [14, 21, 28].indexOf(v('base')) >= 0 ? v('base') : CUMPL_DEF.base,
+    minResp: Math.round(lim(v('min'), 3, 20, CUMPL_DEF.minResp)),
+    z: -Math.round(lim(v('z'), 0.5, 3, 1) * 10) / 10,
+    dolorDias: Math.round(lim(v('dolor'), 1, 7, CUMPL_DEF.dolorDias)),
+    racha: Math.round(lim(v('racha'), 1, 14, CUMPL_DEF.racha)),
+    meta: Math.round(lim(v('meta'), 50, 100, CUMPL_DEF.meta))
+  };
+  if(document.getElementById('cumpl-cfg-smax')){
+    c.suenoMax = Math.round(lim(v('smax'), 1, 10, CUMPL_DEF.suenoMax));
+    c.suenoDias = Math.round(lim(v('sdias'), 1, 7, CUMPL_DEF.suenoDias));
+  }
+  return c;
+}
+function cumplCfgGuardar(conf){
+  if(!cumplPuedeConfigurar()) return;
+  var cat = (typeof SB_CATEGORIA !== 'undefined') ? SB_CATEGORIA : '';
+  var anterior = CUMPL.conf[cat] ? Object.assign({}, CUMPL.conf[cat]) : null;
+  var c = Object.assign({}, cumplConfDe(cat), conf || cumplCfgLeer());
+  CUMPL.conf[cat] = c; CUMPL.borrador = null;
+  if(cat === cumplCatActiva()){ try{ localStorage.setItem('hoyCumpl_v1', JSON.stringify(c)); }catch(e){} }
+  var msg = function(t, ok){ var e = document.getElementById('cumpl-cfg-msg'); if(e){ e.textContent = t; e.style.color = ok ? '#15805F' : '#B3261E'; } };
+  cumplRefrescar();
+  try{ if(CUMPL.abierto) cumplPanelPintar(); }catch(e){}   // muestra ya las alertas con lo nuevo
+  msg('Guardando…', true);
+  if(typeof sbClient === 'undefined' || !sbClient){ msg('Guardado en este dispositivo.', true); return; }
+  // Si la nube no lo acepta, se vuelve a lo que había (no queda «medio guardado»)
+  var fallo = function(e){
+    if(anterior) CUMPL.conf[cat] = anterior; else delete CUMPL.conf[cat];
+    if(cat === cumplCatActiva()){ try{ if(anterior) localStorage.setItem('hoyCumpl_v1', JSON.stringify(anterior)); else localStorage.removeItem('hoyCumpl_v1'); }catch(_){} }
+    cumplRefrescar();
+    try{ if(CUMPL.abierto) cumplPanelPintar(); }catch(_){}
+    msg('No se pudo guardar (no se cambió nada): ' + ((e && e.message) || e || 'error'), false);
+  };
+  try{
+    Promise.resolve(sbClient.from('app_settings').upsert({key: 'HOY_CUMPL', categoria: cat, value: c}, {onConflict: 'key,categoria'}))
+      .then(function(r){ if(r && r.error) throw r.error; msg('✓ Guardado para ' + cat + '.', true); })
+      .catch(fallo);
+  }catch(e){ fallo(e); }
+}
+function cumplCfgDefecto(){ cumplCfgGuardar(Object.assign({}, CUMPL_DEF)); }
+window.cumplCfgToggle = cumplCfgToggle; window.cumplCfgGuardar = cumplCfgGuardar; window.cumplCfgDefecto = cumplCfgDefecto;
+
+// ── Club: parte «Respuestas» en Carga y wellness ──────────────────────────
+// Usa lo que la vista del club ya bajó (wellness y PSE) más tres cosas
+// chicas: el plantel de cada división, el sueño de los últimos días y la
+// configuración de alertas de cada división.
+function cumplClubExtra(){
+  var ex = CLUB.datos.cumplExtra;
+  if(ex || CLUB.cargando.cumplExtra || CLUB.err.cumplExtra) return ex || null;
+  var cats = clubCats(), desde = clubDesde(10);
+  CLUB.cargando.cumplExtra = Promise.all([
+    clubPaginado(function(){ return sbClient.from('player_profiles').select('id,name,categoria,estado:data->>estado,injuries:data->injuries').in('categoria', cats).order('categoria').order('id'); }),
+    clubPaginado(function(){ return sbClient.from('microciclo').select('fecha,categoria').in('categoria', cats).gte('fecha', clubDesde(40)).order('fecha').order('categoria').order('week').order('day'); })
+      .catch(function(){ return []; }),
+    clubPaginado(function(){ return sbClient.from('wellness_data').select('name,date,categoria,fields').in('categoria', cats).gte('date', desde).order('date').order('categoria').order('name'); }),
+    sbClient.from('app_settings').select('categoria,value').eq('key', 'HOY_CUMPL').in('categoria', cats)
+      .then(function(r){ return (r && !r.error && r.data) ? r.data : []; }, function(){ return []; })
+  ]).then(function(r){
+    CLUB.datos.cumplExtra = {perfiles: r[0], sesiones: r[1], recientes: r[2], confs: r[3]}; CLUB.cargando.cumplExtra = null;
+    (r[3] || []).forEach(function(x){ if(x && x.value && typeof x.value === 'object') CUMPL.conf[x.categoria] = x.value; });
+    clubRender();
+  }).catch(function(e){
+    CLUB.cargando.cumplExtra = null; CLUB.err.cumplExtra = (e && e.message) ? e.message : String(e); clubRender();
+  });
+  return null;
+}
+function cumplClubLayout(div){
+  var lay = null;
+  ((CLUB.datos.carga || {}).layouts || []).forEach(function(r){ if(r.categoria === div && r.value && Array.isArray(r.value.fields)) lay = r.value; });
+  if(!lay && typeof cargaDefaultWellnessLayout === 'function'){ try{ lay = cargaDefaultWellnessLayout(); }catch(e){} }
+  return lay || {fields: []};
+}
+function cumplClubCalcular(div, ex, dias, ref){
+  var D = CLUB.datos.carga || {}, lay = cumplClubLayout(div), sueno = cumplCampoSueno(lay);
+  var maxL = (lay.fields || []).reduce(function(a, f){ return a + (f.max || 5); }, 0);
+  var FUERA = {lesion: 1, reserva: 1, primera: 1, nodisp: 1, ausente: 1};
+  var vistos = {}, plantel = [];
+  (ex.perfiles || []).forEach(function(p){
+    if(p.categoria !== div || !p.name) return;
+    var k = clubNorm(p.name); if(vistos[k]) return; vistos[k] = 1;
+    var fueraHoy = !!FUERA[p.estado], prof = {injuries: Array.isArray(p.injuries) ? p.injuries : []};
+    var lesSinFechas = p.estado === 'lesion' && !prof.injuries.some(function(x){ return x && x.dateStart; });
+    plantel.push({nombre: p.name, clave: k, fuera: function(d){
+      return (d === ref && fueraHoy) || lesSinFechas || cumplLesionado(prof, d);
+    }});
+  });
+  var actividad = {};
+  (ex.sesiones || []).forEach(function(s){ if(s.categoria === div && s.fecha) actividad[String(s.fecha).slice(0, 10)] = 1; });
+  var sv = {};
+  (ex.recientes || []).forEach(function(r){
+    if(r.categoria !== div || !sueno || !r.fields) return;
+    var v = Number(r.fields[sueno.key]); if(!isNaN(v)) sv[clubNorm(r.name) + '|' + String(r.date).slice(0, 10)] = v;
+  });
+  var well = (D.wellness || []).filter(function(r){ return r.categoria === div; }).map(function(r){
+    var k = clubNorm(r.name), f = String(r.date).slice(0, 10), rd = Number(r.readiness);
+    return {clave: k, fecha: f, pct: (maxL > 0 && !isNaN(rd) && rd > 0) ? Math.min(100, rd / maxL * 100) : null,
+      paso: maxL > 0 ? 100 / maxL : null, dolor: cumplHayDolor(r.dolor), zona: r.dolor_zona || '', sueno: sv[k + '|' + f] != null ? sv[k + '|' + f] : null};
+  });
+  var pse = (D.pse || []).filter(function(r){ return r.categoria === div; }).map(function(r){ return {clave: clubNorm(r.name), fecha: String(r.date).slice(0, 10)}; });
+  var R = cumplCalcular({plantel: plantel, well: well, pse: pse, ref: ref, dias: dias, conf: cumplConfDe(div), actividad: actividad});
+  R.cat = div;
+  return R;
+}
+function clubCarCumpl(){
+  if(CLUB.err.cumplExtra) return '<div style="padding:16px;color:#B3261E;font-size:12px">No se pudo leer: ' + clubEsc(CLUB.err.cumplExtra)
+    + ' <button onclick="CLUB.err.cumplExtra=null;clubRender()" style="margin-left:6px;padding:3px 10px;border-radius:7px;border:1px solid var(--bor-1,#dde2ea);background:transparent;color:var(--tex-1,#15202e);cursor:pointer;font-family:inherit">Reintentar</button></div>';
+  var ex = cumplClubExtra();
+  if(!ex) return '<div style="padding:24px;text-align:center;color:var(--tex-3,#929DB1);font-size:12px">Leyendo…</div>';
+  var dias = CLUB.cumplDias || 14, sel = clubSel(), ref = clubHoy();
+  var Rs = sel.map(function(d){ return cumplClubCalcular(d, ex, dias, ref); });
+  var h = clubTabla([{t: 'División'}, {t: 'Plantel', r: 1}, {t: 'Wellness hoy', r: 1}, {t: 'PSE hoy', r: 1},
+      {t: 'Wellness ' + dias + ' d', r: 1}, {t: 'PSE ' + dias + ' d', r: 1}, {t: 'Jugadores con alertas', r: 1}],
+    Rs.map(function(R){
+      var act = R.hoy.wResp.length + R.hoy.wFalta.length, C = R.conf;
+      return [clubChipDiv(R.cat) + ' ' + clubEsc(R.cat), R.plantel, R.hoy.wResp.length + ' / ' + act, R.hoy.pResp.length + ' / ' + act,
+        '<b style="color:' + cumplColPct(R.wPct, C.meta) + '">' + (R.wPct == null ? '—' : cumplNum(R.wPct) + ' %') + '</b>',
+        '<b style="color:' + cumplColPct(R.pPct, C.meta) + '">' + (R.pPct == null ? '—' : cumplNum(R.pPct) + ' %') + '</b>',
+        R.porJug.length ? '<b style="color:' + (R.porJug.some(function(a){ return a.nivel === 'rojo'; }) ? '#B3261E' : '#B06000') + '">' + R.porJug.length + '</b>' : '0'];
+    }), {vacio: 'Sin divisiones elegidas.'})
+    + '<div style="font-size:11px;color:var(--tex-3,#929DB1);margin-top:6px">Plantel según Perfiles. Cuentan los días con sesión en el microciclo '
+    + 'o, si no hay registro, con al menos el 30 % de respuestas; no cuentan los días en que el jugador estaba lesionado. '
+    + 'Es una vista resumida: no mira la asistencia ni la condición anotada día por día, así que puede diferir un poco del detalle de cada división '
+    + '(Hoy → Respuestas y alertas). Las alertas comparan a cada jugador con su propio promedio y cada división las ajusta desde ahí (⚙).</div>';
+  var todas = [];
+  Rs.forEach(function(R){ R.porJug.forEach(function(a){ todas.push({div: R.cat, a: a}); }); });
+  h += clubTitulo('Alertas de hoy · ' + todas.length + ' jugador(es)');
+  if(!todas.length) h += '<div style="font-size:12px;color:#15805F">Sin alertas.</div>';
+  else {
+    h += todas.sort(function(x, y){ return (x.a.nivel === 'rojo' ? 0 : 1) - (y.a.nivel === 'rojo' ? 0 : 1) || x.div.localeCompare(y.div); })
+      .map(function(t){ return '<div style="display:flex;gap:6px;align-items:center">' + clubChipDiv(t.div) + '<div style="flex:1">' + cumplHtmlAlerta(t.a) + '</div></div>'; }).join('');
+  }
+  // Los que menos responden en el club
+  var bajos = [];
+  Rs.forEach(function(R){ R.jug.forEach(function(j){ if(!j.fuera && j.wEsp >= 3 && j.wPct != null && j.wPct < R.conf.meta) bajos.push({div: R.cat, j: j, meta: R.conf.meta}); }); });
+  bajos.sort(function(a, b){ return a.j.wPct - b.j.wPct; });
+  h += clubTitulo('Los que menos responden el wellness (' + dias + ' días, debajo de la meta)');
+  h += bajos.length ? clubTabla([{t: 'División'}, {t: 'Jugador'}, {t: 'Wellness', r: 1}, {t: 'PSE', r: 1}, {t: 'Días sin responder', r: 1}],
+      bajos.slice(0, 15).map(function(b){
+        return [clubChipDiv(b.div), clubEsc(b.j.nombre), '<b style="color:' + cumplColPct(b.j.wPct, b.meta) + '">' + cumplNum(b.j.wPct) + ' %</b> (' + b.j.wOk + '/' + b.j.wEsp + ')',
+          b.j.pEsp ? cumplNum(b.j.pPct) + ' %' : '—', b.j.racha];
+      })) + (bajos.length > 15 ? '<div style="font-size:11px;color:var(--tex-3,#929DB1);margin-top:4px">y ' + (bajos.length - 15) + ' más.</div>' : '')
+    : '<div style="font-size:12px;color:#15805F">Todos están en la meta o arriba.</div>';
+  return h;
+}
+function clubCumplDias(n){ CLUB.cumplDias = n; clubRender(); }
+window.clubCumplDias = clubCumplDias;
+
+// ── Enganche con la pestaña Hoy (sin tocar cómo se dibuja) ────────────────
+(function(){
+  function enganchar(){
+    if(typeof window.hoyRender !== 'function' || window.hoyRender._cumpl) return;
+    var orig = window.hoyRender;
+    var nuevo = function(){
+      var r = orig.apply(this, arguments);
+      try{ cumplInyectarHoy(); }catch(e){ try{ console.warn('[Respuestas]', e); }catch(_){} }
+      // (si está abierta la configuración no se redibuja: se perdería lo que se está escribiendo)
+      try{ if(CUMPL.abierto && !CUMPL.cfgAbierta) cumplPanelPintar(); }catch(e){}
+      return r;
+    };
+    nuevo._cumpl = true;
+    window.hoyRender = nuevo;
+    try{ if(typeof mainView !== 'undefined' && mainView === 'hoy') cumplInyectarHoy(); }catch(e){}
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', enganchar); else enganchar();
 })();
 
 </script>
