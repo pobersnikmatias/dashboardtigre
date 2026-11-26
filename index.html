@@ -21009,6 +21009,8 @@ function adminAbrir(){
   ADMIN.msg = ''; ADMIN.tab = 'usuarios';
   if(ADMIN.push){ ADMIN.push.d = null; ADMIN.push.pedida = false; ADMIN.push.leyendo = false; ADMIN.push.err = ''; ADMIN.push.falta = false;
                   ADMIN.push.editando = null; ADMIN.push.ocupado = false; ADMIN.push.preparando++; ADMIN.push.ficha++; }
+  if(ADMIN.temp){ ADMIN.temp.d = null; ADMIN.temp.pedida = false; ADMIN.temp.leyendo = false; ADMIN.temp.err = ''; ADMIN.temp.falta = false;
+                  ADMIN.temp.confirmando = false; ADMIN.temp.resultado = null; ADMIN.temp.ficha = (ADMIN.temp.ficha || 0) + 1; }
   if(ADMIN.jug){ ADMIN.jug.lista = null; ADMIN.jug.pedida = false; ADMIN.jug.leyendo = false; ADMIN.jug.vincular = null;
                  ADMIN.jug.err = ''; ADMIN.jug.falta = false; ADMIN.jug.ficha = (ADMIN.jug.ficha || 0) + 1; }
   adminRender();
@@ -21050,7 +21052,9 @@ function adminCargar(){
     (r[1].data || []).forEach(function(x){
       (ADMIN.alcance[x.auth_uid] = ADMIN.alcance[x.auth_uid] || []).push(x.categoria);
     });
-    ADMIN.cats = (r[2].data || []).sort(function(a,b){
+    // v214: «Ex jugadores» (paso 9) guarda a los que dejaron el club: no es una
+    // división de trabajo, así que no aparece en Cuentas, Jugadores ni Divisiones.
+    ADMIN.cats = (r[2].data || []).filter(function(c){ return c.nombre !== 'Ex jugadores'; }).sort(function(a,b){
       return (a.orden||0) - (b.orden||0) || String(a.nombre).localeCompare(String(b.nombre),'es');
     });
     var vistos = {};
@@ -21098,23 +21102,24 @@ function adminRender(){
     + '<div style="font-size:17px;font-weight:800;color:var(--tex-1,#15202e)">Administración</div>'
     + '<div style="font-size:11.5px;color:var(--tex-2,#667);margin-top:2px">'
     + 'Club Atlético Tigre · ' + adminEsc(MI_NOMBRE || (sbCurrentUser && sbCurrentUser.email) || '') + '</div></div>'
-    + '<button onclick="adminCargar();if(ADMIN.tab===\'jugadores\')adminJugRecargar();if(ADMIN.tab===\'recordatorios\')adminPushRecargar()" title="Volver a leer de la base" style="border:1px solid var(--bor-1,#dfe3ea);'
+    + '<button onclick="adminCargar();if(ADMIN.tab===\'jugadores\')adminJugRecargar();if(ADMIN.tab===\'recordatorios\')adminPushRecargar();if(ADMIN.tab===\'temporada\')temporadaRecargar()" title="Volver a leer de la base" style="border:1px solid var(--bor-1,#dfe3ea);'
     + 'background:transparent;color:var(--tex-2,#667);border-radius:8px;padding:7px 11px;font-size:12px;'
     + 'cursor:pointer;font-family:inherit">Actualizar</button>'
     + '<button onclick="adminCerrar()" style="border:none;background:transparent;color:var(--tex-2,#667);'
     + 'font-size:22px;line-height:1;cursor:pointer;padding:2px 6px">×</button></div>'
     + '<div id="admin-pestanas" style="display:flex;gap:2px;padding:12px 20px 0;border-bottom:1px solid var(--bor-1,#dfe3ea);margin-bottom:16px;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:thin">'
-    + pest('usuarios','Cuentas') + pest('jugadores','Jugadores') + pest('divisiones','Divisiones') + pest('recordatorios','🔔 Recordatorios') + '</div>'
+    + pest('usuarios','Cuentas') + pest('jugadores','Jugadores') + pest('divisiones','Divisiones') + pest('recordatorios','🔔 Recordatorios') + pest('temporada','🔄 Temporada') + '</div>'
     + aviso
     + '<div style="padding:0 20px 22px">'
     + (ADMIN.cargando ? '<div style="padding:30px;text-align:center;color:var(--tex-2,#667);font-size:13px">Leyendo…</div>'
        : (ADMIN.tab === 'usuarios' ? adminHtmlUsuarios() : (ADMIN.tab === 'jugadores' ? adminHtmlJugadores()
-          : (ADMIN.tab === 'recordatorios' ? adminHtmlRecordatorios() : adminHtmlDivisiones()))))
+          : (ADMIN.tab === 'recordatorios' ? adminHtmlRecordatorios()
+          : (ADMIN.tab === 'temporada' && typeof adminHtmlTemporada === 'function' ? adminHtmlTemporada() : adminHtmlDivisiones())))))
     + '</div>';
   // En pantallas angostas, que la pestaña elegida quede a la vista
   var tiras = document.getElementById('admin-pestanas');
   if(tiras && tiras.scrollWidth > tiras.clientWidth){
-    var activa = tiras.children[['usuarios','jugadores','divisiones','recordatorios'].indexOf(ADMIN.tab)];
+    var activa = tiras.children[['usuarios','jugadores','divisiones','recordatorios','temporada'].indexOf(ADMIN.tab)];
     if(activa) tiras.scrollLeft = Math.max(0, activa.offsetLeft + activa.offsetWidth - tiras.clientWidth + 20);
   }
 }
@@ -57791,6 +57796,411 @@ window.clubCumplDias = clubCumplDias;
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', enganchar); else enganchar();
 })();
+
+</script>
+<script id="temporada-js">
+/* ══ CAMBIO DE TEMPORADA (v214) ════════════════════════════════════════════
+   Panel de administración → pestaña «🔄 Temporada»: pasa a los jugadores de
+   división todos juntos, con sus cuentas y su acceso a la app (paso 9).
+   Además, al entrar al dashboard se pregunta qué jugadores se fueron de la
+   división abierta, para que Hoy y la carga del vestuario no los sigan
+   mostrando por sus datos viejos (los datos se quedan donde se cargaron). */
+
+// ── 1. Los que se fueron de esta división ─────────────────────────────────
+var TEMP_SALIDAS = null;          // {categoria: {nombreNormalizado: perfil}}
+var TEMP_LLEGADAS = null;         // {categoria: {perfil: fechaISO del pase}}
+var _tempPidiendo = false, _tempSinPaso9 = false;
+// No demora el arranque: la respuesta se aplica cuando llega (aunque tarde)
+function temporadaSalidasCargar(){
+  if(_tempPidiendo || _tempSinPaso9) return;
+  if(typeof sbClient === 'undefined' || !sbClient || typeof sbCurrentUser === 'undefined' || !sbCurrentUser) return;
+  if(typeof MI_ROL !== 'undefined' && (!MI_ROL || MI_ROL === 'jugador')) return;
+  _tempPidiendo = true;
+  try{
+    Promise.resolve(sbClient.rpc('temporada_salidas')).then(function(r){
+      _tempPidiendo = false;
+      if(r && r.error && /PGRST202|Could not find the function|does not exist/i.test(String(r.error.message || r.error.code || ''))){ _tempSinPaso9 = true; return; }
+      if(!r || r.error || !r.data) return;
+      var sal = Array.isArray(r.data) ? r.data : (r.data.salidas || []), lle = Array.isArray(r.data) ? [] : (r.data.llegadas || []);
+      var S = {}, L = {};
+      sal.forEach(function(x){
+        if(!x || !x.categoria || !x.nombre) return;
+        (S[x.categoria] = S[x.categoria] || {})[temporadaNorm(x.nombre)] = String(x.perfil || '');
+      });
+      lle.forEach(function(x){ if(x && x.categoria && x.perfil) (L[x.categoria] = L[x.categoria] || {})[String(x.perfil)] = String(x.desde || ''); });
+      TEMP_SALIDAS = S; TEMP_LLEGADAS = L;
+      temporadaOlvidarBorrados();
+      var cambio = temporadaLimpiarPerfiles();
+      if(cambio || Object.keys(S[temporadaCat()] || {}).length){
+        try{ if(typeof mainView !== 'undefined' && mainView === 'hoy' && typeof hoyRender === 'function') hoyRender(); }catch(e){}
+      }
+    }, function(){ _tempPidiendo = false; });
+  }catch(e){ _tempPidiendo = false; }
+}
+// Un «perfil borrado» viejo con el mismo id que un jugador que llegó: se olvida
+// (si no, este dispositivo borraría de la nube al que llegó)
+function temporadaOlvidarBorrados(){
+  var L = TEMP_LLEGADAS && TEMP_LLEGADAS[temporadaCat()];
+  if(!L || typeof PROF_DELETED === 'undefined') return;
+  var olvidados = 0;
+  Object.keys(L).forEach(function(id){
+    var t = PROF_DELETED[id];
+    if(t === undefined) return;
+    if(!L[id] || String(t) < String(L[id])){
+      try{ if(typeof profTombClear === 'function') profTombClear(id); else delete PROF_DELETED[id]; }catch(e){}
+      olvidados++;
+      try{ console.log('[Temporada] «' + id + '» llegó por un cambio de temporada: se olvida un borrado viejo con ese nombre.'); }catch(e){}
+    }
+  });
+  // Ese perfil no se había cargado (estaba «borrado» acá): se vuelven a leer los perfiles
+  if(olvidados && typeof profPollOnce === 'function'){ try{ profPollOnce(); }catch(e){} }
+}
+function temporadaNorm(n){ return (typeof hoyNorm === 'function') ? hoyNorm(n) : String(n || '').toLowerCase().trim(); }
+function temporadaCat(){ return (typeof SB_CATEGORIA !== 'undefined' && SB_CATEGORIA) ? SB_CATEGORIA : (window.CAT_ACTIVA || ''); }
+// Perfiles que quedaron guardados en este dispositivo de jugadores que ya
+// pasaron a otra división: la base confirma que ese perfil ya no está acá.
+function temporadaLimpiarPerfiles(){
+  var S = TEMP_SALIDAS && TEMP_SALIDAS[temporadaCat()];
+  if(!S || typeof PLAYER_PROFILES === 'undefined') return;
+  var ids = {}; Object.keys(S).forEach(function(k){ if(S[k]) ids[S[k]] = k; });
+  var quitados = 0, perdidos = [];
+  Object.keys(PLAYER_PROFILES).forEach(function(id){
+    var p = PLAYER_PROFILES[id];
+    if(!p || !ids[id] || temporadaNorm(p.name) !== ids[id]) return;
+    var sucio = false;
+    try{ sucio = !!(typeof _profDirty !== 'undefined' && _profDirty[id]); }catch(e){}
+    if(sucio){
+      perdidos.push(p.name);
+      // Copia de lo que no se llegó a subir, por las dudas
+      try{ var bk = JSON.parse(sessionStorage.getItem('temporada_sin_subir') || '{}'); bk[id + '@' + temporadaCat()] = p; sessionStorage.setItem('temporada_sin_subir', JSON.stringify(bk)); }catch(e){}
+    }
+    delete PLAYER_PROFILES[id]; quitados++;
+    try{ if(typeof _profDirty !== 'undefined') delete _profDirty[id]; }catch(e){}
+  });
+  if(quitados){
+    try{ if(typeof profDirtySave === 'function') profDirtySave(); }catch(e){}
+    try{ if(typeof saveData === 'function') saveData(); }catch(e){}
+    try{ console.log('[Temporada] ' + quitados + ' perfil(es) de jugadores que pasaron a otra división, quitados de este dispositivo.'); }catch(e){}
+  }
+  if(perdidos.length) temporadaAviso('Había cambios sin subir en el perfil de ' + perdidos.join(', ') + ', que ' + (perdidos.length > 1 ? 'pasaron' : 'pasó')
+    + ' a otra división con el cambio de temporada. Esos cambios no se guardaron: cargalos de nuevo en su división nueva.');
+  return quitados > 0;
+}
+function temporadaAviso(t){
+  try{
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:100000;max-width:620px;width:calc(100% - 24px);'
+      + 'background:#fff4e5;color:#7a4500;border:1px solid #e8b46a;border-radius:10px;padding:11px 14px;font-size:12.5px;line-height:1.45;box-shadow:0 8px 28px rgba(0,0,0,.18)';
+    d.innerHTML = '⚠️ ' + (typeof adminEsc === 'function' ? adminEsc(t) : String(t)) + ' <button style="margin-left:8px;border:none;background:transparent;color:#7a4500;font-weight:800;cursor:pointer">✕</button>';
+    d.querySelector('button').onclick = function(){ d.remove(); };
+    document.body.appendChild(d);
+    setTimeout(function(){ try{ d.remove(); }catch(e){} }, 20000);
+  }catch(e){}
+}
+// Los nombres del plantel (Hoy, la carga del vestuario) sin los que se fueron,
+// salvo que haya un perfil con ese nombre en la división (alguien que volvió,
+// o un homónimo nuevo).
+(function(){
+  function enganchar(){
+    if(typeof window.cargaSelfPlayerNames === 'function' && !window.cargaSelfPlayerNames._temp){
+      var orig = window.cargaSelfPlayerNames;
+      var nuevo = function(){
+        var lista = orig.apply(this, arguments);
+        var S = TEMP_SALIDAS && TEMP_SALIDAS[temporadaCat()];
+        if(!S || !Array.isArray(lista)) return lista;
+        var conPerfil = {};
+        try{ Object.keys(PLAYER_PROFILES || {}).forEach(function(k){ var p = PLAYER_PROFILES[k]; if(p && p.name) conPerfil[temporadaNorm(p.name)] = 1; }); }catch(e){}
+        return lista.filter(function(n){ var k = temporadaNorm(n); return !(k in S) || conPerfil[k]; });
+      };
+      nuevo._temp = true;
+      window.cargaSelfPlayerNames = nuevo;
+    }
+    if(typeof window.sbLoadInitialData === 'function' && !window.sbLoadInitialData._temp){
+      var origL = window.sbLoadInitialData;
+      var nuevoL = function(){
+        var p = origL.apply(this, arguments);
+        // Se pregunta en paralelo, sin hacer esperar el arranque
+        Promise.resolve(p).then(function(){ temporadaSalidasCargar(); }, function(){});
+        return p;
+      };
+      nuevoL._temp = true;
+      window.sbLoadInitialData = nuevoL;
+    }
+  }
+  enganchar();
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', enganchar);
+  // Una pestaña que queda abierta días: se vuelve a preguntar cada 20 minutos
+  // (sólo si está a la vista). Es una consulta de unos pocos bytes.
+  setInterval(function(){
+    try{ if(document.visibilityState === 'visible' && typeof sbReady !== 'undefined' && sbReady) temporadaSalidasCargar(); }catch(e){}
+  }, 20 * 60000);
+})();
+
+// ── 2. Pestaña del panel de administración ────────────────────────────────
+ADMIN.temp = {d: null, err: '', falta: false, leyendo: false, pedida: false, ficha: 0, ocupado: false,
+              nombre: '', destDiv: {}, destJug: {}, abiertas: {}, confirmando: false, confirmaTxt: '', resultado: null};
+var TEMP_DEJO = '__dejo';
+
+function temporadaNombreSugerido(){
+  var d = new Date(); return String(d.getMonth() >= 8 ? d.getFullYear() + 1 : d.getFullYear());
+}
+function temporadaCargar(){
+  var T = ADMIN.temp;
+  if(T.leyendo) return;
+  var ficha = T.ficha = (T.ficha || 0) + 1;
+  T.leyendo = true; T.err = ''; adminRender();
+  var fin = function(r, e){
+    if(ficha !== T.ficha) return;
+    T.leyendo = false;
+    if(e || (r && r.error)){
+      var m = e ? ((e && e.message) || String(e)) : (r.error.message || '');
+      T.falta = !e && /PGRST202|does not exist|Could not find the function/i.test(m);
+      T.err = T.falta ? '' : m; T.d = null;
+    } else {
+      T.d = r.data || null; T.falta = false;
+      if(!T.nombre){
+        // Si esa ya se aplicó, se sugiere la siguiente
+        var usadas = {}; ((T.d && T.d.temporadas) || []).forEach(function(t){ if(t.estado === 'aplicado') usadas[String(t.temporada)] = 1; });
+        var nom = temporadaNombreSugerido();
+        while(usadas[nom] && /^\d+$/.test(nom)) nom = String(+nom + 1);
+        T.nombre = nom;
+      }
+      // Destinos por defecto: la división siguiente (si hay), si no se queda
+      ((T.d && T.d.divisiones) || []).forEach(function(dv){
+        if(!(dv.nombre in T.destDiv)) T.destDiv[dv.nombre] = dv.sugerido || '';
+      });
+    }
+    adminRender();
+  };
+  try{ sbClient.rpc('temporada_plan').then(function(r){ fin(r); }, function(e){ fin(null, e); }); }
+  catch(e){ fin(null, e); }
+}
+function temporadaRecargar(){ var T = ADMIN.temp; T.leyendo = false; T.pedida = true; temporadaCargar(); }
+window.temporadaRecargar = temporadaRecargar;
+
+function temporadaDestino(cat, id){
+  var T = ADMIN.temp, k = cat + '|' + id;
+  return (k in T.destJug) ? T.destJug[k] : (T.destDiv[cat] || '');
+}
+// Lista de pases según lo elegido
+function temporadaMovs(){
+  var T = ADMIN.temp, out = [];
+  ((T.d && T.d.divisiones) || []).forEach(function(dv){
+    (dv.jugadores || []).forEach(function(j){
+      var d = temporadaDestino(dv.nombre, j.id);
+      if(!d || d === dv.nombre) return;
+      out.push(d === TEMP_DEJO ? {perfil: j.id, desde: dv.nombre, dejo: true, nombre: j.nombre}
+                               : {perfil: j.id, desde: dv.nombre, a: d, nombre: j.nombre});
+    });
+  });
+  return out;
+}
+function temporadaSel(val, actual, onchange, ancho){
+  var T = ADMIN.temp, divs = ((T.d && T.d.divisiones) || []).map(function(d){ return d.nombre; });
+  var op = function(v, t){ return '<option value="' + adminEsc(v) + '"' + (v === val ? ' selected' : '') + '>' + adminEsc(t) + '</option>'; };
+  return '<select onchange="' + onchange + '" style="' + adminEstInput() + (ancho ? 'width:' + ancho + ';' : '') + '">'
+    + op('', 'Se queda en ' + actual)
+    + divs.filter(function(d){ return d !== actual; }).map(function(d){ return op(d, 'Pasa a ' + d); }).join('')
+    + op(TEMP_DEJO, 'Deja el club') + '</select>';
+}
+function temporadaSetDiv(i, v){
+  var T = ADMIN.temp, dv = T.d.divisiones[i]; if(!dv) return;
+  T.destDiv[dv.nombre] = v;
+  // Al cambiar el destino de la división, las excepciones que quedaron iguales al nuevo destino se limpian
+  Object.keys(T.destJug).forEach(function(k){ if(k.indexOf(dv.nombre + '|') === 0 && T.destJug[k] === v) delete T.destJug[k]; });
+  T.confirmando = false; adminRender();
+}
+function temporadaSetJug(i, j, v){
+  var T = ADMIN.temp, dv = T.d.divisiones[i]; if(!dv) return;
+  var jug = dv.jugadores[j]; if(!jug) return;
+  var k = dv.nombre + '|' + jug.id;
+  if(v === (T.destDiv[dv.nombre] || '')) delete T.destJug[k]; else T.destJug[k] = v;
+  T.confirmando = false; adminRender();
+}
+function temporadaAbrirDiv(i){ var T = ADMIN.temp, dv = T.d.divisiones[i]; if(!dv) return; T.abiertas[dv.nombre] = !T.abiertas[dv.nombre]; adminRender(); }
+function temporadaNombre(v){
+  var T = ADMIN.temp; T.nombre = String(v || '').slice(0, 40);
+  if(T.confirmando){ T.confirmando = false; T.confirmaTxt = ''; adminRender();
+    var e = document.getElementById('temp-nombre'); if(e){ e.focus(); try{ e.setSelectionRange(e.value.length, e.value.length); }catch(_){} } }
+}
+window.temporadaSetDiv = temporadaSetDiv; window.temporadaSetJug = temporadaSetJug;
+window.temporadaAbrirDiv = temporadaAbrirDiv; window.temporadaNombre = temporadaNombre;
+
+function temporadaResumenDiv(dv){
+  var cuentas = {};
+  (dv.jugadores || []).forEach(function(j){
+    var d = temporadaDestino(dv.nombre, j.id);
+    var k = !d || d === dv.nombre ? 'se quedan' : (d === TEMP_DEJO ? 'dejan el club' : 'a ' + d);
+    cuentas[k] = (cuentas[k] || 0) + 1;
+  });
+  var ks = Object.keys(cuentas).sort(function(a, b){ return cuentas[b] - cuentas[a]; });
+  return ks.map(function(k){ return '<b>' + cuentas[k] + '</b> ' + adminEsc(k); }).join(' · ') || 'sin jugadores';
+}
+function temporadaHoyISO(){
+  return (typeof hoyLocalISO === 'function') ? hoyLocalISO()
+    : (function(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })(new Date());
+}
+
+function adminHtmlTemporada(){
+  var T = ADMIN.temp, d = T.d;
+  if(!d && !T.err && !T.falta && !T.leyendo && !T.pedida){ T.pedida = true; setTimeout(function(){ temporadaCargar(); }, 0); }
+  var caja = function(cont, col){
+    return '<div style="border:1px solid ' + (col ? 'color-mix(in srgb,' + col + ' 35%,transparent)' : 'var(--bor-1,#dfe3ea)') + ';border-radius:11px;padding:13px 15px;margin-bottom:14px;'
+      + (col ? 'background:color-mix(in srgb,' + col + ' 8%,transparent);' : '') + 'font-size:12.5px;line-height:1.6;color:var(--tex-1,#15202e)">' + cont + '</div>';
+  };
+  var boton = function(txt, fn, prim, apagado){
+    return '<button ' + (apagado ? 'disabled ' : '') + 'onclick="' + fn + '" style="' + (prim
+      ? 'background:var(--club-c2,#3B4D88);color:#fff;border:none;'
+      : 'background:transparent;color:var(--tex-1,#15202e);border:1px solid var(--bor-1,#dfe3ea);')
+      + 'border-radius:9px;padding:9px 16px;font-size:12.5px;font-weight:700;cursor:' + (apagado ? 'default' : 'pointer') + ';opacity:' + (apagado ? '.5' : '1') + ';font-family:inherit">' + txt + '</button>';
+  };
+  if(T.falta) return caja('<b>Todavía no está instalado.</b> Para usar el cambio de temporada hay que correr el <b>paso 9</b> en Supabase (SQL Editor). Está explicado en la guía.', '#B26A00');
+  if(T.err) return caja('No se pudo leer: ' + adminEsc(T.err) + ' <button onclick="temporadaRecargar()" style="' + adminEstInput() + 'cursor:pointer;margin-left:6px">Reintentar</button>', '#B3261E');
+  if(!d) return '<div style="padding:30px;text-align:center;color:var(--tex-2,#667);font-size:13px">Leyendo…</div>';
+
+  var h = '';
+  if(T.resultado){
+    var R = T.resultado;
+    h += caja('✅ <b>Temporada «' + adminEsc(R.temporada) + '» aplicada.</b> Pasaron de división <b>' + R.pasaron + '</b> jugador(es)'
+      + (R.dejaron ? ', <b>' + R.dejaron + '</b> dejaron el club (sus cuentas quedaron desactivadas)' : '') + '. '
+      + R.cuentas + ' cuenta(s) de la app siguen a su jugador: entran con el mismo usuario y contraseña.<br>'
+      + '<b>Avisá a los cuerpos técnicos que recarguen el dashboard</b> (o que lo cierren y lo vuelvan a abrir). '
+      + 'Las cuentas del cuerpo técnico no cambian: si un DT sigue a su grupo, cambiale las divisiones en la pestaña Cuentas.'
+      + '<div style="margin-top:8px">' + boton('Recargar el dashboard ahora', 'location.reload()', true) + '</div>', '#0F6E56');
+  }
+  h += '<div style="font-size:12.5px;color:var(--tex-2,#556);line-height:1.6;margin-bottom:14px">'
+    + 'Pasa a los jugadores de división todos juntos. Cada uno conserva su perfil, sus lesiones y su cuenta de la app (mismo usuario y contraseña). '
+    + '<b>Lo cargado durante el año se queda en la división donde se cargó</b> (así cada división conserva su temporada completa); '
+    + 'el jugador lo sigue viendo en su app y vos en la vista Club. Si algo sale mal, se puede deshacer.</div>';
+
+  // Temporadas ya aplicadas
+  var hechas = (d.temporadas || []);
+  if(hechas.length){
+    h += '<div style="font-size:13px;font-weight:800;color:var(--tex-1,#15202e);margin:4px 0 8px">Cambios de temporada hechos</div>'
+      + '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;overflow:hidden;margin-bottom:16px">'
+      + hechas.map(function(t, i){
+          var ap = t.estado === 'aplicado';
+          return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 13px;font-size:12.5px;color:var(--tex-1,#15202e);' + (i ? 'border-top:1px solid var(--bor-1,#dfe3ea);' : '') + (ap ? '' : 'opacity:.6;') + '">'
+            + '<b>' + adminEsc(t.temporada) + '</b><span style="color:var(--tex-2,#667)">' + (t.fecha ? adminEsc(String(t.fecha).slice(8, 10) + '/' + String(t.fecha).slice(5, 7) + '/' + String(t.fecha).slice(0, 4)) : '') + '</span>'
+            + '<span style="color:var(--tex-2,#667)">' + t.jugadores + ' jugador(es)' + (t.dejaron ? ' · ' + t.dejaron + ' dejaron el club' : '') + '</span>'
+            + '<span style="flex:1"></span>'
+            + (ap ? adminBtnChico('Deshacer', 'Vuelve a todos a la división de antes', 'temporadaDeshacerN(' + i + ')', T.ocupado)
+                  : '<span style="font-size:11px;color:var(--tex-3,#929DB1)">deshecho</span>')
+            + '</div>';
+        }).join('') + '</div>';
+  }
+
+  // El plan
+  var divs = d.divisiones || [];
+  h += '<div style="font-size:13px;font-weight:800;color:var(--tex-1,#15202e);margin:4px 0 8px">Nuevo cambio de temporada</div>'
+    + '<label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--tex-1,#15202e);margin-bottom:12px">'
+    + '<span>Nombre de la temporada</span><input id="temp-nombre" value="' + adminEsc(T.nombre) + '" oninput="temporadaNombre(this.value)" maxlength="40" style="' + adminEstInput() + 'width:110px">'
+    + '<span style="font-size:11px;color:var(--tex-3,#929DB1)">Los pases cuentan desde hoy (' + temporadaHoyISO().split('-').reverse().join('/') + ').</span></label>';
+  h += '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:11px;overflow:hidden;margin-bottom:14px">';
+  divs.forEach(function(dv, i){
+    var n = (dv.jugadores || []).length, abierta = !!T.abiertas[dv.nombre];
+    var excep = Object.keys(T.destJug).filter(function(k){ return k.indexOf(dv.nombre + '|') === 0; }).length;
+    h += '<div style="padding:10px 13px;' + (i ? 'border-top:1px solid var(--bor-1,#dfe3ea);' : '') + '">'
+      + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      + '<div style="min-width:150px;font-size:12.5px;font-weight:800;color:var(--tex-1,#15202e)">' + adminEsc(dv.nombre)
+      + ' <span style="font-weight:600;color:var(--tex-3,#929DB1);font-size:11px">' + n + ' jug.</span></div>'
+      + (n ? temporadaSel(T.destDiv[dv.nombre] || '', dv.nombre, 'temporadaSetDiv(' + i + ',this.value)', '210px') : '<span style="font-size:11.5px;color:var(--tex-3,#929DB1)">sin jugadores</span>')
+      + '<span style="flex:1;min-width:10px"></span>'
+      + (n ? '<span style="font-size:11.5px;color:var(--tex-2,#667)">' + temporadaResumenDiv(dv) + '</span>'
+         + adminBtnChico(abierta ? 'Cerrar' : ('Uno por uno' + (excep ? ' (' + excep + ')' : '')), 'Elegir el destino de cada jugador', 'temporadaAbrirDiv(' + i + ')', T.ocupado) : '')
+      + '</div>';
+    if(abierta && n){
+      h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:6px 14px;margin-top:10px;padding:10px;border-radius:9px;background:var(--sup-2,#f6f7f9)">'
+        + dv.jugadores.map(function(j, k){
+            var dest = temporadaDestino(dv.nombre, j.id), distinto = (dv.nombre + '|' + j.id) in T.destJug;
+            return '<div style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--tex-1,#15202e)">'
+              + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (distinto ? 'font-weight:800' : '') + '" title="' + adminEsc(j.nombre) + '">'
+              + adminEsc(j.nombre) + (j.cuenta ? ' <span title="Tiene cuenta de la app">📱</span>' : '') + (j.estado === 'lesion' ? ' <span title="Lesionado">🚑</span>' : '') + '</span>'
+              + temporadaSel(dest, dv.nombre, 'temporadaSetJug(' + i + ',' + k + ',this.value)', '150px') + '</div>';
+          }).join('') + '</div>';
+    }
+    h += '</div>';
+  });
+  h += '</div>';
+
+  // Cómo queda
+  var movs = temporadaMovs(), despues = {}, antes = {};
+  divs.forEach(function(dv){ antes[dv.nombre] = (dv.jugadores || []).length; despues[dv.nombre] = antes[dv.nombre]; });
+  var dejan = 0;
+  movs.forEach(function(m){ despues[m.desde]--; if(m.dejo) dejan++; else despues[m.a] = (despues[m.a] || 0) + 1; });
+  h += '<div style="font-size:13px;font-weight:800;color:var(--tex-1,#15202e);margin:4px 0 8px">Así quedaría cada división</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'
+    + divs.map(function(dv){
+        var a = antes[dv.nombre], b = despues[dv.nombre];
+        return '<div style="border:1px solid var(--bor-1,#dfe3ea);border-radius:9px;padding:6px 10px;font-size:11.5px;color:var(--tex-2,#667);min-width:110px">'
+          + '<div style="font-weight:800;color:var(--tex-1,#15202e)">' + adminEsc(dv.nombre) + '</div>'
+          + a + ' → <b style="color:' + (b === 0 ? '#B06000' : 'var(--tex-1,#15202e)') + '">' + b + '</b>' + (b === 0 && a ? ' <span style="font-size:10.5px">(vacía)</span>' : '') + '</div>';
+      }).join('') + '</div>'
+    + '<div style="font-size:11.5px;color:var(--tex-2,#667);margin-bottom:14px">' + movs.length + ' pase(s)' + (dejan ? ' · ' + dejan + ' dejan el club (su perfil queda guardado y su cuenta se desactiva)' : '')
+    + '. Una división que queda vacía espera a la camada nueva: sus jugadores se cargan como siempre.</div>';
+
+  // Confirmar
+  if(!T.confirmando){
+    h += boton('Revisar y aplicar…', 'ADMIN.temp.confirmando=true;ADMIN.temp.confirmaTxt=\'\';adminRender()', true, !movs.length || T.ocupado);
+  } else {
+    var ok = String(T.confirmaTxt || '').trim() === String(T.nombre || '').trim() && String(T.nombre || '').trim() !== '';
+    h += caja('<b>Antes de aplicar:</b><ul style="margin:6px 0 8px 18px;padding:0">'
+      + '<li>Pedile a los cuerpos técnicos que tengan todo sincronizado (que abran el dashboard con conexión) y que no carguen nada mientras hacés el cambio.</li>'
+      + '<li>' + movs.length + ' jugador(es) cambian de división <b>ahora</b>, con sus cuentas de la app.</li>'
+      + (dejan ? '<li>' + dejan + ' dejan el club: su cuenta de la app se desactiva.</li>' : '')
+      + '<li>Si algo sale mal, se deshace desde acá mismo.</li></ul>'
+      + 'Para confirmar, escribí el nombre de la temporada (<b>' + adminEsc(T.nombre) + '</b>): '
+      + '<input id="temp-confirma" value="' + adminEsc(T.confirmaTxt || '') + '" oninput="ADMIN.temp.confirmaTxt=this.value;document.getElementById(\'temp-aplicar\').disabled=(this.value.trim()!==ADMIN.temp.nombre.trim());document.getElementById(\'temp-aplicar\').style.opacity=(this.value.trim()!==ADMIN.temp.nombre.trim())?\'.5\':\'1\'" style="' + adminEstInput() + 'width:110px">'
+      + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+      + '<button id="temp-aplicar" ' + (ok && !T.ocupado ? '' : 'disabled ') + 'onclick="temporadaAplicar()" style="background:#B3261E;color:#fff;border:none;border-radius:9px;padding:9px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:' + (ok && !T.ocupado ? '1' : '.5') + '">'
+      + (T.ocupado ? 'Aplicando…' : 'Aplicar el cambio de temporada') + '</button>'
+      + boton('Cancelar', 'ADMIN.temp.confirmando=false;adminRender()', false, T.ocupado) + '</div>', '#B3261E');
+  }
+  return h;
+}
+
+function temporadaAplicar(){
+  var T = ADMIN.temp;
+  if(T.ocupado) return;
+  var nombre = String(T.nombre || '').trim(), movs = temporadaMovs();
+  if(!nombre || String(T.confirmaTxt || '').trim() !== nombre || !movs.length) return;
+  T.ocupado = true; adminRender();
+  sbClient.rpc('temporada_aplicar', {p_temporada: nombre, p_fecha: temporadaHoyISO(),
+      p_movs: movs.map(function(m){ var x = {perfil: m.perfil, desde: m.desde}; if(m.dejo) x.dejo = true; else x.a = m.a; return x; })})
+    .then(function(r){
+      T.ocupado = false;
+      if(r.error) throw r.error;
+      T.resultado = r.data || {temporada: nombre};
+      T.confirmando = false; T.destJug = {}; T.destDiv = {}; T.abiertas = {}; T.nombre = '';
+      ADMIN.msg = '';
+      temporadaRecargar();
+      try{ adminCargar(); }catch(e){}
+    }).catch(function(e){
+      T.ocupado = false;
+      adminAviso('No se aplicó nada: ' + ((e && e.message) || e), 'mal');
+    });
+}
+function temporadaDeshacer(nombre){
+  var T = ADMIN.temp;
+  if(T.ocupado) return;
+  if(!confirm('¿Deshacer el cambio de temporada «' + nombre + '»?\n\nTodos los jugadores vuelven a la división de antes, con sus cuentas. '
+    + 'Lo que se cargó mientras tanto en las divisiones nuevas queda donde se cargó.')) return;
+  T.ocupado = true; adminRender();
+  sbClient.rpc('temporada_deshacer', {p_temporada: nombre}).then(function(r){
+    T.ocupado = false;
+    if(r.error) throw r.error;
+    T.resultado = null;
+    ADMIN.msg = '↩ Temporada «' + nombre + '» deshecha: volvieron ' + ((r.data && r.data.volvieron) || 0) + ' jugador(es). Avisá a los cuerpos técnicos que recarguen el dashboard.';
+    ADMIN.msgTipo = 'ok';
+    temporadaRecargar();
+    try{ adminCargar(); }catch(e){}
+  }).catch(function(e){
+    T.ocupado = false;
+    adminAviso('No se deshizo nada: ' + ((e && e.message) || e), 'mal');
+  });
+}
+function temporadaDeshacerN(i){ var t = ((ADMIN.temp.d && ADMIN.temp.d.temporadas) || [])[i]; if(t) temporadaDeshacer(String(t.temporada)); }
+window.temporadaAplicar = temporadaAplicar; window.temporadaDeshacer = temporadaDeshacer; window.temporadaDeshacerN = temporadaDeshacerN;
 
 </script>
 </body>
