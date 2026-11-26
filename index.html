@@ -50448,7 +50448,7 @@ window.tstSetIndiv=tstSetIndiv;
 // ═══ POSICIONES Y FILTRO (v160) ═══════════════════════════════════════════
 var TST_POS_LIST=[
   {k:'ARQ',lbl:'Arqueros'},{k:'DFC',lbl:'Defensores centrales'},{k:'LAT',lbl:'Laterales'},
-  {k:'VOL',lbl:'Volantes'},{k:'DC',lbl:'Doble cinco'},{k:'EXT',lbl:'Extremos'},
+  {k:'VOL',lbl:'Volantes'},{k:'DC',lbl:'Delanteros centro'},{k:'EXT',lbl:'Extremos'},
   {k:'CA',lbl:'Contención / armado'},{k:'DEL',lbl:'Delanteros'}
 ];
 var _tstPosFilter='';   // '' = todas las posiciones
@@ -58244,16 +58244,16 @@ var MA_POS = [
   {k: 'DFC', lbl: 'Defensores centrales', linea: 'DEF'},
   {k: 'LAT', lbl: 'Laterales', linea: 'DEF'},
   {k: 'VOL CTR', lbl: 'Volantes centrales', linea: 'MED'},
-  {k: 'DC', lbl: 'Doble cinco', linea: 'MED'},
-  {k: 'CA', lbl: 'Contención / armado', linea: 'MED'},
   {k: 'VOL', lbl: 'Volantes', linea: 'MED'},
   {k: 'EXT', lbl: 'Extremos', linea: 'ATA'},
-  {k: 'DEL', lbl: 'Delanteros', linea: 'ATA'}
+  {k: 'DEL', lbl: 'Delanteros centro', linea: 'ATA'}
 ];
+// Códigos del perfil que son el mismo puesto: DC = delantero centro; CA (casi no se usa) va con los volantes
+var MA_ALIAS = {'DC': 'DEL', 'CA': 'VOL'};
 var MA_LINEAS = [
   {k: 'DEF', lbl: 'Defensa', det: 'DFC + LAT'},
-  {k: 'MED', lbl: 'Mediocampo', det: 'VOL CTR + DC + CA + VOL'},
-  {k: 'ATA', lbl: 'Ataque', det: 'EXT + DEL'}
+  {k: 'MED', lbl: 'Mediocampo', det: 'VOL CTR + VOL'},
+  {k: 'ATA', lbl: 'Delanteros', det: 'DC (o DEL) + EXT'}
 ];
 function maNorm(s){ return String(s || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
 // Posición: la del perfil (la que carga el cuerpo técnico) y, si no tiene, la de la planilla GPS.
@@ -58285,26 +58285,28 @@ function maPosHeur(t){
   if(/(EXTREMO|^EXT|WING|^W$|^EI$|^ED$|^LW$|^RW$|^ALA)/.test(t)) return 'EXT';
   if(/(DELANTERO|^DEL|^FW$|^ST$|^CF$|PUNTA|^9$|ATACANTE)/.test(t)) return 'DEL';
   if(/(CINCO|^5$|^CTR$|PIVOT|^DM$|^MCD$|^CDM$|CONTENCION|VOLANTE CENTRAL|MEDIOCENTRO DEF)/.test(t)) return 'VOL CTR';
-  if(/(ENGANCHE|ARMADOR|^10$|^AM$|^MCO$|^CAM$)/.test(t)) return 'CA';
+  if(/(ENGANCHE|ARMADOR|^10$|^AM$|^MCO$|^CAM$)/.test(t)) return 'VOL';
   if(/(VOLANTE|^VOL|MEDIO|^MED$|^MC$|^CM$|^MI$|^MD$|^VD$|^VI$|INTERIOR|^MID)/.test(t)) return 'VOL';
   if(/(DFC|DEFENSOR|ZAGUERO|STOPPER|^CB$|^DF$|^(DEF )?CENTRAL$)/.test(t)) return 'DFC';
   if(/^DEF/.test(t)) return 'DFC';
   return '';
 }
 function maEsCodigo(t){ return MA_POS.some(function(x){ return x.k === t; }); }
+function maCanon(t){ return MA_ALIAS[t] || t; }
 function maPosCode(raw, nombre){
-  var p = maNorm(maPosPerfil(nombre));
+  var p = maCanon(maNorm(maPosPerfil(nombre)));
   if(p){ if(maEsCodigo(p)) return p; var hp = maPosHeur(p); if(hp) return hp; }
-  var t = maNorm(raw);
+  var t = maCanon(maNorm(raw));
   if(!t) return '';
-  if(maEsCodigo(t) && t !== 'DC') return t;          // «DC» en una planilla puede ser delantero centro: no se adivina
+  if(maEsCodigo(t)) return t;
   return maPosHeur(t);
 }
 function maLineaDe(code){ var x = MA_POS.filter(function(p){ return p.k === code; })[0]; return x ? x.linea : ''; }
 function maPosLbl(code){ var x = MA_POS.filter(function(p){ return p.k === code; })[0]; return x ? x.lbl : code; }
 function maLineaLbl(k){ var x = MA_LINEAS.filter(function(l){ return l.k === k; })[0]; return x ? x.lbl : k; }
+function maPlural(a){ return a === 'L:ATA' || a.indexOf('P:') === 0; }
 function maConArt(a, mayus){
-  var t = a === 'equipo' ? 'el equipo' : (a === 'L:DEF' ? 'la defensa' : a === 'L:MED' ? 'el mediocampo' : a === 'L:ATA' ? 'el ataque' : 'los ' + maAlcanceLbl(a).toLowerCase());
+  var t = a === 'equipo' ? 'el equipo' : (a === 'L:DEF' ? 'la defensa' : a === 'L:MED' ? 'el mediocampo' : a === 'L:ATA' ? 'los delanteros' : 'los ' + maAlcanceLbl(a).toLowerCase());
   return mayus ? t.charAt(0).toUpperCase() + t.slice(1) : t;
 }
 function maPuedeEditar(){
@@ -58524,7 +58526,7 @@ function maHallazgos(D){
       var d = maPct(maMedia(x.a), maMedia(x.b)), mt = maMet(k);
       if(Math.abs(d) < MA_MIN_PCT) return;
       out.push({peso: Math.abs(g), tipo: 'cond', clave: k + (d > 0 ? '+' : '-'),
-        txt: 'De <b>visitante</b>, ' + maConArt(alc) + ' registra un <b>' + maMasMenos(d) + '</b> de <b>' + maEsc(maFrase(k)) + '</b> que de local' + (mt.tipo === 'p90' ? ' (por 90 min)' : ''),
+        txt: 'De <b>visitante</b>, ' + maConArt(alc) + (maPlural(alc) ? ' registran un' : ' registra un') + ' <b>' + maMasMenos(d) + '</b> de <b>' + maEsc(maFrase(k)) + '</b> que de local' + (mt.tipo === 'p90' ? ' (por 90 min)' : ''),
         det: 'Efecto ' + e.t + ' (g = ' + maFmt(g, 2).replace('-', '−') + ') · ' + x.a.length + ' de visitante, ' + x.b.length + ' de local'});
     });
   });
@@ -58537,7 +58539,7 @@ function maHallazgos(D){
       var d = maPct(maMedia(x.a), maMedia(x.b)), mt = maMet(k);
       if(Math.abs(d) < MA_MIN_PCT) return;
       out.push({peso: Math.abs(g), tipo: 'res', clave: k + (d > 0 ? '+' : '-'),
-        txt: 'En los partidos <b>ganados</b>, ' + maConArt(alc) + ' registró un <b>' + maMasMenos(d) + '</b> de <b>' + maEsc(maFrase(k)) + '</b> que en los que no ganó',
+        txt: 'En los partidos <b>ganados</b>, ' + maConArt(alc) + (maPlural(alc) ? ' registraron un' : ' registró un') + ' <b>' + maMasMenos(d) + '</b> de <b>' + maEsc(maFrase(k)) + '</b> que en los que no ganó',
         det: 'Efecto ' + e.t + ' (g = ' + maFmt(g, 2).replace('-', '−') + ') · ' + x.a.length + ' ganados, ' + x.b.length + ' empatados o perdidos'});
     });
   });
@@ -58983,7 +58985,7 @@ function maHtmlRes(D){
       return '<select onchange="maSet(\'' + campo + '\',this.value)">' + grupos.map(function(a){ return '<option value="' + maEsc(a) + '"' + (a === val ? ' selected' : '') + '>' + maEsc(maAlcanceLbl(a)) + '</option>'; }).join('') + '</select>';
     };
     var C = maComparar(sel, A, B, MA.cmpMet);
-    h += '<div class="ma-card" style="margin-top:18px"><div class="ma-h2">¿Qué pasó cuando… ' + sg('cmpA', A) + ' hizo más ' + maSelMet(D, 'cmpMet') + ' que ' + sg('cmpB', B) + '?</div>';
+    h += '<div class="ma-card" style="margin-top:18px"><div class="ma-h2">¿Qué pasó cuando hubo más ' + maSelMet(D, 'cmpMet') + ' en ' + sg('cmpA', A) + ' que en ' + sg('cmpB', B) + '?</div>';
     if(A === B) h += '<div class="ma-nota">Elegí dos grupos distintos.</div>';
     else if(!C.si.n && !C.no.n) h += '<div class="ma-nota">No hay partidos con datos de los dos grupos.</div>';
     else {
