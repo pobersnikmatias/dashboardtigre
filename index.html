@@ -176,6 +176,128 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 #pdf-print-area{display:none}
 </style>
 <!-- Supabase JS SDK v2 (CDN) -->
+<script id="demo-js">
+/* ══ MODO DEMO (v216) · 1/3 · AISLAMIENTO ════════════════════════════════
+   Se activa sólo con «?demo» en la dirección (botón «Ver demo» del ingreso).
+   Va PRIMERO en el archivo, antes de que el dashboard lea el disco:
+   · el almacenamiento del navegador pasa a ser una memoria que se pierde al
+     cerrar la pestaña (nada de la demo queda en la computadora ni pisa los
+     datos de quien usa el dashboard en ese navegador);
+   · sin IndexedDB (la caché de la nube se queda sin tocar);
+   · ningún pedido puede llegar a Supabase (la base del club), pase lo que
+     pase en el resto del código.
+   Sin «?demo», este bloque no hace absolutamente nada. */
+(function(){
+  var on = false;
+  try{ on = /(^|&)demo(=(1|si))?(&|$)/i.test(String(location.search || '').replace(/^\?/, '')); }catch(e){}
+  window.DEMO = on;
+  if(!on) return;
+
+  var DEMO_UID = '00000000-0000-4000-8000-00000000de00';
+  window.DEMO_UID = DEMO_UID;
+  window.DEMO_DIV = '5ta División';
+
+  // ── Almacenamiento en memoria ──────────────────────────────────────────
+  function Memoria(){ this.__d = Object.create(null); this.__k = []; }
+  Memoria.prototype.getItem = function(k){ k = String(k); return (k in this.__d) ? this.__d[k] : null; };
+  Memoria.prototype.setItem = function(k, v){ k = String(k); if(!(k in this.__d)) this.__k.push(k); this.__d[k] = String(v); };
+  Memoria.prototype.removeItem = function(k){ k = String(k); if(k in this.__d){ delete this.__d[k]; this.__k.splice(this.__k.indexOf(k), 1); } };
+  Memoria.prototype.clear = function(){ this.__d = Object.create(null); this.__k = []; };
+  Memoria.prototype.key = function(i){ return this.__k[i] == null ? null : this.__k[i]; };
+  Object.defineProperty(Memoria.prototype, 'length', {get: function(){ return this.__k.length; }});
+
+  // El tema (claro/oscuro) del navegador se respeta; nada más se lee del disco real.
+  var tema = null;
+  try{ tema = window.localStorage.getItem('tema_v1'); }catch(e){}
+
+  var ls = new Memoria(), ss = new Memoria();
+  var cambiado = false;
+  try{
+    Object.defineProperty(window, 'localStorage', {configurable: true, enumerable: true, get: function(){ return ls; }});
+    Object.defineProperty(window, 'sessionStorage', {configurable: true, enumerable: true, get: function(){ return ss; }});
+    cambiado = (window.localStorage === ls && window.sessionStorage === ss);
+  }catch(e){}
+  if(!cambiado){
+    // Navegador que no deja reemplazarlo: se desvía el disco real a la memoria
+    try{
+      var P = Storage.prototype, real = {};
+      ['getItem', 'setItem', 'removeItem', 'clear', 'key'].forEach(function(m){ real[m] = P[m]; });
+      var lsReal = null, ssReal = null;
+      try{ lsReal = window.localStorage; }catch(e){}
+      try{ ssReal = window.sessionStorage; }catch(e){}
+      var mem = function(o){ return o === lsReal ? ls : (o === ssReal ? ss : null); };
+      P.getItem = function(k){ var m = mem(this); return m ? m.getItem(k) : real.getItem.call(this, k); };
+      P.setItem = function(k, v){ var m = mem(this); return m ? m.setItem(k, v) : real.setItem.call(this, k, v); };
+      P.removeItem = function(k){ var m = mem(this); return m ? m.removeItem(k) : real.removeItem.call(this, k); };
+      P.clear = function(){ var m = mem(this); return m ? m.clear() : real.clear.call(this); };
+      P.key = function(i){ var m = mem(this); return m ? m.key(i) : real.key.call(this, i); };
+      var dl = Object.getOwnPropertyDescriptor(P, 'length');
+      Object.defineProperty(P, 'length', {configurable: true, get: function(){ var m = mem(this); return m ? m.length : dl.get.call(this); }});
+    }catch(e){ console.warn('[demo] almacenamiento:', e); }
+  }
+  // Sin IndexedDB: el dashboard ya sabe funcionar sin ella
+  try{ Object.defineProperty(window, 'indexedDB', {configurable: true, enumerable: true, get: function(){ return undefined; }}); }catch(e){}
+  try{
+    if(typeof indexedDB !== 'undefined' && window.IDBFactory){
+      // Si no se pudo sacar, al menos se usa otra base (nunca la del club)
+      var op = IDBFactory.prototype.open;
+      IDBFactory.prototype.open = function(n, v){ return op.call(this, 'demo__' + n, v); };
+    }
+  }catch(e){}
+
+  // Lo que el dashboard espera encontrar para un usuario ya ingresado
+  ls.setItem('sb-demo-auth-token', JSON.stringify({access_token: 'demo', refresh_token: 'demo', expires_at: 4102444800,
+    user: {id: DEMO_UID, email: 'demo@dashboard'}}));
+  ls.setItem('escala_dueno', DEMO_UID);
+  ls.setItem('gps_cat_activa', window.DEMO_DIV);
+  ls.setItem('_escala_mudanza_v204', 'demo');
+  if(tema) ls.setItem('tema_v1', tema);
+  // El fixture y las planillas que vienen escritos en el archivo son del
+  // plantel real: en la demo se arranca vacío (la demo trae los suyos).
+  ls.setItem('FIX_DATA::' + window.DEMO_DIV, JSON.stringify({fixture: [], planillas: {}}));
+
+  // ── Ningún pedido a la base del club ───────────────────────────────────
+  // Primera barrera, la del propio navegador: en la demo la página sólo puede
+  // conectarse con su propio sitio y con las bibliotecas (gráficos, PDF).
+  // Vale para fetch, XHR, WebSocket, sendBeacon y EventSource, y la heredan
+  // las ventanas que abre la página (impresiones, informes).
+  try{
+    var csp = document.createElement('meta');
+    csp.httpEquiv = 'Content-Security-Policy';
+    csp.content = "connect-src 'self' blob: data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com";
+    (document.head || document.documentElement).appendChild(csp);
+  }catch(e){}
+  // Segunda barrera: cortar a mano cualquier pedido a Supabase.
+  // (Las ventanas de impresión que abre el dashboard sólo escriben HTML: no
+  // usan el almacenamiento; si algún día lo hicieran, ver esta nota.)
+  var esSupabase = function(u){ try{ return /supabase\.(co|in)(\/|:|$)/i.test(String(u && u.url || u)); }catch(e){ return false; } };
+  try{
+    var f0 = window.fetch;
+    if(f0) window.fetch = function(u){
+      if(esSupabase(u)) return Promise.reject(new TypeError('Modo demo: sin conexión a la base'));
+      return f0.apply(this, arguments);
+    };
+  }catch(e){}
+  try{
+    var xo = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(m, u){
+      if(esSupabase(u)) throw new Error('Modo demo: sin conexión a la base');
+      return xo.apply(this, arguments);
+    };
+  }catch(e){}
+  try{
+    var WS = window.WebSocket;
+    if(WS){
+      var W2 = function(u, p){ if(esSupabase(u)) throw new Error('Modo demo: sin conexión a la base'); return p === undefined ? new WS(u) : new WS(u, p); };
+      W2.prototype = WS.prototype; W2.CONNECTING = 0; W2.OPEN = 1; W2.CLOSING = 2; W2.CLOSED = 3;
+      window.WebSocket = W2;
+    }
+  }catch(e){}
+  try{ if(navigator.serviceWorker && navigator.serviceWorker.register){ navigator.serviceWorker.register = function(){ return Promise.reject(new Error('demo')); }; } }catch(e){}
+
+})();
+
+</script>
 <script id="pegado-js">
 // ══ PROTECCIÓN: ARCHIVOS PEGADOS DENTRO DE index.html (v211f) ══════════════
 // La app de los jugadores son otros archivos (jugador.html, jugador-sw.js,
@@ -448,6 +570,187 @@ td{padding:3px 5px;border-bottom:0.5px solid #eee;color:#1a1a1a}
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script id="demo-sb-js">
+/* ══ MODO DEMO (v216) · 2/3 · LA «NUBE» DE LA DEMO ════════════════════════
+   Reemplaza al cliente de Supabase por uno que vive en la memoria de la
+   pestaña, con las mismas reglas que la base de verdad (1000 filas por
+   consulta, filtros, orden, upsert por clave única). El dashboard funciona
+   igual que siempre; lo que se cambie queda sólo en esta pestaña y se pierde
+   al recargar. Los datos son inventados (los arma demo-datos-js). */
+(function(){
+  if(!window.DEMO) return;
+  var UNIQ = {
+    wellness_data: 'name,date,categoria', pse_data: 'name,date,week,day,categoria', player_profiles: 'id,categoria',
+    app_settings: 'key,categoria', matches: 'id,categoria', microciclo: 'week,day,categoria', plan_weeks: 'name,created,categoria',
+    gym_sessions: 'id,categoria', gym_exercises: 'id,categoria', gym_cats: 'name,categoria', gym_evals: 'player_key,categoria',
+    eval_aliases: 'alias_key,categoria', nutrition_data: 'player_key,categoria', mobility_data: 'player_key,categoria',
+    drills_exercises: 'id,categoria', usuarios: 'auth_uid', usuario_alcance: 'auth_uid,categoria', categorias: 'nombre', roles_permisos: 'rol,area'
+  };
+  var SERIAL = {wellness_data: 1, pse_data: 1, microciclo: 1, plan_weeks: 1};
+  var MAXROWS = 1000, seq = 5e6;
+  var DB = null;
+
+  function base(){
+    if(DB) return DB;
+    DB = {};
+    Object.keys(UNIQ).forEach(function(t){ DB[t] = []; });
+    try{ if(typeof window.demoBaseConstruir === 'function') window.demoBaseConstruir(DB); }
+    catch(e){ console.error('[demo] armando los datos:', e); }
+    window.__demoDB = DB;
+    return DB;
+  }
+  // Las respuestas esperan a que el archivo termine de cargar (los datos se
+  // arman con las funciones del propio dashboard)
+  var listo = new Promise(function(res){
+    if(document.readyState !== 'loading') res();
+    else document.addEventListener('DOMContentLoaded', function(){ res(); });
+  });
+
+  function getPath(r, expr){
+    var e = String(expr).split('::')[0], parts = e.split(/->>?/), v = r[parts[0]];
+    for(var i = 1; i < parts.length; i++){ if(v == null) return null; v = v[parts[i]]; }
+    if(/->>/.test(e) && v != null && typeof v !== 'string') v = JSON.stringify(v);
+    return v === undefined ? null : v;
+  }
+  function cmp(a, b){
+    if(a == null && b == null) return 0; if(a == null) return 1; if(b == null) return -1;
+    if(typeof a === 'number' && typeof b === 'number') return a - b;
+    a = String(a); b = String(b); return a < b ? -1 : (a > b ? 1 : 0);
+  }
+  function splitSel(sel){ return String(sel).split(',').map(function(x){ return x.trim(); }).filter(Boolean); }
+  function proj(sel, r){
+    if(sel == null || sel === '*') return JSON.parse(JSON.stringify(r));
+    var o = {};
+    splitSel(sel).forEach(function(it){
+      if(it === '*'){ Object.assign(o, JSON.parse(JSON.stringify(r))); return; }
+      var al = null, ex = it, m = it.match(/^([A-Za-z_]\w*):(?!:)(.*)$/);
+      if(m){ al = m[1]; ex = m[2]; }
+      var parts = ex.split('::')[0].split(/->>?/), key = al || parts[parts.length - 1];
+      var v = getPath(r, ex); o[key] = v == null ? null : JSON.parse(JSON.stringify(v));
+    });
+    return o;
+  }
+  function likeRe(p, i){ return new RegExp('^' + String(p).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.') + '$', i ? 'i' : ''); }
+
+  function handle(s){
+    var D = base(), t = s.t;
+    if(!D[t]) D[t] = [];
+    var rows = D[t];
+    var match = function(r){
+      return (s.filters || []).every(function(f){
+        var op = f[0], c = f[1], v = f[2], x = op === 'match' ? null : getPath(r, c);
+        switch(op){
+          case 'eq': return x != null && String(x) === String(v);
+          case 'neq': return x != null && String(x) !== String(v);
+          case 'gt': return x != null && cmp(x, v) > 0;
+          case 'gte': return x != null && cmp(x, v) >= 0;
+          case 'lt': return x != null && cmp(x, v) < 0;
+          case 'lte': return x != null && cmp(x, v) <= 0;
+          case 'in': return x != null && (v || []).map(String).indexOf(String(x)) >= 0;
+          case 'is': return v === null ? x == null : x === v;
+          case 'like': return x != null && likeRe(v, false).test(String(x));
+          case 'ilike': return x != null && likeRe(v, true).test(String(x));
+          case 'match': return Object.keys(v || {}).every(function(k){ return String(r[k]) === String(v[k]); });
+          default: return true;
+        }
+      });
+    };
+    if(s.op === 'upsert' || s.op === 'insert'){
+      var list = Array.isArray(s.rows) ? s.rows : [s.rows];
+      var oc = (s.opts && s.opts.onConflict) || UNIQ[t] || 'id';
+      var keys = String(oc).split(',').map(function(x){ return x.trim(); }), out = [];
+      list.forEach(function(r){
+        if(!r) return;
+        var i = s.op === 'upsert' ? rows.findIndex(function(x){ return keys.every(function(k){ return String(x[k]) === String(r[k]); }); }) : -1;
+        var nr;
+        if(i >= 0){ nr = Object.assign({}, rows[i], JSON.parse(JSON.stringify(r))); rows.splice(i, 1); }
+        else { nr = JSON.parse(JSON.stringify(r)); if(SERIAL[t] && nr.id == null) nr.id = ++seq; }
+        if(nr.updated_at == null) nr.updated_at = new Date().toISOString();
+        rows.push(nr); out.push(nr);
+      });
+      return {data: s.sel != null ? out.map(function(r){ return proj(s.sel, r); }) : null, error: null, status: 201};
+    }
+    if(s.op === 'update'){ rows.filter(match).forEach(function(r){ Object.assign(r, JSON.parse(JSON.stringify(s.patch || {}))); }); return {data: null, error: null, status: 204}; }
+    if(s.op === 'delete'){ var keep = rows.filter(function(r){ return !match(r); }), n = rows.length - keep.length; D[t] = keep; return {data: null, error: null, status: 204, count: n}; }
+    var d = rows.filter(match);
+    if(s.orders && s.orders.length) d = d.slice().sort(function(a, b){
+      for(var i = 0; i < s.orders.length; i++){ var x = cmp(getPath(a, s.orders[i][0]), getPath(b, s.orders[i][0])); if(x) return s.orders[i][1] === false ? -x : x; }
+      return 0;
+    });
+    var a = 0, z = d.length - 1;
+    if(s.range){ a = s.range[0]; z = s.range[1]; }
+    if(s.limit != null) z = Math.min(z, a + s.limit - 1);
+    z = Math.min(z, a + MAXROWS - 1);
+    var total = d.length, sel = s.sel == null ? '*' : s.sel;
+    d = d.slice(a, z + 1).map(function(r){ return proj(sel, r); });
+    if(s.single || s.maybe){
+      if(d.length > 1 || (!d.length && s.single)) return {data: null, error: {code: 'PGRST116', message: 'JSON object requested, multiple (or no) rows returned'}, status: 406};
+      return {data: d[0] || null, error: null, status: 200};
+    }
+    return {data: d, error: null, status: 200, count: s.count ? total : null};
+  }
+
+  function Q(t){
+    var s = {t: t, op: 'select', sel: null, filters: [], orders: [], range: null, limit: null, single: false, maybe: false, rows: null, opts: null, patch: null, count: 0};
+    var b = {}, selDespues = false;
+    b.select = function(c, o){ if(s.op !== 'select') selDespues = true; s.sel = (c == null ? '*' : String(c).replace(/\s+/g, '')); if(o && o.count) s.count = 1; return b; };
+    ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'is', 'like', 'ilike'].forEach(function(m){ b[m] = function(c, v){ s.filters.push([m, c, v]); return b; }; });
+    b.in = function(c, v){ s.filters.push(['in', c, Array.isArray(v) ? v : []]); return b; };
+    b.match = function(o){ s.filters.push(['match', '__', o]); return b; };
+    b.filter = function(c, op, v){ s.filters.push([op, c, v]); return b; };
+    b.order = function(c, o){ s.orders.push([c, !(o && o.ascending === false)]); return b; };
+    b.range = function(x, y){ s.range = [x, y]; return b; };
+    b.limit = function(n){ s.limit = n; return b; };
+    b.single = function(){ s.single = true; return b; };
+    b.maybeSingle = function(){ s.maybe = true; return b; };
+    b.upsert = function(r, o){ s.op = 'upsert'; s.rows = r; s.opts = o || null; return b; };
+    b.insert = function(r, o){ s.op = 'insert'; s.rows = r; s.opts = o || null; return b; };
+    b.update = function(p){ s.op = 'update'; s.patch = p; return b; };
+    b.delete = function(){ s.op = 'delete'; return b; };
+    b.abortSignal = function(){ return b; };
+    b.returns = function(){ return b; };
+    b.throwOnError = function(){ return b; };
+    b.then = function(res, rej){
+      return listo.then(function(){
+        if(s.op !== 'select' && !selDespues) s.sel = null;
+        var r; try{ r = handle(s); }catch(e){ r = {data: null, error: {message: String(e && e.message || e)}}; }
+        return r;
+      }).then(res, rej);
+    };
+    b.catch = function(f){ return b.then(null, f); };
+    b.finally = function(f){ return b.then(function(r){ f(); return r; }, function(e){ f(); throw e; }); };
+    return b;
+  }
+  var USER = {id: window.DEMO_UID, email: 'demo@dashboard', user_metadata: {}, app_metadata: {}};
+  var SES = {access_token: 'demo', refresh_token: 'demo', expires_at: 4102444800, user: USER};
+  var cliente = {
+    from: function(t){ return Q(t); },
+    rpc: function(fn){
+      return listo.then(function(){
+        if(fn === 'admin_jugadores') return {data: [], error: null};
+        return {data: null, error: {code: 'PGRST202', message: 'Modo demo: función no disponible (' + fn + ')'}};
+      });
+    },
+    channel: function(){ var c = {on: function(){ return c; }, subscribe: function(){ return c; }, unsubscribe: function(){}}; return c; },
+    removeChannel: function(){},
+    auth: {
+      getSession: function(){ return Promise.resolve({data: {session: SES}, error: null}); },
+      getUser: function(){ return Promise.resolve({data: {user: USER}, error: null}); },
+      onAuthStateChange: function(){ return {data: {subscription: {unsubscribe: function(){}}}}; },
+      signInWithPassword: function(){ return Promise.resolve({data: {user: USER, session: SES}, error: null}); },
+      // «Cerrar sesión» en la demo = salir de la demo (y no seguir con la recarga que viene después)
+      signOut: function(){ try{ location.replace(location.pathname); }catch(e){} return new Promise(function(){}); },
+      refreshSession: function(){ return Promise.resolve({data: {session: SES, user: USER}, error: null}); },
+      setSession: function(){ return Promise.resolve({data: {session: SES, user: USER}, error: null}); },
+      startAutoRefresh: function(){}, stopAutoRefresh: function(){}
+    }
+  };
+  var lib = window.supabase || {};
+  window.supabase = Object.assign({}, lib, {createClient: function(){ return cliente; }});
+  window.__demoCliente = cliente;
+})();
+
+</script>
 <style>
 /* Ocultar el dashboard hasta que sbInit decida qué mostrar.
    Evita que se vea el contenido un instante antes del login overlay. */
@@ -1728,7 +2031,7 @@ body.rail-fijo .rail-item::after{opacity:0!important}
       <img id="club-escudo-drawer" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHAAAACwCAYAAADXCOr/AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAAjOklEQVR42u2dd5weV3X3v+feO0/dorLqtsCWbclyQQaDjSvFLSQ0h5dADA6hJPSSgEPHoYQQQnkhFNMCjh2SFwIGTO8GGzC2ccNgW5bcZFmyykq7T5uZe877xzwraWXZWvMiS6t3fvo8H83uzjNz7/3dc+5pdwb2YyxfMsse/5h5tj/30e3PnXv6SQM8709m789dJOzPnTvusDrzF+3X/O2/Enj4I5u25JDAvLkZpx0/20oCpxme9Lhh5szq0ai0OP34RimB0w1PfEyD4HMsRk5ZUS8JnE54xLyGHbV8gG7MyLTKQQdWOH7FkJUEThOcfsIQI3OUVBy5q1BvKmedNFxK4HTBGacuAAXPMN7X6GWOJxw3pyRwOuCQRcN29NGDpFlCCA18UifNqxx6SJNTVoxYSeA+jlOOm8e8WQlpbIJrgjSJNsBA3fPkE0ZKCdzX8YST5hCyBHENRGogdZxvkKeBUx63uCRwX8exxyygm9ZwSQN8A/ENXKiTZlUOWTbC0UfMsZLAPYxljxi2xbMaD3mgX/7cI23unAo98bjQgNCE0ESSBmZNBgbg7NOWPHS3ZFbdDjlgYJ8kXva1Bh21bJ696zVLOLAxxoZRwdc9STCqXkmckrsALsEs4CTB1+pk3oE1mTNSoZ5kOGuiziN4BFByfPSYjNOJOa3xDKGFV8OikuddsBQ04k3J1NGNQp5D7EaqQVm9pcn5H13F71eul5LA3eDgkZq99tyDeMoJVXJbiwuRSq1KqCjiHc7XQJqFeqRKYBALNTJ1YMMQKqh4ZJuCUdRyVDOErVRMkSxispFoLYgdVDuYdtAIMUvodbvEVKj6A/nqz1t89OLV3LmxK6UEPgT8zVMfYa84Z4i59VG6qUMGoCIKropJE+ebkDhU6oivIm4GxjxIUqCOiAMDw0DGIQuYbQQbR2OK1zEkj2hsI7ED1iUzw1pCJSjr2kN8/D+38ulL79pnx2mfJhDguCNm2FtfvpDHH7mVbqtDFgYIro5zdcQ3UDcLc3WcryCuDm4AnCLSRFyRLbOYAS1QgdgCaxNjD6yD2EbI25jmpDElycZoDA5w2TV1zv/onVx329g+PUb7PIET+Mh5h9lfPjVCN6edz8Lq4H0V56oYMxDfANdEXAOkAq6CuWrRSe2BpaimoG2ctgqp0xZKlxjHkS40/WayWsKFX4HzPrRyWozNtCEQ4FlnzLZ3v2wRs+dnjI9XCdUhnA/AEM7VwTfBNUAC4qogVQodmmKWYpohsQ3agthGrYtqTp5uZnioy7p7PG/4yN1c+uPN02ZcphWBAAcf2LQPvXUxpz16iC1jVWJo4H1AfB2kCa4OkoALmPQl0HqY5mAZoh2I41jskFuHoF0G68o3L9/Cmz+0llV3jU6rMZl2BE7gra9Yai9//mIqltOLCeJr/dBZA1xSkCiV4mRLMctAM8TafQK71JKMjib86ydv48MXrpqWYzFtCQQ448RF9t7zjuSAeRlZXkV8A3F1RBJMPIgv+NOIEMEyTDtYbFEJKXeuCbzu3Tfws9+snbbjMK1Dad+7fI384GerqdcEjRloCrGLaQ+0h8R28bHiZ2IPNEU1p1oTrrp+zbQmD/aDqrTjHj1Mr9PCU0FMMFOwDPAgBTcGYDlYjpDiSemMd3n8cYNlLHRv4tQVI7ZscYVuu4XQBe0g1ka0DdYqPtoCHUesjbMOoh1Eu6TdDotmR85+0vQu/J3WBJ58XMKgH8XyHM27xfqmXUy7oD1iXoTICvXZRbWDxg4au6A5tTjKk05qTmsJnNYq9MzHNWmnmwlUMUuI1kFIEUuwGKgNFsLV2epJfIbQJUfBKoikjHW7nHr09C45nLYSeOJRM+3QxYFWx8gQlHHEulgWIe8xNJxz/W+E314vDM9ok8UWqSliPbyO43JHrw0LZ8NTT51rJYEPM55wXA3numhqYF181sO1jWroUKsbF1y4mSe/9Ep5wkuulIsvaTMwoFSlhXQMiT0ibSwaMXY49bFJKYEP+/r3qBpjrUiMBj1P7Hgqwyl3bR7kr9+0lvM+unqbe/Dy96yUv33rRtaPzqQ22CPtONJMyM0YGzNOPKpREvhw4thlQ7Z4pE6rHej1avTyHAarfPPnFZ71ilv5xs/uH8v80g83yjNefSvf+kWdZLBGSCHrVmm3q8xrCmedMsNKAh8292EmEoxeK6fiHMps3veZNi9402q5fW3nAR3zVXe35flvvE3efcE449kMKonR62ak0XjCo6Znxdq0tEIfd+gsstEWtcEqN62p8d7PruVXN26cckTl41++Ry6/dtze+OIFHHGQ0NnSYcUjhkoV+nDgUUuaNu+graBDfO0HyjNed6M8FPImcN3KrfLcN94sF32tg+YzmbmgxVnHzt6vd/PuE3jtc5fYTz53uD31+D9eeeCJy+bZt/73kfbhv19SErin8cKzl9rSA/fMTqPzXnRESWCJEiVKlChRokSJEiVKlChRYs9B/vRP/8z+9oUvYUt7K5Z4nDqmebnofgxDneIyY7g2wAf/7UOE4594Kk89+2m0N6wnWA4WEEDoR5Vk23eL44lg066Odz73gY7/WN+bajumc5t3QARwkUwqDMwe4avfv5SQttr00h6/++AFpJd8HzfUJJW8f73/19HZV0ZqOre5ON8QKibEsQ7h6Wdw1PlvoNfuEupRSLyQ33k3tdtWkY40qWUOKcO6+5byFLAkUtnQJmzcRDV4aiaEnnOoCK5SwdUaJEkDvD7Mmv0PWXVtm6KXvdzOB2vDznLHH9heA7wTtAq+WiN3QidA8KZ4dfgIPTGcCS4aJrZdmK0v2M5jojgzwGNik7XB/bSF4FRRDBXwBmYCYkRxBECdUskduYMoOSE6MEfuI2Iy6dIqhorh1ZM7h8cIKLkTvIEg6MTZBtEighH697UdSu1N+vSbK/rjtNgQgwOzHUZZiEBSnELe74ugRAdJBI+SO8Dc5CEwIRjEoKg4klg0LYpMGrfiW5EogjdfbIWD/n22t0MlkIkRFCrqCArBxIiuaBCSTprTEzPGnJKLQVdxmtLzQhRP0LjbaRN8gCRg0m8RgpAScyXpRnrVnFQrJLlD60rmHaIOsbijKdX/X/DqqERHcKDWI7a7aAr5tn4KgmG1QKWSULPAuDcMqMSiCdYfFa9GLo7UG85y6ICRYqI7DJuAGj0vEBwV7wgipARcLCZ3Lg4FXLEbfxvUCTHPsE4XIenXr+q2+28zTsTjLeIVMqlAvRAkzO1wvYJtIUddRPuTYKeamF0Jt4AZTgRbuoRKSAgoUdyuTaUd2fMBXb8O27CJIA4VKwZXDffIxUh9BnXroeIJVkHuWk3e2kqeGF7v3xYxQZynJymyeZzOjCH0xMcxeNgyhhfMwSUOy43xtfcSr7mJ7m9vo9NtUR+qgvXnT1+jTPTNmWGqJL6OLD+E6GwSgQBOoNdtE7dsobdhI0m7R7XWIFSraJ+6gpV80rD5LGJzR2DufFyek4bCtvA2edwShKCK4OnlKdxx2y6Mm11j90VNAkTBakMc/e8fIhy0mKgpCQHkgUtqLEZcpco9H/o4q975AWqDM+hJhjdjHM+R//wWhk85iSzvkChIUuO6l7+W7L++SSWpFJJik6eUd5B1Rxmr1Vn44nM4+JxnM/yoI3CJn3RvBfI8Z+yq61j9+YtofeVShlwgr9Ugj9tIzB1UVYi9lO6Kgzj20k/h/UD/xtvvbGrFVuzNo4z9/g42//gK7vvWtwi33o7MrKFkDHU9nSA7kO4Y67VZ8JLnccgrX0KatXHOESy5v5yYkpHjXYVs1Z3ccNbzcJ2tmN8tf1OsSpP+mlir4nzAXOErmjzIHHHFH7WaFHNUDQ2GN8OrIpUKToTE1YtTnVCLdTRX1BmST+6l857eeAs79DCO/pe3MfuUE4q1TBWLBSnW1/7RIEhg9vGPYfbxj2Ht6adx25veTXXLZlytjvRJzEUIAmJGNSZIaCI+9BXhdkdKASGhsqDOnAULmPPE41n86nNZ/f5PsOmz/0mz5tlaNZK4A+kiJKp4lyAiBFfDgt+1uWDgqeAEXK0KzlAKidwd3BS4I4qS+YyYZxAjecyxPCK5kpKBKaKGWYZqhmU5pBkWI7lNmBX99Uz6KkoNMXAWi3XBwMRIPUSxvgGTYTg0COnYGHrsMaz46ucZOeUENMuRLEfEMAONhpkBhneGuZxeVGIWWfDnf8rR//1J8pG5xPY4+L4xZMX63+uPk6j1Z4EiVnzUFMl6SOyCRiyLaJZRGxnh8Pe9jZHXv4LuWEZdJ0/kCaKii4WhYsVToNQMjTna6xFjDlmKxZQYU4gRyzJMtDAQp4DdEmgCXh21vEq10US8pxYCknhicHhzCA4TQQh4l+CSgKvVEO+pJpVt0upswpqS4ilKAuaskEABQ/G2/bzoCkmujPfoLjmQYz79fmoL5qG9lDRxWHBIdLjgkUpAkoDzAecCopCI4IMn5jlDxzyKZZ/9F9qLRpDMCCb4/iTyVkihyYTqdP3lwSHikKSK8zUET0w8mghRM6IaS//+pcjJx5B2ChU5efUp/jFxSQGnUrSxWkV9wJIKhAohVBDv8QPNvpU6NWcjTMkBQbCYseHHV5AsmgexCxZoPOYoqgPD25RoFKFzx110V61CxOGTGq2bbiaEQES3uQVTWXYVh1mFqkXaZiz9x3+gungxeZqi1QrV1HAVgQCbfvkr7vv5tcjmreiiWSx84uMZOnx5X60a4jzdLGfm8cczc/nR5Ksuw80IRNP7KakJlWYTk6rVY+vVN+LnDdJceggRRzV6zAkxRiwJLHrWn7Hq8isZ3N2SZQWRvU3r6Nz4OxKroBjRCaIgIZDevgaXZTgnu13/prgG9qdoNs7Nr34btSzinbK1qxz5zX8nOfUEYpYTRAghsPKDF7Dlgi8wNDBCajl5TanVa+QW+5I1tWB5dJCIIxsbg6c8gflnnQGpYhWPU3Be6G3awO/e+D42ff1bVDtdEjUyEe6dNYvZ5z6bI9/yKtIkQSxSSyrc8m+fpv2jK6kPNEjJiA6C7rrLaop3jvG71nDt815Erl0O+OsXsPT888gRQtx+7sCRR+LrddAHD4CYRsQ71n/rMm58/quZMVDHtItXQcVh5smqDYaboXATpsDg1IyY/nQcSAJUI3iPdwqSTfjrmESEQNWMegPcgKeRKblTzAx1EKJDRKYysfAGSKTlhYOf/efgHJnrkWgAjJj2uO6lbyD75g+YPXsOseZxQaji0dhl7AOf4PrRFo/6yPmA55YPfJL1//xhGo1Aah6vRsUg+l0TaMI246vWqOLv3czGr3+P/I2vgOYgMSq4HBFPXm3QqToaaX9+PlAHRVBgYMlBzHnaGVSqCTlGJXpUMkiEeM8ovZUrqeHIpzDVp0Sg4HAqqChmDh8dol2iSxAgSOHYO0DUERVyFLfDJHJaRFLcFONIBmie4ebNYcaxxxa/8x7NBFcRVn/uYuKlP2Vo3ghZlhItJ9+cEzWSh4ykGtj00U9w69yEVAN3v+ODzBqskaYBZiRUTVDzu1TfSMGDm1gWOhEdHmHB888mNBrkmmPOwAqL1TpbCKmB60dxHmgcnSMCw48/lsd+7QuTgyUYDuHub/2I35/7Sur1Cpj+cSSwCD0VFp70pdGZ4cxNltJ+5wUKB/l+wQGbcixQnMM6KUMLF9CYPxtDSXCQOLJOh7u/fCmDzYRUQcyThoR5f/00wsL5hF6XGAqrIfYi3oTD/+nNqPfo+i2s/eolxLyHevphwZ0yZ7I9gNFcvIAjv/wx6rPmMrDkIHpmVBRiMMhBEqFz2a9pbunA7CGIDx6dCmZgiokrLPL+mqsKzgkmkXpehACn4Mfvw7uTrG/W16sQHNFyggrmobd2HbXb1+EqjoxILYIfaPKIt7ySZM5uXi/QarP5h5dhrbvBh10OUBH1K+KqvllnzmOPK/xGs0LLCPieQdXTufce1lz0ZXQ4FK7HbrqlIkQTTCPBpDDsDMwUDYZSuFKTI0bTkEDpR2JsJ5UkgGleRBWliD+qZHiLpO1xNM4iqOFUigCzE7wZufWtvfGteM3JJe1fLeykH3b0rwo6YtQiNNaPGZszpJrQGx/lpte8g3zNGoZqFWK03Vv/CkEcspPLkfTvGCoNFN+Pddr0JdAM1AvSS5GoOO/AgRok80bI581Abt9CkEDqIHceh5BMWJHBCM5vCyAEUxLn6GaRVi+l6ip4K+KzDxTA2K7OpSDGJvwz496f/4K73v0R5JfXUJ3VgJ5OSWTMKZ2NGxm7YSXVLMN84bRbFKg1aP/6amouYkwtpbcPq1BDKw066+6lu3Ed1bkLikdGmqM2OIMZf3IGGz/wMWbOTshTwVkVPzSI855tzp1Z/2m9gmok4IhjLaQ9ijlBd+eX9l0xZ9IPpxUSJias/OIlyA+vYMaBw4xqhpcE5MHXP4sR7xM2/OgXXPuSVzO/0qCHLyxulHaiDEZHpVaHqNtCldNTAjGqPqF39wbGfnsz9Tnz0ehwzmNmHPzSv2T0ku+SrV5JMrMJvS2sueBzJPMWIa0u4zXPwc99JklzECzi8yLE07r1TqTVxg80yA2CPUg0YZvWsyKiYoVayx2c8M9v4do717H18p+TzKpDzJjqftm6GAf6QGUw4MQjZgR1NBFCNMYk4nVqQY99d4eugRNDNbL+az/EpJAYXJFgrc+bzxGfeR+dw5bR2jhGumUzd/3jh7nlxa/lutefD/dtJq03yGI/i+aLZ6dt/vmVWK4k5na/xhgQFSdCVCX2U1pqCkNDLP/MP+EPXUZlc1pkfKeI2O0xvqnFltEO3Q1b6W3cTHvTGO0NLUbH2tSznKl5y/uwBDqM3CIM1Rn9xnfpvOx51JYuxXIleEeMkaHHrOC4b/w7t//PN2hdfjXDG7cSHzGfeec+k5ETTyTLjEBh5TkvdO9dy8bvfIekWSNXKUx6v+tsqPZzoONr7uWen13G0nOeQ0wjseKpmKB5pDZ/IUs/9y9cf/bfUBvbgEuSB43GiBTOef3RRzP//NfjajVcrv2gfUBDlXzTvWz5r0tI8ny7JbdnCJSdw6U7rDtTCK/uok6ksBFs26XEjLp50k2buOk9H+bYL3yMTCCqkpinl+ck8+ZyyMtfBC9/EZEMX5gx5Ln2jY+IquIl4fcf+RyNVXcR5wzSi0I1ClqsbAhFYBub3L4anjXv+DDDjSHmP/MpxCxiHkSMPFeGj1zOso+/k5te8HcMxYg5h+0wBrZDdYO5IrwzsHwZM96xbNdG6vr7+MUl3yeMjf5xshEPtD45TYoyBCDH9RfifiZBinCXVwe7zGntUHywgypTseIlHbr95xSl1hxm87d/xNXv+icS7/DiiBqpeo9YJOYRi4azhBgViznBFUZHFg0fElZ/9aus+cIXqQ7MRDJILEfMEdQV5SQoUbZPHO230IIw6JTf/t0/MvqbG/CJR2NRHxS80IsZc057Ege99+1s7fUIsV8k1q/OcRNlAOpRg4Dh1Yh5JMbiozEjz1IsRtLxHs1Ucf003B5bA12/aEhjJOQRzYrEahaEEItgbO5sUqRjYipWo4HlaIy43CA3LEaSXKhFT+4ElbitfkViZFEywKaPXsz1r387cXwUKn1fSfvhcTMkFumoiBSRDe9wSWDtf/4Pd7z6PczPfWHdiqBidEMkd0oleswCFgVVxTQWubkYiXlOVk+Ys3Ezv3vpP9BZdw+WePK8yIl6g7zbY/Hzz2be37+GzaNtalYUHuXO4TUjixGLSsi1SECbIX0LUwCJRXpNAfU5vSSdkgX6BxMoQOoEaQzgvMdVE3wtQbzH+aIICBy5t/svxgI9kUL/e49UA67/XXWQiyc6R6JFhluA1CspkfnVOp0LLuI3T3sBG7/ybWx8HPEeCR5CkR8kOIL3uOBo33oHt73qbax6zduYmWdYcHSCEsVw6ggWCVbkvrtVT1Kt4LxDQkIICc57aoNDhNTIZni49WZuftnbCe02lSRBkkAICaFWPFx92ZtewfzXnEO71yZ6KaSuViPxHl9LIAlI8MXE8n7bRyoBnwS891TqDXohwfiD8oFTs3zMoBIcGz5+EeOHX00eu4VImmfs19fAgMfnijq5X+TTgLoqd33484wedTVtugTz5GSMXnsNlWYNyfuxV3N4LVJLmY94zUlmNkh/dzOrXvQGVh15KLUnP5Y5y49gaGQWrhLI0pzWmntYf8VVjP74l9TWrqc6XKHrFNF+cYROlEoKEQeVCnHt3dz8zvfjqw2SvCiFtODJN24itLpk5kiGBun+9Aquev7LmPm4x0LUImUrhathiaOXjmPVKlGVRsXRvuQHrB5tk+cdRAT6ft/940s54gP52k3Uxns4HLpLA2by70IhIf0SBgsYDkQflEw18FVj7OvfYMuXv0GaZNQzRUmwgSpWd0gaiwzGTtdRM0It0v72d+l+5TuM1zPqqeA0UBvyuCSgGumFIkNfy4q5kTtwVlhxoSqEqpD//ia6113PnTioVcALFhW6Pbw3huo1/IwaGpUwMSkAb0IvgFOHITjvaK7bxKZ/vaBPaSRzQhRHPXqSgTrOJyQ9kGYg/vRnbPjeT8hCv7RPi8mQA3UCjYE6XVFC3ehdeQXtn15B7jO8KYZn54I7Ewiao+JQX6XWSDDndqkwxRLEtgf6guH7NaFKdEqQ3vb6lQdUoYaZ4AcaBITKjkaoGpYVamoicnG/QLElhKZDBoThHddU1UL7YoRYlF6YFIW0zoRKpAj0WuELulqNakO23xdDEg/1ShEgVi2eZjhRntFvpUqR3pJ+2a4BWqlQq9YQEoyIhYyKFSTnqjiLRe5QITQGYEAK12+H6qREigB8poY3wcxDPSFp9EN8O2Y7di6I3iH5UKyT95c8oYtJ7AtcxMQRogiKJ8OTS0JiAadTdEp1V+6A4KZQTbWzMlABMTdpUfZA6pMiKiFdWtWMkFd38FgMi7aTere+nfzQ7m8GipL5Ls2ex2ugliudSo4RJuVpTSf3/f5TdFIYh/gHeMEPZP1HcUSR4jVQYoRqjKROadbqVHpCPuhR353yeshutfQf9t1CeiO5C4gFatEVbsKe3AhhUI0p5jzdEAgGVYVsh8qD7YUzUzz+Qzc/7XRuUaidMJgKZpCJUomRkAsEc3SqjnsbkboXvNXZ+5uThEQDA70eedKh5R3NtEL0cY/d0QESB0mdMpAaWyqOlDrVuFOmQZj68UM590G+ZwJpiOQNY2YQEnXF/pIoShXP9+sL+crIMYzUR4iW9tewvUUd5GLMyDfx0tFRDuj1SCvQTmzXRUh/VBbbRF+8vu6LA3O5vrmAZnRTTu/ssTExQVyFrclmzrDZHB895iAUkRNltDnCxqFlpDOqRdHuXpW9Qr/HzUom68mcUcsr6ESFuMme0qAoCUnMEUlZlwwzOnAgHRfoh7L3rlLyjrFkDq3heVgA02L3E2ZFYVKCkVhRk8leJhBTgtn99tY9nK0IBokpwdz2bWt7M8BvQmJGvRL6ZqsREMEQMjXMORRH3Mvbcyf2I2zbYCIPJ4OTg/QmxVqzdxXo5GHQfgIYU8LEHrxCEqVfVbb3CWTSFpO9m5gscha6D7TGs3OVX5jwnTrdXrEfwAyxvU+gYA+v4D2AQdiPK+z1Sb1NJ9hOan5CWxYqq1jGTfaNeb83JFAM1G13x4sc5cR02rvjYrKjO1P4FtP65VclKAksCSxREliiJLAksERJYImSwBIlgSWBJUoCS5QEligJLAksURJYoiSwRElgSWCJfQtSEjgtabOivCPTouTEOVcSOJ1gGCJCu9MpnpRRSuB0VqDSf8JhiWlNZElgaYWWKAksURJYEliiJLBESWCJksCSwBIlgSVKAkuUBJYEligJLFESWKIksCSwRElgiZLAEiWBJYEl9iKK90CJxW3PsysJnF78YRj1amXb+5ZLAqcbzEiS4kUPZmVd6PTkcIdnTpYElkZMiZLAEiWBJYElSgJLlASWKAksCSxREliiJLBESWBJYImSwBIlgSWmQuC+8Xq1Eg+dQCle9CamgKH7wKvnSjwEAqUkbHoTmGZZ/7BUodMOAm7L6BZEhHq9jplRCuQ0QP/VpoLg1t93H06EwWYds4iUgrgvCxyG0mzWEIRer4u76667yLodDlg0F+cmCCxZ3CfFzgAXWbhgNlm3w933rMH94orLZf2G9Ry6ZDGDtUCMO7/qusS+In8xOgargcMOeQRr193LFZdfLg7gqmt/w/JlB7DkgJmkaYZzpX+/z9EnjjTNWHLADA4/bCFXXnPVdkf+O9/7DrOGHCcfv5w07xTvky+xbxHoHL28y8nHL2fWsOPrl35jO4Gf/Oin5M67buXMsx7DogUNemkLJ4JYoUqttGwe/hWvP+ZiDidCL22xeGGNpzzleFau/B3/8bmLZBuBABd+/mIOOWiEv3jqSWSdHHEOk1i8fL40avaK0WKiqETEObJOzjnPOpWDHzmLz3zq89sd+YmDt739nXLj9dfy3LNP5qxTlrNly31Y0gBL8FoO58MNryBWgaTO6Ob1PO30FfzFM07hl7+4nPe9/1/lfgQCvOZVr0N0A2943RN44uMPZXzDGE4Tgi+t0ofb3wtecJYwft84Tz5pGa975Um0tq7h71772knnTiLwJ5ddJi988csYbjZ555vO4Xl/vhTTDYyOZcVeNOdx3uGcICK4PfwRJ+AEnENk4rj/EfkjuTv9a+18fSeIuD3eRyeCc/2PdzjnUYPRsQyN9/FXz1nOu958DoO1Oi/929fyqyuvmtTpsHN3vvI/l0jaxT72sQ/w1jf8BaeceDRf+fov+fUN97Bl6ziqHvEFkXvKXxQgogy2M2inuLRFK9SoxcKZjR7wELzDeUeOhyiogCPDGyh+p5kaiQJiCWKCBcVZJGpEI0gOIYfMC+p6VGODzsBWWr2UKAEl7jn/2MDU0BhxLmN4qMJJJx3Is55+IiefsIzbV63kha86j29++2uyq7HaJQ477DA7//x38cynPx2XJNxw651ce+0qbrllHevWj7F1vEVkzy2OKjCyeQ3/q3U3c7I2Y5UqtTzHDEwVxlpUN25Ft24l+EioN1AfiKpEB0EnG16ZExKFBAea0+20iBZwA0NkswbQwSZJUsEpOHLUGnxu9iBrhg7Fk+wxQ84MKh4Gmw3mz5vFsqWLWLHiYI48ZCGtsTH++0v/h/e8513ccccd8kCT/UHxpCedZueeey5PPPUUFi5aSEgSemmbNIuYVfdcx8QRxajHMSq5R0iIrodgaFSs02Xr3WtZ95vraH//Z7SvvJaBdofQGCAaQNzpio4gQtoaY2yoSfOkYxl80snMOXI5gwvm4Zp1vPd0vZBEwcyThirOEqLke9QSdy6jWk1IXJV2u8Ptq1fy3e//iIsvvpirr/617E5bTRlnnnWWLV16CAsWLGTG8EwqrlJMoe2R1qkdy3bV8UB/FyskoR08Tis4MzKfY1JUD8yZPcIRyw7n0EcejIuRtT/5CRs+diFjv/wVzUYNs7D9wlKo0Fany9BJJzLrVX/FnJNPwky4ZdVKVq68jQ0bN5DHSEUdTqGTgLccZ4rXUPjE8iBtnmpfd+63CO1el/Ub7uOOO1Zz4403cM3V1/z/YzWeftoZdvGFF9tYq2ebNq+3G857q/107jK7+oCj7apFR9lVBxxlVx9wtF02d5nd9KZ32H2j621LJ7WLL7zYTjvt9NLB3VfwjDOfar+79VZr9Vp23T+8166YtcSuOvAou2rxUfazWQfbjW9+n413x+2W1avtOU9/VkncvogjDj/cfn/LLTa6eaP98unPsatmHWa/nnWoXfXsc210dJPddtsqO/bRjy7J25fxJ2eeaVu6Xbvruz+wnxx4tF32yGNs7U8us43tlp15eqkypwW++B9ftLyT2i/OfLZd/bTnW5Zm9qlPfHq/JG+/zBtddNHn6SWBwdNPoXH6KYwbfOHCz+63Ybf9Ejf//hZrJB7nHPeNbmHFMSuklMBphBtuvJ55ixcz98ADuf6G68t1ZbphxYoV9t3vfMe+9KUv2ZIlS/Zb4+X/Ak6rLuYYPHI0AAAAAElFTkSuQmCC" alt="Escudo Tigre" style="width:40px;height:40px;object-fit:contain;flex-shrink:0">
       <div style="flex:1;min-width:0">
         <div style="font-size:14px;font-weight:800;line-height:1.2" id="club-name-drawer">Club Atlético Tigre</div>
-        <div style="font-size:11px;opacity:0.85"><span id="club-cat-drawer">5ta División</span> · AFA 2025</div>
+        <div style="font-size:11px;opacity:0.85"><span id="club-cat-drawer">5ta División</span> · <span class="fix-anio">Temporada</span></div>
       </div>
     </div>
   </div>
@@ -25494,8 +25797,8 @@ window.captImprimirDash=captImprimirDash;
 
 <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
   <div>
-    <div style="font-size:15px;font-weight:700;color:#0D1B2A">&#9917; Equipo &mdash; 5ta Divisi&oacute;n AFA 2025</div>
-    <div style="font-size:11px;color:var(--tex-3,#646D82);margin-top:2px">Club Atl&eacute;tico Tigre &middot; Categor&iacute;a 2007 &middot; Toc&aacute; un partido para ver la planilla</div>
+    <div style="font-size:15px;font-weight:700;color:#0D1B2A">&#9917; Equipo &mdash; <span id="fix-tit-cat">5ta Divisi&oacute;n</span></div>
+    <div style="font-size:11px;color:var(--tex-3,#646D82);margin-top:2px">Club Atl&eacute;tico Tigre &middot; <span class="fix-anio">Temporada</span> &middot; Toc&aacute; un partido para ver la planilla</div>
   </div>
   <div style="display:flex;gap:8px;font-size:10px;color:var(--tex-3,#646D82);align-items:center;flex-wrap:wrap">
     <span>&#127968; Local &nbsp;&#9992; Visitante</span>
@@ -57099,7 +57402,10 @@ window.temaRepintar=temaRepintar;
     id:'temaOscuro',
     beforeUpdate:function(chart){
       if(!esOscuro())return;
-      var o=chart.options||{};
+      // v216: se escribe en las opciones ORIGINALES del gráfico. chart.options
+      // es un intermediario de Chart.js 4: escribirle objetos rompía el dibujo
+      // con «Recursion detected» y el gráfico quedaba sin actualizar.
+      var o=(chart.config&&chart.config.options)||chart.options||{};
       if(o.scales) Object.keys(o.scales).forEach(function(k){ pintarEje(o.scales[k]); });
       o.plugins=o.plugins||{};
       if(o.plugins.legend){ o.plugins.legend.labels=o.plugins.legend.labels||{}; o.plugins.legend.labels.color=TEXTO; }
@@ -59059,6 +59365,580 @@ function maGuardarDato(id, campo, valor){
 }
 window.maGuardarDato = maGuardarDato;
 try{ maCss(); }catch(e){}
+
+
+// ── Encabezado de Equipo (v216): la división activa y la temporada en curso ─
+// (antes decía siempre «5ta División AFA 2025 · Categoría 2007»)
+function maEncabezadoEquipo(){
+  try{
+    var cat = (typeof CAT_ACTIVA !== 'undefined' && CAT_ACTIVA) ? CAT_ACTIVA : ((typeof SB_CATEGORIA !== 'undefined' && SB_CATEGORIA) || '');
+    var t = document.getElementById('fix-tit-cat'); if(t && cat) t.textContent = cat;
+    var anio = 'Temporada ' + new Date().getFullYear();
+    document.querySelectorAll('.fix-anio').forEach(function(e){ e.textContent = anio; });
+  }catch(e){}
+}
+(function(){
+  var envolver = function(n){
+    var f = window[n]; if(typeof f !== 'function' || f.__maEnc) return;
+    var w = function(){ var r = f.apply(this, arguments); maEncabezadoEquipo(); return r; };
+    w.__maEnc = true; window[n] = w;
+  };
+  ['fixtureRender', 'setMainView'].forEach(envolver);
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', maEncabezadoEquipo); else maEncabezadoEquipo();
+})();
+
+</script>
+<script id="demo-datos-js">
+/* ══ MODO DEMO (v216) · 3/3 · DATOS INVENTADOS Y PANTALLA ═════════════════
+   Un plantel ficticio de 5ta División con una temporada creíble: wellness y
+   PSE diarios, GPS de cada entrenamiento, partidos con la planilla de cada
+   jugador, fixture, lesiones, antropometría, tests, gimnasio y planificación.
+   Todo se arma en el momento, relativo a la fecha de hoy, y es siempre el
+   mismo (semilla fija). Nombres inventados: no corresponden a jugadores reales.
+
+   Fuera del modo demo, lo único que hace este bloque es agregar el botón
+   «Ver demo» en la pantalla de ingreso. */
+(function(){
+
+  // ── Botón «Ver demo» (pantalla de ingreso normal) ──────────────────────
+  function botonDemo(){
+    if(window.DEMO) return;
+    var btn = document.getElementById('sb-login-btn');
+    if(!btn || document.getElementById('demo-entrar')) return;
+    var w = document.createElement('div');
+    w.style.cssText = 'margin-top:14px;padding-top:14px;border-top:1px solid #eceef2;text-align:center';
+    w.innerHTML = '<a id="demo-entrar" href="?demo" style="display:block;width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #1B2845;border-radius:6px;'
+      + 'color:#1B2845;font-size:13px;font-weight:700;text-decoration:none">👀 Ver demo</a>'
+      + '<div style="font-size:10.5px;color:#7a8396;margin-top:6px;line-height:1.45">Recorré el dashboard con un plantel de ejemplo.<br>Datos inventados, sin usuario y sin tocar nada del club.</div>';
+    var msg = document.getElementById('sb-login-msg');
+    (msg && msg.parentNode === btn.parentNode ? msg : btn).insertAdjacentElement('afterend', w);
+  }
+  if(!window.DEMO){
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', botonDemo); else botonDemo();
+    return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // DATOS
+  // ════════════════════════════════════════════════════════════════════
+  var DIV = window.DEMO_DIV, UID = window.DEMO_UID;
+  var R = (function(s){ return function(){ s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })(20240611);
+  var rnd = function(a, b){ return a + R() * (b - a); };
+  var nrm = function(m, sd){ var u = 0, v = 0; while(!u) u = R(); while(!v) v = R(); return m + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  var ent = function(a, b){ return Math.floor(rnd(a, b + 1)); };
+  var r1 = function(x){ return Math.round(x * 10) / 10; };
+  var r2 = function(x){ return Math.round(x * 100) / 100; };
+  var lim = function(x, a, b){ return Math.max(a, Math.min(b, x)); };
+  function semNom(n){ return 'Sem ' + String(n).padStart(2, '0'); }
+  function iso(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function masDias(d, n){ var x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
+  function sello(f, h){ var d = new Date(f + 'T' + String(h || 9).padStart(2, '0') + ':00:00'); return d.toISOString(); }
+
+  var HOY = new Date(); HOY = new Date(HOY.getFullYear(), HOY.getMonth(), HOY.getDate());
+  var HORA = new Date().getHours();
+  // Lunes de esta semana
+  var LUNES = masDias(HOY, -((HOY.getDay() + 6) % 7));
+
+  // ── Plantel (nombres inventados) ───────────────────────────────────────
+  var PLANTEL = [
+    ['Tomás Aguirre', 'ARQ'], ['Bautista Ferreyra', 'ARQ'], ['Ignacio Molina', 'ARQ'],
+    ['Lautaro Benítez', 'DFC'], ['Franco Medina', 'DFC'], ['Valentín Sosa', 'DFC'], ['Joaquín Ledesma', 'DFC'],
+    ['Santiago Ríos', 'LAT'], ['Mateo Quiroga', 'LAT'], ['Thiago Correa', 'LAT'], ['Benjamín Paz', 'LAT'],
+    ['Agustín Romero', 'VOL CTR'], ['Facundo Vera', 'VOL CTR'], ['Nicolás Godoy', 'VOL CTR'],
+    ['Lucas Acosta', 'VOL'], ['Juan Cruz Ojeda', 'VOL'], ['Gonzalo Funes', 'VOL'], ['Emiliano Navarro', 'VOL'],
+    ['Ramiro Domínguez', 'EXT'], ['Bruno Cabrera', 'EXT'], ['Dylan Herrera', 'EXT'], ['Maximiliano Peralta', 'EXT'],
+    ['Julián Castro', 'DC'], ['Alejo Giménez', 'DC'], ['Kevin Luna', 'DC'], ['Santino Ibarra', 'DC']
+  ];
+  // Valores de partido por 90 minutos según el puesto
+  var POS_GPS = {ARQ: 'Arquero', DFC: 'Defensor Central', LAT: 'Lateral', 'VOL CTR': 'Volante Central', VOL: 'Volante', EXT: 'Extremo', DC: 'Delantero'};
+  var PERFIL_POS = {
+    ARQ:  {mts: 5600,  hsr: 60,  h2: 15,  h25: 2,   spr: 0.6, acc: 9,  dcc: 10, rhie: 1,  vmax: 26.5, pl: 650},
+    DFC:  {mts: 9900,  hsr: 470, h2: 240, h25: 75,  spr: 9,   acc: 21, dcc: 26, rhie: 6,  vmax: 30.8, pl: 1020},
+    LAT:  {mts: 10700, hsr: 680, h2: 410, h25: 170, spr: 19,  acc: 28, dcc: 29, rhie: 11, vmax: 32.4, pl: 1100},
+    'VOL CTR': {mts: 11300, hsr: 720, h2: 360, h25: 95, spr: 14, acc: 25, dcc: 27, rhie: 9, vmax: 30.6, pl: 1150},
+    VOL:  {mts: 11100, hsr: 760, h2: 420, h25: 140, spr: 18,  acc: 27, dcc: 27, rhie: 11, vmax: 31.4, pl: 1130},
+    EXT:  {mts: 10400, hsr: 760, h2: 470, h25: 250, spr: 26,  acc: 31, dcc: 28, rhie: 13, vmax: 33.3, pl: 1080},
+    DC:   {mts: 9800,  hsr: 640, h2: 420, h25: 220, spr: 24,  acc: 29, dcc: 25, rhie: 12, vmax: 32.7, pl: 1010}
+  };
+  var J = PLANTEL.map(function(p, i){
+    return {i: i, name: p[0], key: p[0].toLowerCase(), pos: p[1], f: lim(nrm(1, 0.05), 0.9, 1.1), vmx: r1(PERFIL_POS[p[1]].vmax + nrm(0, 0.8)),
+            w: lim(nrm(3.7, 0.25), 3.1, 4.4), titular: false};
+  });
+  // Titulares habituales (un 4-3-3)
+  var XI = ['Tomás Aguirre', 'Lautaro Benítez', 'Franco Medina', 'Santiago Ríos', 'Mateo Quiroga', 'Agustín Romero', 'Lucas Acosta', 'Juan Cruz Ojeda',
+            'Ramiro Domínguez', 'Bruno Cabrera', 'Julián Castro'];
+  J.forEach(function(j){ j.titular = XI.indexOf(j.name) >= 0; });
+  var porNombre = {}; J.forEach(function(j){ porNombre[j.name] = j; });
+
+  // Lesiones: dos jugadores lesionados hoy y otras ya cerradas
+  var LES = [
+    {n: 'Valentín Sosa', ini: -9, fin: null, type: 'Muscular', zone: 'Isquiotibiales', sev: 'Moderada', notes: 'Sprint en partido. Ecografía: lesión grado I.'},
+    {n: 'Dylan Herrera', ini: -4, fin: null, type: 'Articular', zone: 'Tobillo', sev: 'Leve', notes: 'Esguince grado I en entrenamiento.'},
+    {n: 'Agustín Romero', ini: -72, fin: -58, type: 'Muscular', zone: 'Aductor', sev: 'Moderada', notes: ''},
+    {n: 'Julián Castro', ini: -101, fin: -80, type: 'Muscular', zone: 'Isquiotibiales', sev: 'Moderada', notes: 'Recaída controlada con protocolo RTP.'},
+    {n: 'Benjamín Paz', ini: -45, fin: -41, type: 'Articular', zone: 'Rodilla', sev: 'Leve', notes: 'Golpe.'},
+    {n: 'Gonzalo Funes', ini: -120, fin: -90, type: 'Ósea', zone: 'Pie / metatarso', sev: 'Grave', notes: 'Fisura de estrés del 5.º metatarsiano.'},
+    {n: 'Kevin Luna', ini: -33, fin: -27, type: 'Muscular', zone: 'Gemelo', sev: 'Leve', notes: ''}
+  ];
+  function lesionadoEl(nombre, f){
+    return LES.some(function(l){
+      if(l.n !== nombre) return false;
+      var a = iso(masDias(HOY, l.ini)), b = l.fin == null ? '9999' : iso(masDias(HOY, l.fin));
+      return f >= a && f <= b;
+    });
+  }
+
+  // ── Calendario: entrenamientos de lunes a viernes, partido el sábado ───
+  var SEMANAS = 18;
+  var DIAS_MD = ['MD-5', 'MD-4', 'MD-3', 'MD-2', 'MD-1'];
+  var FACT_DIA = {   // proporción del partido (por minuto) y duración
+    'MD-5': {d: 0.62, hi: 0.35, sp: 0.2, ac: 0.75, min: 62, pse: 3.5},
+    'MD-4': {d: 0.82, hi: 0.70, sp: 0.55, ac: 1.25, min: 82, pse: 6.6},
+    'MD-3': {d: 0.92, hi: 0.95, sp: 0.85, ac: 0.95, min: 88, pse: 7.2},
+    'MD-2': {d: 0.70, hi: 0.45, sp: 0.35, ac: 0.85, min: 72, pse: 5.0},
+    'MD-1': {d: 0.55, hi: 0.30, sp: 0.55, ac: 0.55, min: 58, pse: 3.4}
+  };
+  var RIVALES = ['Lanús', 'Vélez Sarsfield', 'Estudiantes LP', 'Banfield', 'Argentinos Juniors', 'Huracán', 'Platense', 'Defensa y Justicia',
+    'Talleres', 'Rosario Central', "Newell's Old Boys", 'Racing Club', 'Independiente', 'San Lorenzo', 'Gimnasia LP', 'Colón', 'Unión',
+    'Atlético Tucumán', 'Godoy Cruz', 'Barracas Central', 'Sarmiento', 'Instituto', 'Belgrano', 'Central Córdoba'];
+
+  // Resultados con una historia: de visitante se corre más; cuando la línea
+  // defensiva hace más alta intensidad que los delanteros, se pierde más.
+  function armarPartido(f, k, temporada, rival, local, comp){
+    var tipo = R();                                   // 0-1: cuánto atacamos
+    var defensivo = tipo < 0.32;                      // partido metido atrás
+    var fV = (local ? 1 : 1.035) * lim(nrm(1, 0.065), 0.86, 1.14);   // cada partido tiene su intensidad
+    var players = [];
+    var disponibles = J.filter(function(j){ return !lesionadoEl(j.name, f); });
+    var tit = disponibles.filter(function(j){ return j.titular; });
+    var sup = disponibles.filter(function(j){ return !j.titular && j.pos !== 'ARQ'; });
+    // Completar el XI si falta algún titular
+    while(tit.length < 11 && sup.length){
+      var falta = XI.map(function(n){ return porNombre[n]; }).filter(function(j){ return tit.indexOf(j) < 0; })[0];
+      var reemplazo = sup.filter(function(j){ return j.pos === (falta ? falta.pos : 'VOL'); })[0] || sup[0];
+      tit.push(reemplazo); sup.splice(sup.indexOf(reemplazo), 1);
+    }
+    var cambios = sup.slice().sort(function(){ return R() - 0.5; }).slice(0, 5);
+    var salen = tit.filter(function(j){ return j.pos !== 'ARQ' && j.pos !== 'DFC'; }).sort(function(){ return R() - 0.5; }).slice(0, cambios.length);
+    var minDe = {};
+    tit.forEach(function(j){ minDe[j.name] = 90; });
+    salen.forEach(function(j, i){ var m = ent(58, 80); minDe[j.name] = m; minDe[cambios[i].name] = 90 - m; });
+    Object.keys(minDe).forEach(function(nm){
+      var j = porNombre[nm], b = PERFIL_POS[j.pos], min = minDe[nm], esc = min / 90 * j.f;
+      var fHI = 1;
+      if(defensivo){ if(j.pos === 'DFC' || j.pos === 'LAT') fHI = 1.32; if(j.pos === 'EXT' || j.pos === 'DC') fHI = 0.72; }
+      else if(tipo > 0.7){ if(j.pos === 'EXT' || j.pos === 'DC') fHI = 1.15; }
+      var n = function(){ return lim(nrm(1, 0.04), 0.9, 1.1); };
+      var p = {name: nm, pos: POS_GPS[j.pos], min: min,
+        mts: Math.round(b.mts * esc * fV * n()), hsr: Math.round(b.hsr * esc * fV * fHI * n()), h2: Math.round(b.h2 * esc * fV * fHI * n()),
+        h25: Math.round(b.h25 * esc * fV * fHI * n()), spr: Math.round(b.spr * esc * fHI * n()), acc: Math.round(b.acc * esc * n()), dcc: Math.round(b.dcc * esc * n()),
+        rhie: Math.round(b.rhie * esc * fHI * n()), pl: Math.round(b.pl * esc * fV * n()), vmax: r1(lim(j.vmx - rnd(0, 1.6), 22, 36))};
+      p.mts_min = r1(p.mts / min);
+      p.accmax = r2(rnd(4.2, 5.6)); p.dccmax = r2(rnd(5.0, 6.4));
+      players.push(p);
+    });
+    // Resultado
+    var fuerza = 0.25 + (local ? 0.25 : -0.15) + (defensivo ? -0.75 : (tipo > 0.7 ? 0.45 : 0.15)) + nrm(0, 0.6);
+    var gf = Math.max(0, Math.round(1.2 + fuerza * 0.9 + nrm(0, 0.6))), gc = Math.max(0, Math.round(1.1 - fuerza * 0.8 + nrm(0, 0.6)));
+    // Promedios del equipo (jugadores con 60' o más, como el filtro del importador)
+    var filt = players.filter(function(p){ return p.min >= 60; });
+    var prom = function(k){ return Math.round(filt.reduce(function(a, p){ return a + p[k]; }, 0) / filt.length * 10) / 10; };
+    var m = {id: k, rival: rival, fecha: f, result: gf + '-' + gc, local: local ? 'local' : 'visita', comp: comp, min: 90,
+      mts: prom('mts'), hsr: prom('hsr'), h2: prom('h2'), h25: prom('h25'), acc: prom('acc'), dcc: prom('dcc'), rhie: prom('rhie'),
+      spr: prom('spr'), pl: prom('pl'), vmax: Math.max.apply(null, players.map(function(p){ return p.vmax; })),
+      players: players, minFilter: 60, nFiltered: filt.length,
+      avgMinFiltered: Math.round(filt.reduce(function(a, p){ return a + p.min; }, 0) / filt.length)};
+    return m;
+  }
+
+  // Planilla del partido (la de la pestaña Equipo), coherente con el GPS
+  var SIST_RIVAL = ['4-4-2', '4-3-3', '4-2-3-1', '3-5-2', '5-3-2', '4-1-4-1'];
+  var CLIMA = ['22° · Viento 8 km/h', '17° · Nublado', '25° · Soleado', '14° · Viento 15 km/h', '19° · Húmedo · Sintético', '11° · Lluvioso'];
+  function planilla(m, local){
+    var gf = +m.result.split('-')[0], gc = +m.result.split('-')[1];
+    var ps = m.players.slice().sort(function(a, b){ return b.min - a.min; });
+    var tit = ps.filter(function(p){ return p.min >= 58 || p.min === 90; }).slice(0, 11);
+    var sup = ps.filter(function(p){ return tit.indexOf(p) < 0; });
+    var rend = function(){ return lim(Math.round(nrm(6.4 + (gf - gc) * 0.25, 0.7)), 4, 9); };
+    var titulares = tit.map(function(p, i){ return {n: i + 1, j: p.name, min: p.min, rend: rend()}; });
+    var suplentes = sup.map(function(p, i){ return {n: 12 + i, j: p.name, min: p.min, rend: rend()}; });
+    var resto = J.filter(function(j){ return !ps.some(function(p){ return p.name === j.name; }) && !lesionadoEl(j.name, m.fecha); }).slice(0, Math.max(0, 7 - sup.length));
+    resto.forEach(function(j, i){ suplentes.push({n: 12 + sup.length + i, j: j.name}); });
+    var cambios = sup.map(function(p){
+      var s2 = tit.filter(function(t){ return t.min === 90 - p.min; })[0];
+      return {sale: s2 ? s2.name : '', entra: p.name, min: 90 - p.min, motivo: ['Táctico', 'Fatiga', 'Recambio'][ent(0, 2)]};
+    });
+    var atac = tit.filter(function(p){ var j = porNombre[p.name]; return j && (j.pos === 'DC' || j.pos === 'EXT' || j.pos === 'VOL'); });
+    var mins = []; for(var g = 0; g < gf + gc; g++) mins.push(ent(4, 92)); mins.sort(function(a, b){ return a - b; });
+    var quien = []; for(g = 0; g < gf; g++) quien.push('f'); for(g = 0; g < gc; g++) quien.push('c');
+    quien.sort(function(){ return R() - 0.5; });
+    var a = 0, c = 0, goles = [], ht = {n: 0, r: 0};
+    quien.forEach(function(q, i){
+      if(q === 'f'){ a++; var au = atac[ent(0, atac.length - 1)] || tit[10]; var as = tit[ent(1, tit.length - 1)];
+        goles.push({asist: as && as.name !== au.name ? as.name : '—', gol: au.name, min: mins[i], result: a + '-' + c}); }
+      else { c++; goles.push({asist: '—', gol: m.rival, min: mins[i], result: a + '-' + c}); }
+      if(mins[i] <= 45){ if(q === 'f') ht.n++; else ht.r++; }
+    });
+    var todos = titulares.concat(suplentes.filter(function(x){ return x.rend; }));
+    var fig = todos.slice().sort(function(x, y){ return y.rend - x.rend; })[0];
+    var am = tit.filter(function(){ return R() < 0.13; }).map(function(p){ return p.name; });
+    return {cond: local ? 'Local' : 'Visitante', resultado: m.result, primer_tiempo: ht, resultado_final: {n: gf, r: gc},
+      sist_propio: R() < 0.75 ? '4-3-3' : '4-4-2', sist_rival: SIST_RIVAL[ent(0, SIST_RIVAL.length - 1)], rendimiento: lim(Math.round(6 + (gf - gc) * 0.6 + nrm(0, 0.6)), 3, 9),
+      clima: CLIMA[ent(0, CLIMA.length - 1)], incidencias: '', figura: fig ? fig.j : '', goles: goles, titulares: titulares, suplentes: suplentes,
+      cambios: cambios, amarillas: am, rojas: []};
+  }
+
+  function construir(DB){
+    var cat = DIV, ahora = new Date().toISOString(), id = 1000;
+    var fila = function(t, o){ o.categoria = o.categoria || cat; if(o.updated_at == null) o.updated_at = ahora; DB[t].push(o); };
+
+    // Acceso: un usuario de cuerpo técnico de la 5ta, todo para ver y probar
+    DB.usuarios.push({auth_uid: UID, email: 'demo@dashboard', nombre: 'Usuario demo', rol: 'cuerpo_tecnico', activo: true, creado_en: ahora});
+    DB.usuario_alcance.push({auth_uid: UID, categoria: DIV});
+    ['Primera', 'Reserva', '4ta División', '5ta División', '6ta División', '7ma División', '8va División', '9na División']
+      .forEach(function(c, i){ DB.categorias.push({nombre: c, orden: i + 1, activa: true}); });
+    ['hoy', 'carga_gps', 'gimnasio', 'evaluaciones', 'lesiones', 'antropometria', 'planificacion', 'perfiles', 'videoteca']
+      .forEach(function(a){ DB.roles_permisos.push({rol: 'cuerpo_tecnico', area: a, permiso: 'cargar'}); });
+
+    // ── Partidos y fixture ───────────────────────────────────────────────
+    var MATCHES = [], fixture = [], planillas = {}, k = 1;
+    var sabado = masDias(LUNES, 5);                   // sábado de esta semana
+    var ultimoJugado = sabado <= HOY ? sabado : masDias(sabado, -7);
+    var rivales = RIVALES.slice();
+    var temp = String(HOY.getFullYear());
+    for(var s = SEMANAS - 1; s >= 0; s--){
+      var f = iso(masDias(ultimoJugado, -7 * s)), local = (s % 2 === 0), rival = rivales[(SEMANAS - 1 - s) % rivales.length];
+      var comp = (s % 6 === 3) ? 'Copa Proyección' : 'Torneo Proyección';
+      var m = armarPartido(f, k++, temp, rival, local, comp);
+      MATCHES.push(m);
+      if(comp !== 'Copa Proyección'){
+        var nf = fixture.length + 1;
+        fixture.push({n: nf, rival: rival, cond: local ? 'Local' : 'Visitante', fecha: f, resultado: m.result});
+        planillas[nf] = planilla(m, local);
+      }
+    }
+    // Próximos partidos del fixture
+    for(var p = 1; p <= 3; p++){
+      var fp = iso(masDias(ultimoJugado, 7 * p));
+      fixture.push({n: fixture.length + 1, rival: rivales[(SEMANAS - 1 + p) % rivales.length], cond: ((SEMANAS + p) % 2 === 0) ? 'Local' : 'Visitante', fecha: fp, resultado: ''});
+    }
+    // Temporada anterior (para comparar temporadas en el análisis)
+    var antes = new Date(HOY.getFullYear() - 1, 8, 6);
+    for(var a = 0; a < 9; a++){
+      var fa = iso(masDias(antes, 7 * a));
+      MATCHES.push(armarPartido(fa, k++, String(HOY.getFullYear() - 1), rivales[(a + 5) % rivales.length], a % 2 === 1, 'Torneo Proyección'));
+    }
+    MATCHES.forEach(function(m){
+      var data = Object.assign({}, m); delete data.id; delete data.rival; delete data.fecha; delete data.result; delete data.comp;
+      fila('matches', {id: String(m.id), rival: m.rival, fecha: m.fecha, result: m.result, comp: m.comp, data: data, updated_at: sello(m.fecha, 20)});
+    });
+
+    // ── Entrenamientos (GPS), wellness y PSE ─────────────────────────────
+    var refPartido = function(f){
+      var prev = MATCHES.filter(function(m){ return m.fecha < f; }).sort(function(a, b){ return a.fecha < b.fecha ? -1 : 1; }).slice(-1)[0];
+      return prev ? {mts: prev.mts, hsr: prev.hsr, h2: prev.h2, h25: prev.h25, acc: prev.acc, dcc: prev.dcc, rhie: prev.rhie} : null;
+    };
+    var NOSABE = 'Ignacio Molina';                  // el que casi nunca responde el wellness
+    var BAJON = 'Mateo Quiroga';                    // viene durmiendo mal: alerta en «Hoy»
+    var ini = masDias(LUNES, -7 * (SEMANAS - 1)), asist = {};
+    for(var d = 0; ; d++){
+      var dia = masDias(ini, d), f2 = iso(dia);
+      if(dia > HOY) break;
+      var dw = (dia.getDay() + 6) % 7;              // 0 = lunes
+      var esHoy = f2 === iso(HOY);
+      var semana = semNom(Math.floor(d / 7) + 1);
+      var partidoHoy = MATCHES.filter(function(m){ return m.fecha === f2; })[0];
+      var md = dw <= 4 ? DIAS_MD[dw] : (dw === 5 ? 'MD' : null);
+      var hubo = !!(md && (md !== 'MD' || partidoHoy));
+      var sesionTerminada = !esHoy || HORA >= 12;
+
+      // Wellness a la mañana (también el día de partido)
+      if(hubo){
+        J.forEach(function(j){
+          if(lesionadoEl(j.name, f2) && R() < 0.6) return;
+          if(j.name === NOSABE && R() < 0.8) return;
+          if(R() < (esHoy ? 0.16 : 0.07)) return;      // no respondió
+          var base = j.w - (dw === 0 ? 0.45 : 0) - (md === 'MD-3' ? 0.15 : 0);
+          if(j.name === BAJON && f2 >= iso(masDias(HOY, -2))) base -= 1.4;
+          var v = function(){ return lim(Math.round(nrm(base, 0.6)), 1, 5); };
+          var fields = {sueno: v(), energia: v(), fisico: v(), emocional: lim(Math.round(nrm(base + 0.3, 0.5)), 1, 5), _upd: Date.parse(sello(f2, 8))};
+          if(j.name === BAJON && f2 >= iso(masDias(HOY, -2))) fields.sueno = 1;
+          var rd = fields.sueno + fields.energia + fields.fisico + fields.emocional;
+          var duele = lesionadoEl(j.name, f2) || (j.name === 'Santiago Ríos' && f2 >= iso(masDias(HOY, -3))) || R() < 0.012;
+          fila('wellness_data', {id: ++id, name: j.name, date: f2, readiness: rd, fields: fields,
+            dolor: duele ? 'Si' : 'No', dolor_zona: duele ? (lesionadoEl(j.name, f2) ? 'Isquiotibiales' : (j.name === 'Santiago Ríos' ? 'Aductor' : 'Gemelo')) : null,
+            week: semana, day: md || '', updated_at: sello(f2, 8)});
+        });
+      }
+      // Entrenamiento con GPS + PSE
+      if(md && md !== 'MD' && sesionTerminada){
+        var FD = FACT_DIA[md], players = [], dur = FD.min + ent(-4, 6);
+        J.forEach(function(j){
+          if(lesionadoEl(j.name, f2)) return;
+          if(R() < 0.04) return;                        // faltó
+          var b = PERFIL_POS[j.pos], t = dur + ent(-3, 3), pm = t / 90 * j.f;
+          var n = function(){ return lim(nrm(1, 0.09), 0.75, 1.25); };
+          var g = j.pos === 'ARQ' ? 0.55 : 1;
+          var pl = {name: j.name, pos: POS_GPS[j.pos], tot_dur: t,
+            mts: Math.round(b.mts * FD.d * pm * n() * (j.pos === 'ARQ' ? 0.7 : 1)),
+            hsr: Math.round(b.hsr * FD.hi * pm * n() * g), h2: Math.round(b.h2 * FD.hi * pm * n() * g), h25: Math.round(b.h25 * FD.sp * pm * n() * g),
+            acc: Math.round(b.acc * FD.ac * pm * n()), dcc: Math.round(b.dcc * FD.ac * pm * n()), rhie: Math.round(b.rhie * FD.hi * pm * n() * g),
+            spr: Math.round(b.spr * FD.sp * pm * n() * g), pl: Math.round(b.pl * FD.d * pm * n()),
+            vmax: r1(lim(j.vmx * (0.84 + FD.sp * 0.15) - rnd(0, 1.2), 20, 35.5)), accmax: r2(rnd(3.8, 5.2)), dccmax: r2(rnd(4.4, 6.0)), extra: {}};
+          pl.mts_min = r1(pl.mts / t);
+          players.push(pl);
+          // PSE del jugador
+          var pse = lim(Math.round(nrm(FD.pse, 0.9)), 1, 10);
+          fila('pse_data', {id: ++id, name: j.name, date: f2, pse: pse,
+            fields: {cardio: pse, muscular: lim(pse + ent(-1, 1), 1, 10), tecnico: lim(pse - ent(0, 2), 1, 10), tactico: lim(pse - ent(0, 2), 1, 10), mental: lim(pse - ent(0, 2), 1, 10),
+                     _min: t, _upd: Date.parse(sello(f2, 12))},
+            week: semana, day: md, updated_at: sello(f2, 12)});
+        });
+        var psEq = r1(FD.pse + nrm(0, 0.3));
+        fila('microciclo', {id: ++id, week: semana, day: md, fecha: f2,
+          data: {ref: refPartido(f2), pse: psEq, ua: Math.round(psEq * dur), players: players}, updated_at: sello(f2, 13)});
+      }
+      // Asistencia (se marca a la mañana)
+      if(md && (md !== 'MD' || partidoHoy)){
+        var nn = typeof window.cargaNormName === 'function' ? window.cargaNormName : function(x){ return String(x).toLowerCase().trim(); };
+        asist[f2] = {};
+        J.forEach(function(j){
+          var code = 'P';
+          if(lesionadoEl(j.name, f2)) code = R() < 0.7 ? 'K' : 'D';
+          else { var x = R(); if(x < 0.012) code = 'AM'; else if(x < 0.017) code = 'AI'; else if(x < 0.03) code = 'D'; }
+          asist[f2][nn(j.name)] = code;
+        });
+      }
+      // GPS del partido (se carga como día MD del microciclo)
+      if(partidoHoy && sesionTerminada){
+        fila('microciclo', {id: ++id, week: semana, day: 'MD', fecha: f2, data: {ref: refPartido(f2), pse: 8, ua: Math.round(8 * 90),
+          players: partidoHoy.players.map(function(p){ return Object.assign({}, p, {tot_dur: p.min, extra: {}}); })}, updated_at: sello(f2, 21)});
+      }
+      // PSE del partido
+      if(partidoHoy && sesionTerminada){
+        partidoHoy.players.forEach(function(p){
+          var pse = lim(Math.round(nrm(p.min >= 60 ? 8 : 6.5, 0.8)), 1, 10);
+          fila('pse_data', {id: ++id, name: p.name, date: f2, pse: pse, fields: {cardio: pse, muscular: lim(pse + ent(-1, 1), 1, 10), _min: p.min, _upd: Date.parse(sello(f2, 19))},
+            week: semana, day: 'MD', updated_at: sello(f2, 19)});
+        });
+      }
+    }
+
+    // ── Perfiles ─────────────────────────────────────────────────────────
+    J.forEach(function(j){
+      var inj = LES.filter(function(l){ return l.n === j.name; }).map(function(l, q){
+        return {id: 1700000000000 + j.i * 10 + q, dateStart: iso(masDias(HOY, l.ini)), dateEnd: l.fin == null ? null : iso(masDias(HOY, l.fin)),
+          type: l.type, zone: l.zone, severity: l.sev, notes: l.notes};
+      });
+      var activa = inj.some(function(x){ return !x.dateEnd; });
+      var nac = iso(new Date(2008, ent(0, 11), ent(1, 28)));
+      fila('player_profiles', {id: j.key, name: j.name, updated_at: ahora,
+        data: {pos: j.pos, estado: activa ? 'lesion' : 'disponible', injuries: inj, vmax: r1(j.vmx + 0.6), accmax: r2(rnd(4.9, 5.8)), dccmax: r2(rnd(5.8, 6.8)),
+               locks: {}, nacimiento: nac, _upd: Date.now() - 86400000 * 3}});
+    });
+
+    // ── Antropometría (cada ~8 semanas) ──────────────────────────────────
+    J.forEach(function(j){
+      var peso = j.pos === 'ARQ' ? rnd(74, 82) : (j.pos === 'DFC' ? rnd(72, 80) : rnd(62, 72)), grasa = rnd(36, 52), osea = rnd(0.105, 0.122), musc = rnd(0.47, 0.52), recs = [];
+      [-115, -60, -8].forEach(function(dd, q){
+        var mus = peso * musc + q * 0.45;
+        var adi = peso * rnd(0.12, 0.15) - q * 0.35;
+        recs.push({date: iso(masDias(HOY, dd)), peso: r1(peso + q * 0.6 + nrm(0, 0.4)), adiposa: r1(adi), muscular: r1(mus), residual: r1(peso * 0.12), osea: r1(peso * osea),
+          imo: r2(mus / (peso * osea)), suma6: r1(grasa - q * 2.2 + nrm(0, 1.5))});
+      });
+      fila('nutrition_data', {player_key: j.key, records: recs});
+    });
+
+    // ── Gimnasio: evaluaciones de fuerza y sesiones ───────────────────────
+    var fuerzaRel = J.map(function(){ return 0; }).concat(J.map(function(){ return 0; }), J.map(function(){ return 0; })).map(function(){ return nrm(0, 0.07); });
+    J.forEach(function(j){
+      if(j.pos === 'ARQ' && j.name !== 'Tomás Aguirre') return;
+      var masa = j.pos === 'DFC' ? 1.1 : 1, ev = [];
+      [-98, -30].forEach(function(dd, q){
+        var mej = 1 + q * rnd(0.04, 0.09);
+        [['Sentadilla con barra', 95, 'VMP'], ['Hip Thrust con barra', 125, '3RM'], ['Press de banca', 62, '5RM']].forEach(function(e, z){
+          var rm = Math.round(e[1] * masa * j.f * mej * (1 + (fuerzaRel[j.i * 3 + z] || 0) + nrm(0, 0.02)) / 2.5) * 2.5;
+          ev.push({id: 1650000000000 + j.i * 100 + q * 10 + z, date: iso(masDias(HOY, dd)), exercise: e[0], method: '1RM', kg: rm, vmp: null, notes: '', rm1: rm});
+        });
+      });
+      fila('gym_evals', {player_key: j.key, evals: ev});
+    });
+    var gid = 1;
+    for(var gs = 9; gs >= 0; gs--){
+      [1, 2].forEach(function(dw2){
+        var fg = masDias(LUNES, -7 * gs + dw2);
+        if(fg > HOY) return;
+        var fuerza = dw2 === 1;
+        var ej = fuerza
+          ? [{exId: 1, p: [[4, 5, 78]]}, {exId: 5, p: [[4, 6, 75]]}, {exId: 9, p: [[3, 8, null]]}, {exId: 4, p: [[3, 6, null]]}]
+          : [{exId: 3, p: [[3, 4, 70]]}, {exId: 6, p: [[3, 8, null]]}, {exId: 7, p: [[3, 8, null]]}, {exId: 8, p: [[3, 8, null]]}];
+        var ex = ej.map(function(e){
+          var series = [];
+          e.p.forEach(function(pp){ for(var q = 0; q < pp[0]; q++) series.push({reps: pp[1], intensity: pp[2] == null ? null : Math.round((pp[2] + (9 - gs) * 0.6) / 2.5) * 2.5, intensity2: null}); });
+          return {exId: e.exId, inttype: e.p[0][2] == null ? 'kg' : 'pct1rm', derivedFrom: null, pctFactor: null, notes: '', series: series, mainSerieIdx: 0, seriesMode: 'identical', bloque: 'Bloque principal'};
+        });
+        var sg = {id: gid++, date: iso(fg), week: semNom(SEMANAS - gs), md: fuerza ? 'MD-4' : 'MD-3', notes: fuerza ? 'Fuerza · tren inferior' : 'Fuerza · cadena posterior y empujes',
+                  exercises: ex, bloques: ['Bloque principal'], bloquesTexto: {}};
+        var data = Object.assign({}, sg); delete data.id; delete data.date; delete data.week; delete data.md; delete data.notes;
+        fila('gym_sessions', {id: String(sg.id), date: sg.date, week: sg.week, md: sg.md, notes: sg.notes, data: data});
+      });
+    }
+
+    // ── Tests de campo ───────────────────────────────────────────────────
+    var TST = [], tid = 1600000000000;
+    [-104, -52, -6].forEach(function(dd, q){
+      var dt = masDias(HOY, dd); dt = masDias(dt, 1 - ((dt.getDay() + 6) % 7));   // el martes de esa semana (MD-4)
+      if(dt > HOY) dt = masDias(dt, -7);
+      var f3 = iso(dt);
+      J.forEach(function(j){
+        if(lesionadoEl(j.name, f3)) return;
+        var mej = 1 + q * 0.018 * j.f;
+        var add = function(test, extra){ TST.push(Object.assign({id: ++tid, testId: test, name: j.name, date: f3, _upd: Date.parse(sello(f3, 10))}, extra)); };
+        var cmjs = [0, 1, 2].map(function(){ return r1(nrm(37.5 * j.f * mej, 1.1)); });
+        add('cmj', {val: cmjs.reduce(function(a, b){ return a + b; }, 0) / 3, reps: 3, vals: cmjs, _raw: cmjs.join(' ')});
+        var abk = [0, 1].map(function(){ return r1(nrm(43 * j.f * mej, 1.3)); });
+        add('abk', {val: (abk[0] + abk[1]) / 2, reps: 2, vals: abk, _raw: abk.join(' ')});
+        if(j.pos === 'ARQ') return;
+        add('spr10', {val: r2(nrm(1.78 / (j.f * mej * 0.5 + 0.5), 0.03)), reps: 1});
+        add('spr30', {val: r2(nrm(4.30 / (j.f * mej * 0.5 + 0.5) - (j.vmx - 31) * 0.04, 0.05)), reps: 1});
+        var c5 = r2(nrm(2.38 / (j.f * mej * 0.4 + 0.6), 0.04));
+        add('cod505', {valI: c5, valD: r2(c5 + nrm(0.03, 0.05))});
+      });
+    });
+    fila('app_settings', {key: 'TST_DATA', value: TST});
+
+    // ── Planificación: la semana actual y la siguiente ───────────────────
+    try{
+      var grupos = (typeof window.planTemplateGroups === 'function') ? window.planTemplateGroups() : [{id: 'todos', name: 'Todos', color: '#555'}];
+      var dibu = typeof D !== 'undefined' && Array.isArray(D) ? D : [];
+      var existe = {}; dibu.forEach(function(x){ existe[x.id] = 1; });
+      // Ejercicios de la biblioteca según el día del microciclo: [id, minutos]
+      var PLAN_DIA = {   // [ejercicios alternativos (rotan por semana), minutos]
+        'MD-5': [[[66, 68], 16], [[25, 26], 11], [[21, 22], 15]],
+        'MD-4': [[[47, 45], 15], [[0, 1, 4], 19], [[30, 32, 36], 14], [[20, 18], 15]],
+        'MD-3': [[[48, 47], 12], [[17, 2, 3], 25], [[6, 7, 8], 15], [[54, 55, 62], 7]],
+        'MD-2': [[[66, 68], 12], [[13, 28], 20], [[14, 15], 14]],
+        'MD-1': [[[52, 53], 15], [[69, 24], 12], [[70], 16]]
+      };
+      for(var smi = -(SEMANAS - 1); smi <= 0; smi++) (function(sm){
+        var lun = masDias(LUNES, 7 * sm), dias = [];
+        ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'].forEach(function(lbl, di){
+          var mdl = ['MD-5', 'MD-4', 'MD-3', 'MD-2', 'MD-1', 'MD'][di], blocks = [];
+          (PLAN_DIA[mdl] || []).forEach(function(it, bi){
+            var alt = it[0], exId = alt[(sm + 60) % alt.length];
+            if(!existe[exId]) return;
+            blocks.push({id: 1690000000000 + (sm + 40) * 1000 + di * 10 + bi, parallel: false, exercises: [{exId: exId, mins: Math.max(6, it[1] + ent(-3, 3)), countVolume: true, group: 'Todos'}]});
+          });
+          dias.push({label: lbl, mdLabel: mdl, blocks: blocks});
+        });
+        var nombre = semNom(SEMANAS + sm);
+        var w = {created: sello(iso(lun), 8), refMode: 'current', groups: grupos, days: dias, startDate: iso(lun), weekLen: 7, _upd: Date.now() - 3600000};
+        fila('plan_weeks', {id: ++id, name: nombre, created: w.created, data: w});
+      })(smi);
+    }catch(e){ console.warn('[demo] planificación:', e); }
+
+    // ── Configuración de la división ──────────────────────────────────────
+    fila('app_settings', {key: 'FIX_FIXTURE', value: fixture});
+    fila('app_settings', {key: 'FIX_PLANILLAS', value: planillas});
+    fila('app_settings', {key: 'HOY_ASIST', value: asist});
+    fila('app_settings', {key: 'HOY_TODOS', value: [
+      {id: 1, txt: 'Revisar carga de Mateo Quiroga (duerme mal hace 3 días)', done: false, date: iso(HOY), _upd: Date.now() - 7200000},
+      {id: 2, txt: 'Reintegro progresivo de Valentín Sosa: semana 2 del protocolo', done: false, date: iso(HOY), _upd: Date.now() - 86400000},
+      {id: 3, txt: 'Tests de salto el lunes antes del entrenamiento', done: true, date: iso(masDias(HOY, -2)), _upd: Date.now() - 172800000}
+    ]});
+  }
+  window.demoBaseConstruir = construir;
+
+  // ════════════════════════════════════════════════════════════════════
+  // PANTALLA: aviso fijo, bienvenida y salida
+  // ════════════════════════════════════════════════════════════════════
+  function salir(){ try{ location.replace(location.pathname); }catch(e){ location.href = location.pathname; } }
+  window.demoSalir = salir;
+
+  function css(){
+    if(document.getElementById('demo-css')) return;
+    var st = document.createElement('style'); st.id = 'demo-css';
+    st.textContent = ''
+      + '#demo-pill{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9800;display:flex;align-items:center;gap:10px;'
+      + 'background:#0D1B2A;color:#fff;border-radius:999px;padding:7px 8px 7px 14px;box-shadow:0 8px 28px rgba(0,0,0,.28);'
+      + 'font:600 12px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;max-width:calc(100% - 24px)}'
+      + '#demo-pill .d-pt{width:8px;height:8px;border-radius:50%;background:#F5B841;flex-shrink:0;box-shadow:0 0 0 3px rgba(245,184,65,.25)}'
+      + '#demo-pill .d-tx{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      + '#demo-pill .d-tx span{opacity:.65;font-weight:500}'
+      + '#demo-pill button{border:none;border-radius:999px;font:inherit;font-weight:700;cursor:pointer;padding:6px 12px;flex-shrink:0}'
+      + '#demo-pill .d-in{background:rgba(255,255,255,.12);color:#fff}'
+      + '#demo-pill .d-out{background:#fff;color:#0D1B2A}'
+      + '#demo-bv{position:fixed;inset:0;z-index:99990;background:rgba(10,18,30,.6);display:flex;align-items:center;justify-content:center;padding:16px}'
+      + '#demo-bv .d-c{background:#fff;display:flex;flex-direction:column;color:#15202e;border-radius:16px;max-width:520px;width:100%;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 24px 70px rgba(0,0,0,.4);'
+      + 'font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}'
+      + '#demo-bv .d-h{background:linear-gradient(135deg,#0D1B2A 0%,#1B2845 100%);color:#fff;padding:20px 22px 18px;border-radius:16px 16px 0 0}'
+      + '#demo-bv .d-h b{display:block;font-size:19px;letter-spacing:-.01em}'
+      + '#demo-bv .d-h div{font-size:12.5px;opacity:.75;margin-top:4px}'
+      + '#demo-bv .d-b{padding:16px 22px 20px}'
+      + '#demo-bv .d-it{display:flex;gap:12px;padding:9px 0;border-top:1px solid #eef0f4}'
+      + '#demo-bv .d-it:first-child{border-top:none}'
+      + '#demo-bv .d-ic{width:30px;height:30px;border-radius:9px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}'
+      + '#demo-bv .d-it b{font-size:13px}'
+      + '#demo-bv .d-it p{margin:1px 0 0;font-size:12px;color:#5a6274}'
+      + '#demo-bv .d-nota{font-size:11.5px;color:#7a8396;margin:12px 0 0;line-height:1.5}'
+      + '#demo-bv .d-ok{margin-top:14px;width:100%;border:none;border-radius:9px;background:#1D9E75;color:#fff;font:700 14px inherit;font-family:inherit;padding:11px;cursor:pointer}'
+      + 'html[data-tema="oscuro"] #demo-pill{background:#26304a;box-shadow:0 8px 28px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.1)}'
+      + 'html[data-tema="oscuro"] #demo-bv .d-c{background:#1b1d21;color:#e6e6e6}'
+      + 'html[data-tema="oscuro"] #demo-bv .d-it{border-color:#2c2f35}'
+      + 'html[data-tema="oscuro"] #demo-bv .d-ic{background:#25282e}'
+      + 'html[data-tema="oscuro"] #demo-bv .d-it p,html[data-tema="oscuro"] #demo-bv .d-nota{color:#a3a9b5}'
+      + 'body.demo-on{padding-bottom:64px}'
+      + '#demo-bv .d-pie{position:sticky;bottom:0;background:inherit;padding:10px 22px 16px;border-top:1px solid #eef0f4}'
+      + 'html[data-tema="oscuro"] #demo-bv .d-pie{border-color:#2c2f35}'
+      + '@media (max-width:560px){#demo-pill .d-tx span,#demo-pill .d-in{display:none}#demo-pill .d-tx{overflow:visible}#demo-pill{bottom:10px;padding:6px 6px 6px 12px;gap:8px}'
+      + '#demo-bv{padding:10px}#demo-bv .d-it p{font-size:11.5px}#demo-bv .d-it{padding:7px 0}#demo-bv .d-h{padding:16px 18px 14px}#demo-bv .d-b{padding:10px 18px 4px}}'
+      + '@media print{#demo-pill,#demo-bv{display:none!important}}';
+    document.head.appendChild(st);
+  }
+  function bienvenida(){
+    css();
+    if(document.getElementById('demo-bv')) return;
+    var it = function(ic, t, d){ return '<div class="d-it"><div class="d-ic">' + ic + '</div><div><b>' + t + '</b><p>' + d + '</p></div></div>'; };
+    var o = document.createElement('div'); o.id = 'demo-bv';
+    o.innerHTML = '<div class="d-c" role="dialog" aria-label="Bienvenida a la demo">'
+      + '<div class="d-h"><b>Bienvenido a la demo</b><div>Un plantel de ejemplo de 5ta División, con la temporada en curso.</div></div>'
+      + '<div class="d-b">'
+      + it('☀️', 'Hoy', 'Cómo llega el plantel: wellness y PSE de cada jugador, quién no respondió, alertas contra el propio promedio y la carga aguda/crónica.')
+      + it('⚽', 'Equipo', 'Fixture, planillas y el GPS de cada partido. En la subpestaña GPS, «Análisis de métricas»: local y visitante, puestos y resultados.')
+      + it('📅', 'Planificación', 'La semana armada con ejercicios de la biblioteca y la carga que se espera de cada día.')
+      + it('📊', 'Análisis de carga', 'La carga externa (GPS) e interna (PSE y wellness) de cada entrenamiento y cada semana.')
+      + it('👤', 'Perfiles', 'Cada jugador: rendimiento, asistencia, área médica, antropometría y su informe individual.')
+      + it('💪', 'Prep. física', 'Sesiones de gimnasio, evaluaciones de 1RM y tests de salto, velocidad y cambio de dirección.')
+      + it('🎬', 'Videoteca', 'La biblioteca de ejercicios con la carga GPS de cada uno, y el diseñador de tareas.')
+      + '<p class="d-nota">Los jugadores y los datos son inventados. Podés tocar todo: lo que cambies queda sólo en esta pantalla y se borra al salir o recargar. '
+      + 'No se guarda nada ni se toca ningún dato del club.</p></div>'
+      + '<div class="d-pie"><button class="d-ok" type="button" style="margin-top:0">Empezar a recorrer</button></div></div>';
+    o.addEventListener('click', function(e){ if(e.target === o || (e.target.classList && e.target.classList.contains('d-ok'))) o.remove(); });
+    document.body.appendChild(o);
+  }
+  window.demoBienvenida = bienvenida;
+  function pastilla(){
+    css();
+    if(document.getElementById('demo-pill')) return;
+    var p = document.createElement('div'); p.id = 'demo-pill';
+    p.innerHTML = '<span class="d-pt"></span><span class="d-tx">Modo demo <span>· datos inventados · no se guarda nada</span></span>'
+      + '<button class="d-in" type="button" onclick="demoBienvenida()">Guía</button>'
+      + '<button class="d-out" type="button" onclick="demoSalir()">Salir de la demo</button>';
+    document.body.appendChild(p);
+  }
+  function arrancar(){
+    try{ document.title = 'Demo · Dashboard de Alto Rendimiento'; }catch(e){}
+    try{ var pn = document.getElementById('prof-name'); if(pn) pn.placeholder = 'Ej: Juan Pérez'; }catch(e){}
+    pastilla();
+    try{ document.body.classList.add('demo-on'); }catch(e){}
+    // La bienvenida, una vez que el dashboard terminó de cargar
+    var n = 0, t = setInterval(function(){
+      n++;
+      if((typeof sbReady !== 'undefined' && sbReady) || n > 60){ clearInterval(t); setTimeout(bienvenida, 400); }
+    }, 250);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', arrancar); else arrancar();
+})();
 
 </script>
 </body>
